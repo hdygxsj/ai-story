@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ai_story}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ai_story}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_story}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  milvus:
+    image: milvusdb/milvus:v2.4.15
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_USE_EMBED: "true"
+      COMMON_STORAGETYPE: local
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - milvus_data:/var/lib/milvus
+
+  api:
+    image: python:3.12-slim
+    working_dir: /app
+    command: bash -lc "pip install -e '.[dev]' && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://ai_story:ai_story@postgres:5432/ai_story}
+      JWT_SECRET: ${JWT_SECRET:-local-development-secret}
+      MILVUS_URI: ${MILVUS_URI:-http://milvus:19530}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - postgres
+      - milvus
+
+  web:
+    image: node:22
+    working_dir: /app
+    command: bash -lc "npm install && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  milvus_data:
