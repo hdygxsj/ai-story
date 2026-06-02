@@ -1,3 +1,4 @@
+from app.models.confirmation import PendingConfirmation
 from app.models.document import Document, DocumentVersion
 from app.models.memory import MemoryItem, MemoryReviewItem
 from app.models.model_profile import ModelProfile
@@ -12,6 +13,7 @@ __all__ = [
     "MemoryReviewItem",
     "ModelProfile",
     "Novel",
+    "PendingConfirmation",
     "User",
     "WorkspaceNode",
 ]
