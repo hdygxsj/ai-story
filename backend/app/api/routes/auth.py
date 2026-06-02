@@ -32,7 +32,7 @@ async def register_user(
     user = User(
         email=payload.email,
         username=payload.username,
-        hashed_password=hash_password(payload.password),
+        password_hash=hash_password(payload.password),
     )
     session.add(user)
     try:
@@ -56,7 +56,7 @@ async def login_user(
     user = await session.scalar(
         select(User).where(or_(User.email == payload.login, User.username == payload.login))
     )
-    if user is None or not verify_password(payload.password, user.hashed_password):
+    if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
