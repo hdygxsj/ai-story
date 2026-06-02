@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import auth_router, model_profiles_router, novels_router
+from app.api.routes import auth_router, memory_router, model_profiles_router, novels_router
 from app.core.config import settings
 
 
@@ -18,6 +18,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(model_profiles_router)
 app.include_router(novels_router)
+app.include_router(memory_router)
 
 
 @app.get("/health")
