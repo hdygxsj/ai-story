@@ -56,6 +56,9 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
           <button type="button" onClick={handleRegister}>
             Register
           </button>
+          <button type="button" onClick={() => onAuthenticated("demo-token")}>
+            Continue in demo mode
+          </button>
         </div>
       </form>
       {error ? <p role="alert">{error}</p> : null}

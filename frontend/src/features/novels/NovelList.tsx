@@ -26,6 +26,9 @@ export function NovelList({ token, novels = [], onSelectNovel }: NovelListProps)
       <form onSubmit={handleCreate} style={{ display: "flex", gap: 8 }}>
         <input aria-label="Novel title" value={title} onChange={(event) => setTitle(event.target.value)} />
         <button type="submit">Create Novel</button>
+        <button type="button" onClick={() => onSelectNovel("demo-novel")}>
+          Open demo novel
+        </button>
       </form>
       <ul>
         {localNovels.map((novel) => (
