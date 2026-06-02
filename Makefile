@@ -1,6 +1,9 @@
-.PHONY: backend-test frontend-test test up down
+.PHONY: backend-bootstrap backend-test frontend-test test up down
 
-backend-test:
+backend-bootstrap:
+	cd backend && python3 -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"
+
+backend-test: backend-bootstrap
 	cd backend && . .venv/bin/activate && pytest -v
 
 frontend-test:
