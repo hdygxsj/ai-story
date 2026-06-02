@@ -14,11 +14,11 @@ class ModelProfileCreate(BaseModel):
     writing_model: str = Field(min_length=1, max_length=255)
     summary_model: str = Field(min_length=1, max_length=255)
     embedding_model: str = Field(min_length=1, max_length=255)
-    supports_tool_calling: bool = False
-    supports_json_mode: bool = False
-    supports_streaming: bool = False
-    context_window: int | None = Field(default=None, gt=0)
-    embedding_dimensions: int | None = Field(default=None, gt=0)
+    supports_tool_calling: bool = True
+    supports_json_mode: bool = True
+    supports_streaming: bool = True
+    context_window: int = Field(default=128000, gt=0)
+    embedding_dimensions: int = Field(default=1536, gt=0)
     extra_headers: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -35,8 +35,8 @@ class ModelProfileResponse(BaseModel):
     supports_tool_calling: bool
     supports_json_mode: bool
     supports_streaming: bool
-    context_window: int | None
-    embedding_dimensions: int | None
+    context_window: int
+    embedding_dimensions: int
     extra_headers: dict[str, Any]
     created_at: datetime
 

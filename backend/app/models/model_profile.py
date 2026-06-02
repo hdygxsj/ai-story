@@ -26,11 +26,11 @@ class ModelProfile(Base):
     writing_model: Mapped[str] = mapped_column(String(255), nullable=False)
     summary_model: Mapped[str] = mapped_column(String(255), nullable=False)
     embedding_model: Mapped[str] = mapped_column(String(255), nullable=False)
-    supports_tool_calling: Mapped[bool] = mapped_column(default=False, nullable=False)
-    supports_json_mode: Mapped[bool] = mapped_column(default=False, nullable=False)
-    supports_streaming: Mapped[bool] = mapped_column(default=False, nullable=False)
-    context_window: Mapped[int | None] = mapped_column(Integer)
-    embedding_dimensions: Mapped[int | None] = mapped_column(Integer)
+    supports_tool_calling: Mapped[bool] = mapped_column(default=True, nullable=False)
+    supports_json_mode: Mapped[bool] = mapped_column(default=True, nullable=False)
+    supports_streaming: Mapped[bool] = mapped_column(default=True, nullable=False)
+    context_window: Mapped[int] = mapped_column(Integer, default=128000, nullable=False)
+    embedding_dimensions: Mapped[int] = mapped_column(Integer, default=1536, nullable=False)
     extra_headers: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

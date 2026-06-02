@@ -77,3 +77,34 @@ def test_model_profiles_are_scoped_to_current_user() -> None:
 
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_model_profile_defaults_match_agent_capabilities() -> None:
+    client = TestClient(app)
+    headers = auth_headers(
+        client,
+        email="defaults@example.com",
+        username="defaultsuser",
+    )
+
+    response = client.post(
+        "/model-profiles",
+        headers=headers,
+        json={
+            "name": "Default capabilities",
+            "provider_kind": "openai",
+            "api_key": "local-key",
+            "chat_model": "gpt",
+            "writing_model": "gpt",
+            "summary_model": "gpt",
+            "embedding_model": "text-embedding-3-small",
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["supports_tool_calling"] is True
+    assert body["supports_json_mode"] is True
+    assert body["supports_streaming"] is True
+    assert body["context_window"] == 128000
+    assert body["embedding_dimensions"] == 1536
