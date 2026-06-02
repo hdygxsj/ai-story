@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.core.crypto import encrypt_api_key
 from app.db.session import get_session
 from app.models import ModelProfile, User
 from app.schemas.model_profile import ModelProfileCreate, ModelProfileResponse
@@ -24,7 +25,7 @@ async def create_model_profile(
         name=payload.name,
         provider_kind=payload.provider_kind,
         base_url=payload.base_url,
-        api_key_ciphertext=payload.api_key,
+        api_key_ciphertext=encrypt_api_key(payload.api_key),
         chat_model=payload.chat_model,
         writing_model=payload.writing_model,
         summary_model=payload.summary_model,

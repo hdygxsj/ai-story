@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     access_token_minutes: int = 1440
     cors_origins: list[str] = ["http://localhost:5173"]
     milvus_uri: str = "http://localhost:19530"
+    provider_api_key_encryption_secret: str = "local-provider-key-secret"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

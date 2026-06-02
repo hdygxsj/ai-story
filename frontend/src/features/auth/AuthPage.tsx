@@ -1,4 +1,5 @@
-import { FormEvent, useState } from "react";
+import { Alert, Button, Card, Form, Input, Space, Typography } from "antd";
+import { useState } from "react";
 
 import { login, register } from "../../api/auth";
 
@@ -6,62 +7,76 @@ type AuthPageProps = {
   onAuthenticated: (token: string) => void;
 };
 
-export function AuthPage({ onAuthenticated }: AuthPageProps) {
-  const [email, setEmail] = useState("demo@example.com");
-  const [username, setUsername] = useState("demo");
-  const [password, setPassword] = useState("secret123");
-  const [error, setError] = useState<string | null>(null);
+type AuthValues = {
+  email: string;
+  username: string;
+  password: string;
+};
 
-  async function handleLogin(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+export function AuthPage({ onAuthenticated }: AuthPageProps) {
+  const [form] = Form.useForm<AuthValues>();
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleLogin(values: AuthValues) {
     setError(null);
+    setLoading(true);
     try {
-      const response = await login(email, password);
+      const response = await login(values.email, values.password);
       onAuthenticated(response.access_token);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Login failed");
+    } finally {
+      setLoading(false);
     }
   }
 
   async function handleRegister() {
     setError(null);
+    setLoading(true);
     try {
-      await register(email, username, password);
-      const response = await login(email, password);
+      const values = await form.validateFields();
+      await register(values.email, values.username, values.password);
+      const response = await login(values.email, values.password);
       onAuthenticated(response.access_token);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Registration failed");
+    } finally {
+      setLoading(false);
     }
   }
 
   return (
-    <section style={{ display: "grid", gap: 12, maxWidth: 420 }}>
-      <h2>Sign in</h2>
-      <p>Use a local account to keep novel workspaces isolated by user.</p>
-      <form onSubmit={handleLogin} style={{ display: "grid", gap: 8 }}>
-        <input aria-label="Email" value={email} onChange={(event) => setEmail(event.target.value)} />
-        <input
-          aria-label="Username"
-          value={username}
-          onChange={(event) => setUsername(event.target.value)}
-        />
-        <input
-          aria-label="Password"
-          type="password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-        />
-        <div style={{ display: "flex", gap: 8 }}>
-          <button type="submit">Login</button>
-          <button type="button" onClick={handleRegister}>
+    <Card style={{ maxWidth: 480, width: "100%" }}>
+      <Typography.Title level={2}>Sign in</Typography.Title>
+      <Typography.Paragraph type="secondary">
+        Use a local account to keep novel workspaces isolated by user.
+      </Typography.Paragraph>
+      <Form<AuthValues>
+        form={form}
+        initialValues={{ email: "demo@example.com", username: "demo", password: "secret123" }}
+        layout="vertical"
+        onFinish={handleLogin}
+      >
+        <Form.Item name="email" label="Email" rules={[{ required: true }, { type: "email" }]}>
+          <Input autoComplete="email" />
+        </Form.Item>
+        <Form.Item name="username" label="Username" rules={[{ required: true }]}>
+          <Input autoComplete="username" />
+        </Form.Item>
+        <Form.Item name="password" label="Password" rules={[{ required: true, min: 8 }]}>
+          <Input.Password autoComplete="current-password" />
+        </Form.Item>
+        <Space>
+          <Button htmlType="submit" loading={loading} type="primary">
+            Login
+          </Button>
+          <Button loading={loading} onClick={handleRegister}>
             Register
-          </button>
-          <button type="button" onClick={() => onAuthenticated("demo-token")}>
-            Continue in demo mode
-          </button>
-        </div>
-      </form>
-      {error ? <p role="alert">{error}</p> : null}
-    </section>
+          </Button>
+        </Space>
+      </Form>
+      {error ? <Alert message={error} role="alert" showIcon style={{ marginTop: 16 }} type="error" /> : null}
+    </Card>
   );
 }

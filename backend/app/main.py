@@ -6,8 +6,10 @@ from app.api.routes import (
     auth_router,
     confirmations_router,
     memory_router,
+    materials_router,
     model_profiles_router,
     novels_router,
+    rag_router,
 )
 from app.core.config import settings
 
@@ -26,8 +28,10 @@ app.include_router(auth_router)
 app.include_router(model_profiles_router)
 app.include_router(novels_router)
 app.include_router(memory_router)
+app.include_router(materials_router)
 app.include_router(agent_router)
 app.include_router(confirmations_router)
+app.include_router(rag_router)
 
 
 @app.get("/health")

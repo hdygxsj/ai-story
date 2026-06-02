@@ -1,4 +1,7 @@
-import { FormEvent, useState } from "react";
+import Bubble from "@ant-design/x/es/bubble";
+import Sender from "@ant-design/x/es/sender";
+import { Alert, Card, Tag, Typography } from "antd";
+import { useState } from "react";
 
 import { sendAgentMessage } from "../../api/agent";
 
@@ -19,44 +22,68 @@ export function AgentPanel({ token, novelId, documentId, selectedText }: AgentPa
   const [messages, setMessages] = useState<ChatMessage[]>([
     { role: "assistant", content: "Tell me what to create, rewrite, or remember." },
   ]);
+  const [pendingConfirmation, setPendingConfirmation] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  async function handleSend(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function handleSend(value: string) {
+    if (!value.trim()) {
+      return;
+    }
+    setError(null);
     setMessages((current) => [...current, { role: "user", content: message }]);
-    const response = await sendAgentMessage(token, novelId, {
-      message,
-      document_id: documentId,
-      selected_text: selectedText,
-    });
-    setMessages((current) => [
-      ...current,
-      {
-        role: "assistant",
-        content: response.confirmation
-          ? `${response.message} Confirmation ${response.confirmation.id} is pending.`
-          : response.message,
-      },
-    ]);
+    setMessage("");
+    try {
+      const response = await sendAgentMessage(token, novelId, {
+        message: value,
+        document_id: documentId,
+        selected_text: selectedText,
+      });
+      setPendingConfirmation(response.confirmation?.id ?? null);
+      setMessages((current) => [
+        ...current,
+        {
+          role: "assistant",
+          content: response.confirmation
+            ? `${response.message} Confirmation ${response.confirmation.id} is pending.`
+            : response.message,
+        },
+      ]);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Agent request failed");
+    }
   }
 
   return (
-    <aside style={{ borderLeft: "1px solid #ddd", display: "grid", gap: 12, padding: 16 }}>
-      <h2>Agent</h2>
-      <div aria-label="Agent conversation" style={{ display: "grid", gap: 8 }}>
-        {messages.map((item, index) => (
-          <p key={`${item.role}-${index}`}>
-            <strong>{item.role}:</strong> {item.content}
-          </p>
-        ))}
-      </div>
-      <form onSubmit={handleSend} style={{ display: "grid", gap: 8 }}>
-        <textarea
-          aria-label="Agent message"
-          value={message}
-          onChange={(event) => setMessage(event.target.value)}
-        />
-        <button type="submit">Send</button>
-      </form>
-    </aside>
+    <Card
+      title={
+        <Typography.Title level={3} style={{ margin: 0 }}>
+          Co-writing Agent
+        </Typography.Title>
+      }
+      extra={pendingConfirmation ? <Tag color="gold">Confirmation pending</Tag> : <Tag color="green">Ready</Tag>}
+      style={{ height: "100%" }}
+      styles={{ body: { display: "flex", flexDirection: "column", gap: 16, height: "calc(100% - 57px)" } }}
+    >
+      <Bubble.List
+        autoScroll
+        items={messages.map((item, index) => ({
+          key: `${item.role}-${index}`,
+          role: item.role === "assistant" ? "ai" : "user",
+          content: item.content,
+        }))}
+        role={{
+          ai: { placement: "start", variant: "shadow" },
+          user: { placement: "end", variant: "filled" },
+        }}
+        style={{ flex: 1 }}
+      />
+      {error ? <Alert message={error} showIcon type="error" /> : null}
+      <Sender
+        placeholder="Ask the Agent to plan, rewrite, remember, or inspect context"
+        value={message}
+        onChange={setMessage}
+        onSubmit={handleSend}
+      />
+    </Card>
   );
 }

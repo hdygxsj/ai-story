@@ -9,6 +9,12 @@ export type MemoryReviewItem = {
   status: string;
 };
 
+export type MemoryItem = Omit<MemoryReviewItem, "status">;
+
+export function listMemoryReviewItems(token: string, novelId: string) {
+  return apiRequest<MemoryReviewItem[]>(`/novels/${novelId}/memory-review-items`, { token });
+}
+
 export function createMemoryReviewItem(
   token: string,
   novelId: string,
@@ -19,4 +25,22 @@ export function createMemoryReviewItem(
     token,
     body: JSON.stringify(payload),
   });
+}
+
+export function approveMemoryReviewItem(token: string, itemId: string) {
+  return apiRequest<MemoryItem>(`/memory-review-items/${itemId}/approve`, {
+    method: "POST",
+    token,
+  });
+}
+
+export function rejectMemoryReviewItem(token: string, itemId: string) {
+  return apiRequest<MemoryReviewItem>(`/memory-review-items/${itemId}/reject`, {
+    method: "POST",
+    token,
+  });
+}
+
+export function listMemoryItems(token: string, novelId: string) {
+  return apiRequest<MemoryItem[]>(`/novels/${novelId}/memory-items`, { token });
 }

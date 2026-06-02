@@ -1,3 +1,5 @@
+import { FileTextOutlined, FolderOutlined, PlusOutlined } from "@ant-design/icons";
+import { Button, Space, Tree, Typography } from "antd";
 import type { WorkspaceNode } from "../../api/workspace";
 
 type WorkspaceTreeProps = {
@@ -29,24 +31,44 @@ const placeholderNodes: WorkspaceNode[] = [
 ];
 
 export function WorkspaceTree({ nodes = placeholderNodes, onSelectDocument }: WorkspaceTreeProps) {
+  const treeData = nodes.map((node) => ({
+    key: node.id,
+    icon: node.node_type === "folder" ? <FolderOutlined /> : <FileTextOutlined />,
+    title: node.title,
+    documentId: node.document_id,
+  }));
+
   return (
-    <section aria-label="Workspace tree" style={{ borderRight: "1px solid #ddd", padding: 16 }}>
-      <h2>Workspace</h2>
-      <button type="button">New Chapter</button>
-      <ul style={{ listStyle: "none", padding: 0 }}>
-        {nodes.map((node) => (
-          <li key={node.id} style={{ marginTop: 8 }}>
-            <button
-              type="button"
-              disabled={!node.document_id}
-              onClick={() => node.document_id && onSelectDocument?.(node.document_id)}
-            >
-              {node.node_type === "folder" ? "Folder: " : "Chapter: "}
-              {node.title}
-            </button>
-          </li>
-        ))}
-      </ul>
+    <section aria-label="Workspace tree" style={{ height: "100%", padding: 16 }}>
+      <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
+        <div>
+          <Typography.Title level={2} style={{ marginBottom: 0 }}>
+            Workspace
+          </Typography.Title>
+          <Typography.Text type="secondary">Chapters, drafts, and notes</Typography.Text>
+        </div>
+        <Space>
+          <Button icon={<PlusOutlined />} size="small" type="primary">
+            New Chapter
+          </Button>
+          <Button icon={<FolderOutlined />} size="small">
+            Folder
+          </Button>
+        </Space>
+        <Tree
+          blockNode
+          defaultExpandAll
+          showIcon
+          treeData={treeData}
+          onSelect={(selectedKeys) => {
+            const selectedKey = String(selectedKeys[0] ?? "");
+            const documentId = nodes.find((node) => node.id === selectedKey)?.document_id;
+            if (documentId) {
+              onSelectDocument?.(documentId);
+            }
+          }}
+        />
+      </Space>
     </section>
   );
 }

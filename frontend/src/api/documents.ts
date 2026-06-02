@@ -8,6 +8,14 @@ export type DocumentRecord = {
   content: DocumentBody;
 };
 
+export type DocumentVersion = {
+  id: string;
+  document_id: string;
+  source: string;
+  content: DocumentBody;
+  created_at: string;
+};
+
 export function getDocument(token: string, documentId: string) {
   return apiRequest<DocumentRecord>(`/documents/${documentId}`, { token });
 }
@@ -18,4 +26,8 @@ export function updateDocument(token: string, documentId: string, content: Docum
     token,
     body: JSON.stringify({ content }),
   });
+}
+
+export function listDocumentVersions(token: string, documentId: string) {
+  return apiRequest<DocumentVersion[]>(`/documents/${documentId}/versions`, { token });
 }

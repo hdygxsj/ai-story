@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { App } from "../App";
@@ -11,14 +11,10 @@ describe("App", () => {
     expect(screen.getByText("Agent-first novel creation IDE")).toBeInTheDocument();
   });
 
-  it("opens demo workspace", () => {
+  it("starts from a real account workflow without demo shortcuts", () => {
     render(<App />);
 
-    fireEvent.click(screen.getByText("Continue in demo mode"));
-    fireEvent.click(screen.getByText("Open demo novel"));
-
-    expect(screen.getByText("Workspace")).toBeTruthy();
-    expect(screen.getByText("Editor")).toBeTruthy();
-    expect(screen.getByText("Agent")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+    expect(screen.queryByText("Continue in demo mode")).not.toBeInTheDocument();
   });
 });

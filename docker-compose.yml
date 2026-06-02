@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ai_story}
       POSTGRES_DB: ${POSTGRES_DB:-ai_story}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -23,29 +23,26 @@ services:
       - milvus_data:/var/lib/milvus
 
   api:
-    image: python:3.12-slim
-    working_dir: /app
-    command: bash -lc "pip install -e '.[dev]' && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    build:
+      context: ./backend
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://ai_story:ai_story@postgres:5432/ai_story}
       JWT_SECRET: ${JWT_SECRET:-local-development-secret}
       MILVUS_URI: ${MILVUS_URI:-http://milvus:19530}
+      PROVIDER_API_KEY_ENCRYPTION_SECRET: ${PROVIDER_API_KEY_ENCRYPTION_SECRET:-local-provider-key-secret}
     ports:
-      - "8000:8000"
-    volumes:
-      - ./backend:/app
+      - "${API_PORT:-8000}:8000"
     depends_on:
       - postgres
       - milvus
 
   web:
-    image: node:22
-    working_dir: /app
-    command: bash -lc "npm ci && npm run dev -- --host 0.0.0.0"
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-http://localhost:8000}
     ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend:/app
+      - "${WEB_PORT:-5173}:80"
     depends_on:
       - api
 

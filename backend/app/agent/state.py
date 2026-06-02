@@ -7,6 +7,7 @@ class AgentState(TypedDict, total=False):
     document_id: UUID | None
     message: str
     selected_text: str | None
+    messages: list[Any]
     response: str
     context_status: list[str]
     proposed_payload: dict[str, Any] | None

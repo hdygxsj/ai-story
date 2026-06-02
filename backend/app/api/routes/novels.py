@@ -12,6 +12,7 @@ from app.schemas.document import DocumentResponse, DocumentUpdate, DocumentVersi
 from app.schemas.novel import NovelCreate, NovelResponse
 from app.schemas.workspace import WorkspaceNodeCreate, WorkspaceNodeResponse
 from app.services.novels import get_owned_novel
+from app.services.rag import extract_text_from_prosemirror, index_text
 
 router = APIRouter(tags=["novels"])
 
@@ -129,6 +130,13 @@ async def update_document(
     version = DocumentVersion(document_id=document.id, source="user", content=document.content)
     session.add(version)
     document.content = payload.content
+    await index_text(
+        session,
+        novel_id=document.novel_id,
+        source_type="document",
+        source_id=str(document.id),
+        text=extract_text_from_prosemirror(payload.content),
+    )
     await session.commit()
     await session.refresh(document)
     return document
