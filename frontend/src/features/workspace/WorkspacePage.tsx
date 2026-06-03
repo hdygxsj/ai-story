@@ -1,4 +1,4 @@
-import { Button, Card, Layout, List, Space, Tabs, Tag, Typography } from "antd";
+import { Button, Card, List, Space, Tabs, Tag, Typography } from "antd";
 import { useEffect, useState } from "react";
 
 import { AgentPanel } from "../agent/AgentPanel";
@@ -44,6 +44,7 @@ export function WorkspacePage({ token, novelId }: WorkspacePageProps) {
   const [characterStates, setCharacterStates] = useState<CharacterState[]>([]);
   const [relationshipEdges, setRelationshipEdges] = useState<RelationshipEdge[]>([]);
   const [saving, setSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState("editor");
 
   useEffect(() => {
     let cancelled = false;
@@ -176,169 +177,176 @@ export function WorkspacePage({ token, novelId }: WorkspacePageProps) {
     await refreshReviewQueues();
   }
 
+  function handleSelectDocument(nextDocumentId: string) {
+    setDocumentId(nextDocumentId);
+    setActiveTab("editor");
+  }
+
   return (
-    <Layout style={{ minHeight: "calc(100vh - 96px)" }}>
-      <Layout.Sider theme="light" width={300}>
-        <WorkspaceTree nodes={nodes} onSelectDocument={setDocumentId} />
-      </Layout.Sider>
-      <Layout.Content style={{ background: "#f5f5f5" }}>
-        <DocumentEditor
-          content={document?.content ?? null}
-          onSave={handleSaveDocument}
-          onSelectText={setSelectedText}
-          saving={saving}
-        />
-      </Layout.Content>
-      <Layout.Sider theme="light" width={420}>
-        <Tabs
-          defaultActiveKey="agent"
-          items={[
-            {
-              key: "agent",
-              label: "Agent",
-              children: (
-                <AgentPanel token={token} novelId={novelId} documentId={documentId} selectedText={selectedText} />
-              ),
-            },
-            {
-              key: "memory",
-              label: "Memory",
-              children: (
-                <Card>
-                  <Typography.Title level={3}>Memory</Typography.Title>
-                  <Typography.Paragraph>
-                    Key memories, character states, timeline events, and RAG context will be reviewed here.
-                  </Typography.Paragraph>
-                  <Tag color="blue">{memoryReviewCount} pending review</Tag>
-                  <Tag>{modelProfileCount} model profiles</Tag>
-                  <List
-                    dataSource={memoryReviews}
-                    locale={{ emptyText: "No pending memory reviews" }}
-                    renderItem={(item) => (
-                      <List.Item
-                        actions={[
-                          <Button size="small" onClick={() => void resolveMemoryReview(item.id, "approve")}>
-                            Approve
-                          </Button>,
-                          <Button danger size="small" onClick={() => void resolveMemoryReview(item.id, "reject")}>
-                            Reject
-                          </Button>,
-                        ]}
-                      >
-                        <List.Item.Meta
-                          description={`${item.memory_type} · importance ${item.importance}`}
-                          title={item.title}
-                        />
-                      </List.Item>
-                    )}
-                    style={{ marginTop: 16 }}
-                  />
-                  <List
-                    dataSource={modelProfiles}
-                    locale={{ emptyText: "No model profiles configured" }}
-                    renderItem={(profile) => (
-                      <List.Item>
-                        <List.Item.Meta description={`${profile.provider_kind} · ${profile.chat_model}`} title={profile.name} />
-                      </List.Item>
-                    )}
-                    style={{ marginTop: 16 }}
-                  />
-                </Card>
-              ),
-            },
-            {
-              key: "confirmations",
-              label: "Confirmations",
-              children: (
-                <Card>
-                  <Typography.Title level={3}>Confirmations</Typography.Title>
-                  <Typography.Paragraph>
-                    Agent write actions wait here until you approve or reject them.
-                  </Typography.Paragraph>
-                  <Space wrap>
-                    <Tag color="gold">{confirmationCount} pending</Tag>
-                    <Tag>{versions.length} saved versions</Tag>
-                  </Space>
-                  <List
-                    dataSource={confirmations}
-                    locale={{ emptyText: "No pending confirmations" }}
-                    renderItem={(confirmation) => (
-                      <List.Item
-                        actions={[
-                          <Button size="small" onClick={() => void resolveConfirmation(confirmation.id, "approve")}>
-                            Approve
-                          </Button>,
-                          <Button danger size="small" onClick={() => void resolveConfirmation(confirmation.id, "reject")}>
-                            Reject
-                          </Button>,
-                        ]}
-                      >
-                        <List.Item.Meta
-                          description={String(confirmation.payload.replacement_text ?? "")}
-                          title={confirmation.action_type}
-                        />
-                      </List.Item>
-                    )}
-                    style={{ marginTop: 16 }}
-                  />
-                </Card>
-              ),
-            },
-            {
-              key: "materials",
-              label: "Materials",
-              children: (
-                <Card>
-                  <Typography.Title level={3}>Materials</Typography.Title>
-                  <Typography.Paragraph>
-                    Structured creative assets, timeline, character state, and relationships.
-                  </Typography.Paragraph>
-                  <List
-                    dataSource={creativeAssets}
-                    header={<strong>Creative Assets</strong>}
-                    renderItem={(asset) => (
-                      <List.Item>
-                        <List.Item.Meta description={`${asset.asset_type} · ${asset.summary}`} title={asset.name} />
-                      </List.Item>
-                    )}
-                  />
-                  <List
-                    dataSource={timelineEvents}
-                    header={<strong>Timeline</strong>}
-                    renderItem={(event) => (
-                      <List.Item>
-                        <List.Item.Meta description={event.event_time} title={event.title} />
-                      </List.Item>
-                    )}
-                  />
-                  <List
-                    dataSource={characterStates}
-                    header={<strong>Character States</strong>}
-                    renderItem={(state) => (
-                      <List.Item>
-                        <List.Item.Meta description={state.character_name} title={state.state} />
-                      </List.Item>
-                    )}
-                  />
-                  <List
-                    dataSource={relationshipEdges}
-                    header={<strong>Relationship Edges</strong>}
-                    renderItem={(edge) => (
-                      <List.Item>
-                        <List.Item.Meta
-                          description={`${edge.source_character} -> ${edge.target_character}`}
-                          title={edge.relationship_type}
-                        />
-                      </List.Item>
-                    )}
-                  />
-                </Card>
-              ),
-            },
-          ]}
-          style={{ padding: 16 }}
-        />
-      </Layout.Sider>
-    </Layout>
+    <Tabs
+      activeKey={activeTab}
+      items={[
+        {
+          children: <WorkspaceTree nodes={nodes} onSelectDocument={handleSelectDocument} />,
+          key: "workspace",
+          label: "Workspace",
+        },
+        {
+          children: (
+            <DocumentEditor
+              content={document?.content ?? null}
+              onSave={handleSaveDocument}
+              onSelectText={setSelectedText}
+              saving={saving}
+            />
+          ),
+          key: "editor",
+          label: "Editor",
+        },
+        {
+          children: <AgentPanel token={token} novelId={novelId} documentId={documentId} selectedText={selectedText} />,
+          key: "agent",
+          label: "Agent",
+        },
+        {
+          children: (
+            <Card>
+              <Typography.Title level={3}>Memory</Typography.Title>
+              <Typography.Paragraph>
+                Key memories, character states, timeline events, and RAG context will be reviewed here.
+              </Typography.Paragraph>
+              <Tag color="blue">{memoryReviewCount} pending review</Tag>
+              <Tag>{modelProfileCount} model profiles</Tag>
+              <List
+                dataSource={memoryReviews}
+                locale={{ emptyText: "No pending memory reviews" }}
+                renderItem={(item) => (
+                  <List.Item
+                    actions={[
+                      <Button size="small" onClick={() => void resolveMemoryReview(item.id, "approve")}>
+                        Approve
+                      </Button>,
+                      <Button danger size="small" onClick={() => void resolveMemoryReview(item.id, "reject")}>
+                        Reject
+                      </Button>,
+                    ]}
+                  >
+                    <List.Item.Meta
+                      description={`${item.memory_type} · importance ${item.importance}`}
+                      title={item.title}
+                    />
+                  </List.Item>
+                )}
+                style={{ marginTop: 16 }}
+              />
+              <List
+                dataSource={modelProfiles}
+                locale={{ emptyText: "No model profiles configured" }}
+                renderItem={(profile) => (
+                  <List.Item>
+                    <List.Item.Meta
+                      description={`${profile.provider_kind} · ${profile.chat_model}`}
+                      title={profile.name}
+                    />
+                  </List.Item>
+                )}
+                style={{ marginTop: 16 }}
+              />
+            </Card>
+          ),
+          key: "memory",
+          label: "Memory",
+        },
+        {
+          children: (
+            <Card>
+              <Typography.Title level={3}>Confirmations</Typography.Title>
+              <Typography.Paragraph>Agent write actions wait here until you approve or reject them.</Typography.Paragraph>
+              <Space wrap>
+                <Tag color="gold">{confirmationCount} pending</Tag>
+                <Tag>{versions.length} saved versions</Tag>
+              </Space>
+              <List
+                dataSource={confirmations}
+                locale={{ emptyText: "No pending confirmations" }}
+                renderItem={(confirmation) => (
+                  <List.Item
+                    actions={[
+                      <Button size="small" onClick={() => void resolveConfirmation(confirmation.id, "approve")}>
+                        Approve
+                      </Button>,
+                      <Button danger size="small" onClick={() => void resolveConfirmation(confirmation.id, "reject")}>
+                        Reject
+                      </Button>,
+                    ]}
+                  >
+                    <List.Item.Meta
+                      description={String(confirmation.payload.replacement_text ?? "")}
+                      title={confirmation.action_type}
+                    />
+                  </List.Item>
+                )}
+                style={{ marginTop: 16 }}
+              />
+            </Card>
+          ),
+          key: "confirmations",
+          label: "Confirmations",
+        },
+        {
+          children: (
+            <Card>
+              <Typography.Title level={3}>Materials</Typography.Title>
+              <Typography.Paragraph>
+                Structured creative assets, timeline, character state, and relationships.
+              </Typography.Paragraph>
+              <List
+                dataSource={creativeAssets}
+                header={<strong>Creative Assets</strong>}
+                renderItem={(asset) => (
+                  <List.Item>
+                    <List.Item.Meta description={`${asset.asset_type} · ${asset.summary}`} title={asset.name} />
+                  </List.Item>
+                )}
+              />
+              <List
+                dataSource={timelineEvents}
+                header={<strong>Timeline</strong>}
+                renderItem={(event) => (
+                  <List.Item>
+                    <List.Item.Meta description={event.event_time} title={event.title} />
+                  </List.Item>
+                )}
+              />
+              <List
+                dataSource={characterStates}
+                header={<strong>Character States</strong>}
+                renderItem={(state) => (
+                  <List.Item>
+                    <List.Item.Meta description={state.character_name} title={state.state} />
+                  </List.Item>
+                )}
+              />
+              <List
+                dataSource={relationshipEdges}
+                header={<strong>Relationship Edges</strong>}
+                renderItem={(edge) => (
+                  <List.Item>
+                    <List.Item.Meta
+                      description={`${edge.source_character} -> ${edge.target_character}`}
+                      title={edge.relationship_type}
+                    />
+                  </List.Item>
+                )}
+              />
+            </Card>
+          ),
+          key: "materials",
+          label: "Materials",
+        },
+      ]}
+      onChange={setActiveTab}
+      style={{ minHeight: "calc(100vh - 96px)", padding: 16 }}
+    />
   );
 }

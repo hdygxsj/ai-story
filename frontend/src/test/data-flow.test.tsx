@@ -131,8 +131,11 @@ describe("frontend data flow", () => {
 
     render(<WorkspacePage token="token" novelId="novel-1" />);
 
-    await user.click(await screen.findByRole("treeitem", { name: /Chapter From API/ }));
+    expect(screen.getByRole("tab", { name: "Editor", selected: true })).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Workspace" }));
+    await user.click(await screen.findByText("Chapter From API"));
 
+    expect(screen.getByRole("tab", { name: "Editor", selected: true })).toBeInTheDocument();
     expect(await screen.findByText("Loaded chapter content")).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Memory" }));
     expect(await screen.findByText("Core vow")).toBeInTheDocument();
