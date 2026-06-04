@@ -65,6 +65,11 @@ class ProposeWorkspaceChangeArgs(BaseModel):
     parent_id: str | None = None
 
 
+class OrganizeWorkspaceTreeArgs(BaseModel):
+    novel_id: str
+    instruction: str = Field(description="Natural language instruction for organizing chapters, folders, and drafts")
+
+
 def draft_rewrite(selected_text: str, instruction: str) -> str:
     return f"{selected_text} The room turned tense as every sound seemed to wait for the next mistake."
 
@@ -73,6 +78,8 @@ def classify_agent_intent(message: str, selected_text: str | None) -> str:
     lowered = message.lower()
     if selected_text and ("rewrite" in lowered or "改写" in lowered or "重写" in lowered):
         return "rewrite_selection"
+    if any(keyword in lowered for keyword in ["整理", "目录", "章节", "草稿", "文件夹", "folder", "chapter", "draft"]):
+        return "organize_workspace"
     if "remember" in lowered or "记住" in lowered:
         return "draft_key_memory"
     return "chat"
@@ -160,6 +167,15 @@ def propose_workspace_change(
     return {"action_type": "workspace_change", "payload": locals()}
 
 
+@tool("organize_workspace_tree", args_schema=OrganizeWorkspaceTreeArgs)
+def organize_workspace_tree(novel_id: str, instruction: str) -> dict[str, Any]:
+    """Organize chapter, folder, and draft nodes. The API runtime applies validated changes."""
+    return {
+        "action_type": "organize_workspace",
+        "payload": {"novel_id": novel_id, "instruction": instruction},
+    }
+
+
 def get_agent_tools() -> list[BaseTool]:
     return [
         read_document,
@@ -172,4 +188,5 @@ def get_agent_tools() -> list[BaseTool]:
         create_timeline_event,
         update_character_state,
         propose_workspace_change,
+        organize_workspace_tree,
     ]

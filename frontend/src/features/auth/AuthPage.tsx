@@ -25,7 +25,7 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
       const response = await login(values.email, values.password);
       onAuthenticated(response.access_token);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Login failed");
+      setError(caught instanceof Error ? caught.message : "登录失败");
     } finally {
       setLoading(false);
     }
@@ -40,7 +40,7 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
       const response = await login(values.email, values.password);
       onAuthenticated(response.access_token);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Registration failed");
+      setError(caught instanceof Error ? caught.message : "注册失败");
     } finally {
       setLoading(false);
     }
@@ -48,9 +48,9 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
 
   return (
     <Card style={{ maxWidth: 480, width: "100%" }}>
-      <Typography.Title level={2}>Sign in</Typography.Title>
+      <Typography.Title level={2}>登录</Typography.Title>
       <Typography.Paragraph type="secondary">
-        Use a local account to keep novel workspaces isolated by user.
+        使用本地账号隔离你的小说、素材和创作记忆。
       </Typography.Paragraph>
       <Form<AuthValues>
         form={form}
@@ -58,21 +58,21 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
         layout="vertical"
         onFinish={handleLogin}
       >
-        <Form.Item name="email" label="Email" rules={[{ required: true }, { type: "email" }]}>
+        <Form.Item name="email" label="邮箱" rules={[{ required: true }, { type: "email" }]}>
           <Input autoComplete="email" />
         </Form.Item>
-        <Form.Item name="username" label="Username" rules={[{ required: true }]}>
+        <Form.Item name="username" label="用户名" rules={[{ required: true }]}>
           <Input autoComplete="username" />
         </Form.Item>
-        <Form.Item name="password" label="Password" rules={[{ required: true, min: 8 }]}>
+        <Form.Item name="password" label="密码" rules={[{ required: true, min: 8 }]}>
           <Input.Password autoComplete="current-password" />
         </Form.Item>
         <Space>
           <Button htmlType="submit" loading={loading} type="primary">
-            Login
+            登录
           </Button>
           <Button loading={loading} onClick={handleRegister}>
-            Register
+            注册
           </Button>
         </Space>
       </Form>

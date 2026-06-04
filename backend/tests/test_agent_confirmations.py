@@ -46,3 +46,35 @@ def test_agent_rewrite_creates_confirmation_and_apply_updates_document() -> None
     assert applied.status_code == 200
     document = client.get(f"/documents/{chapter['document_id']}", headers=headers).json()
     assert "tense" in str(document["content"]).lower()
+
+
+def test_agent_directory_organization_applies_workspace_changes_without_confirmation() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client)
+    novel = client.post("/novels", headers=headers, json={"title": "Agent Directory Book"}).json()
+    drafts = client.post(
+        f"/novels/{novel['id']}/nodes",
+        headers=headers,
+        json={"title": "草稿", "node_type": "folder", "parent_id": None},
+    ).json()
+    draft_chapter = client.post(
+        f"/novels/{novel['id']}/nodes",
+        headers=headers,
+        json={"title": "草稿片段", "node_type": "chapter", "parent_id": None},
+    ).json()
+
+    response = client.post(
+        f"/novels/{novel['id']}/agent/messages",
+        headers=headers,
+        json={"message": "帮我整理章节和草稿目录"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["confirmation"] is None
+    assert body["workspace_diff"]["changes"][0]["node_id"] == draft_chapter["id"]
+    assert body["workspace_nodes"]
+
+    nodes = client.get(f"/novels/{novel['id']}/nodes", headers=headers).json()
+    by_id = {node["id"]: node for node in nodes}
+    assert by_id[draft_chapter["id"]]["parent_id"] == drafts["id"]

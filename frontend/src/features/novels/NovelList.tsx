@@ -1,19 +1,23 @@
-import { Alert, Button, Card, Empty, Form, Input, List, Space, Typography } from "antd";
+import { Alert, Button, Card, Empty, Flex, Form, Input, List, Modal, Space, Typography } from "antd";
 import { useEffect, useState } from "react";
 
 import type { Novel } from "../../api/novels";
-import { createNovel, listNovels } from "../../api/novels";
+import { createNovel, importNovel, listNovels } from "../../api/novels";
 
 type NovelListProps = {
   token: string;
   novels?: Novel[];
+  onNovelsChange?: (novels: Novel[]) => void;
   onSelectNovel: (novelId: string) => void;
 };
 
-export function NovelList({ token, novels = [], onSelectNovel }: NovelListProps) {
+export function NovelList({ token, novels = [], onNovelsChange, onSelectNovel }: NovelListProps) {
   const [form] = Form.useForm<{ title: string }>();
+  const [importForm] = Form.useForm<{ importTitle: string; content: string }>();
   const [localNovels, setLocalNovels] = useState<Novel[]>(novels);
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,10 +31,11 @@ export function NovelList({ token, novels = [], onSelectNovel }: NovelListProps)
         const loaded = await listNovels(token);
         if (!cancelled) {
           setLocalNovels(loaded);
+          onNovelsChange?.(loaded);
         }
       } catch (caught) {
         if (!cancelled) {
-          setError(caught instanceof Error ? caught.message : "Unable to load novels");
+          setError(caught instanceof Error ? caught.message : "无法加载小说列表");
         }
       } finally {
         if (!cancelled) {
@@ -50,7 +55,9 @@ export function NovelList({ token, novels = [], onSelectNovel }: NovelListProps)
     setCreating(true);
     try {
       const novel = await createNovel(token, values.title);
-      setLocalNovels((current) => [...current, novel]);
+      const nextNovels = [...localNovels, novel];
+      setLocalNovels(nextNovels);
+      onNovelsChange?.(nextNovels);
       form.resetFields();
       onSelectNovel(novel.id);
     } finally {
@@ -58,36 +65,78 @@ export function NovelList({ token, novels = [], onSelectNovel }: NovelListProps)
     }
   }
 
+  async function handleImport(values: { importTitle: string; content: string }) {
+    setImporting(true);
+    try {
+      const novel = await importNovel(token, { title: values.importTitle, content: values.content, format: "markdown" });
+      const nextNovels = [...localNovels, novel];
+      setLocalNovels(nextNovels);
+      onNovelsChange?.(nextNovels);
+      importForm.resetFields();
+      setImportOpen(false);
+      onSelectNovel(novel.id);
+    } finally {
+      setImporting(false);
+    }
+  }
+
   return (
-    <Card style={{ width: "min(860px, 100%)" }}>
+    <Card
+      style={{
+        border: "1px solid rgba(255,122,24,0.12)",
+        borderRadius: 22,
+        boxShadow: "0 18px 45px rgba(255,122,24,0.10)",
+        width: "min(920px, 100%)",
+      }}
+    >
       <Space orientation="vertical" size="large" style={{ width: "100%" }}>
         <div>
-          <Typography.Title level={2}>Novels</Typography.Title>
-          <Typography.Text type="secondary">Create or open a user-owned novel workspace.</Typography.Text>
+          <Typography.Title level={2}>我的小说</Typography.Title>
+          <Typography.Text type="secondary">创建或打开你的小说工作区。</Typography.Text>
         </div>
-        <Form form={form} initialValues={{ title: "New Novel" }} layout="inline" onFinish={handleCreate}>
-          <Form.Item name="title" rules={[{ required: true, message: "Novel title is required" }]}>
-            <Input aria-label="Novel title" placeholder="Novel title" />
-          </Form.Item>
-          <Button htmlType="submit" loading={creating} type="primary">
-            Create Novel
-          </Button>
-        </Form>
+        <Flex gap={12} wrap="wrap">
+          <Form form={form} initialValues={{ title: "新小说" }} layout="inline" onFinish={handleCreate}>
+            <Form.Item name="title" rules={[{ required: true, message: "请输入小说标题" }]}>
+              <Input aria-label="小说标题" placeholder="小说标题" />
+            </Form.Item>
+            <Button htmlType="submit" loading={creating} type="primary">
+              创建小说
+            </Button>
+          </Form>
+          <Button onClick={() => setImportOpen(true)}>导入小说</Button>
+        </Flex>
         {error ? <Alert message={error} showIcon type="error" /> : null}
         {localNovels.length ? (
           <List
             dataSource={localNovels}
             loading={loading}
             renderItem={(novel) => (
-              <List.Item actions={[<Button onClick={() => onSelectNovel(novel.id)}>Open</Button>]}>
-                <List.Item.Meta description={novel.description || "No description yet"} title={novel.title} />
+              <List.Item actions={[<Button onClick={() => onSelectNovel(novel.id)}>打开</Button>]}>
+                <List.Item.Meta description={novel.description || "暂无简介"} title={novel.title} />
               </List.Item>
             )}
           />
         ) : (
-          <Empty description="No novels yet. Create one to start writing." />
+          <Empty description="还没有小说，先创建一本开始写作。" />
         )}
       </Space>
+      <Modal
+        confirmLoading={importing}
+        okText="导入"
+        onCancel={() => setImportOpen(false)}
+        onOk={() => importForm.submit()}
+        open={importOpen}
+        title="导入小说"
+      >
+        <Form form={importForm} layout="vertical" onFinish={handleImport}>
+          <Form.Item label="导入小说标题" name="importTitle" rules={[{ required: true, message: "请输入小说标题" }]}>
+            <Input aria-label="导入小说标题" placeholder="例如：海灯记" />
+          </Form.Item>
+          <Form.Item label="导入正文" name="content" rules={[{ required: true, message: "请粘贴正文内容" }]}>
+            <Input.TextArea aria-label="导入正文" autoSize={{ minRows: 8, maxRows: 14 }} placeholder="# 第一章&#10;正文内容..." />
+          </Form.Item>
+        </Form>
+      </Modal>
     </Card>
   );
 }

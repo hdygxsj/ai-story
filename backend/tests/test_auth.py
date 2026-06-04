@@ -3,6 +3,28 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 
+def test_auth_cors_allows_localhost_and_loopback_frontend_origins() -> None:
+    client = TestClient(app)
+
+    for origin in (
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+    ):
+        response = client.options(
+            "/auth/login",
+            headers={
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+                "Origin": origin,
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == origin
+
+
 def test_register_and_login_user() -> None:
     client = TestClient(app)
 

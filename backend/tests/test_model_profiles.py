@@ -50,6 +50,38 @@ def test_create_and_list_openai_compatible_profile() -> None:
     assert list_response.json()[0]["name"] == "Local compatible"
 
 
+def test_create_profile_accepts_purpose_specific_providers() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client, email="purpose-provider@example.com", username="purposeprovider")
+    create_response = client.post(
+        "/model-profiles",
+        headers=headers,
+        json={
+            "name": "Mixed providers",
+            "provider_kind": "openai-compatible",
+            "base_url": "http://localhost:11434/v1",
+            "api_key": "default-key",
+            "chat_provider_kind": "anthropic",
+            "chat_model": "claude-3-5-sonnet-latest",
+            "chat_api_key": "chat-key",
+            "writing_provider_kind": "openai-compatible",
+            "writing_model": "qwen-writing",
+            "writing_api_key": "writing-key",
+            "summary_provider_kind": "openai",
+            "summary_model": "gpt-4o-mini",
+            "embedding_provider_kind": "openai-compatible",
+            "embedding_model": "embedding-model",
+        },
+    )
+
+    assert create_response.status_code == 201
+    body = create_response.json()
+    assert body["chat_provider_kind"] == "anthropic"
+    assert body["writing_provider_kind"] == "openai-compatible"
+    assert body["summary_provider_kind"] == "openai"
+    assert body["embedding_provider_kind"] == "openai-compatible"
+
+
 def test_model_profiles_are_scoped_to_current_user() -> None:
     client = TestClient(app)
     first_headers = auth_headers(client)

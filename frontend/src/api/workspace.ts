@@ -11,6 +11,14 @@ export type WorkspaceNode = {
   position: number;
 };
 
+export type WorkspaceNodeReorderItem = {
+  id: string;
+  parent_id: string | null;
+  position: number;
+  title?: string;
+  status?: string;
+};
+
 export function listWorkspaceNodes(token: string, novelId: string) {
   return apiRequest<WorkspaceNode[]>(`/novels/${novelId}/nodes`, { token });
 }
@@ -20,5 +28,26 @@ export function createWorkspaceNode(token: string, novelId: string, title: strin
     method: "POST",
     token,
     body: JSON.stringify({ title, node_type: nodeType, parent_id: null }),
+  });
+}
+
+export function updateWorkspaceNode(
+  token: string,
+  novelId: string,
+  nodeId: string,
+  payload: Partial<Pick<WorkspaceNode, "parent_id" | "position" | "title">>,
+) {
+  return apiRequest<WorkspaceNode>(`/novels/${novelId}/nodes/${nodeId}`, {
+    method: "PATCH",
+    token,
+    body: JSON.stringify(payload),
+  });
+}
+
+export function reorderWorkspaceNodes(token: string, novelId: string, items: WorkspaceNodeReorderItem[]) {
+  return apiRequest<WorkspaceNode[]>(`/novels/${novelId}/nodes/reorder`, {
+    method: "PATCH",
+    token,
+    body: JSON.stringify({ items }),
   });
 }

@@ -7,7 +7,12 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://ai_story:ai_story@localhost:5432/ai_story"
     jwt_secret: str = "local-development-secret"
     access_token_minutes: int = 1440
-    cors_origins: list[str] = ["http://localhost:5173"]
+    cors_origins: list[str] = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+    ]
     milvus_uri: str = "http://localhost:19530"
     provider_api_key_encryption_secret: str = "local-provider-key-secret"
 

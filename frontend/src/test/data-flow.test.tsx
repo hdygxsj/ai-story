@@ -16,11 +16,67 @@ describe("frontend data flow", () => {
   beforeEach(() => {
     vi.stubGlobal(
       "fetch",
-      vi.fn((input: RequestInfo | URL) => {
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         if (url.endsWith("/novels")) {
           return Promise.resolve(
             jsonResponse([{ id: "novel-1", title: "Fetched Novel", description: "Loaded from API" }]),
+          );
+        }
+        if (url.endsWith("/novels/novel-1/nodes") && init?.method === "POST") {
+          return Promise.resolve(
+            jsonResponse({
+              id: "node-2",
+              novel_id: "novel-1",
+              parent_id: null,
+              document_id: "doc-2",
+              title: "新章节",
+              node_type: "chapter",
+              status: "draft",
+              position: 1,
+            }),
+          );
+        }
+        if (url.endsWith("/novels/novel-1/nodes/reorder") && init?.method === "PATCH") {
+          const body = JSON.parse(String(init.body));
+          const status = body.items?.[0]?.status ?? "draft";
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: "node-1",
+                novel_id: "novel-1",
+                parent_id: null,
+                document_id: "doc-1",
+                title: "Chapter From API",
+                node_type: "chapter",
+                status,
+                position: 0,
+              },
+              {
+                id: "node-3",
+                novel_id: "novel-1",
+                parent_id: null,
+                document_id: "doc-3",
+                title: "Second Chapter",
+                node_type: "chapter",
+                status: "draft",
+                position: 1,
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/novels/novel-1/nodes/node-1") && init?.method === "PATCH") {
+          return Promise.resolve(
+            jsonResponse({
+              id: "node-1",
+              novel_id: "novel-1",
+              parent_id: null,
+              document_id: "doc-1",
+              title: "重命名章节",
+              node_type: "chapter",
+              status: "draft",
+              position: 0,
+            }),
           );
         }
         if (url.endsWith("/novels/novel-1/nodes")) {
@@ -36,10 +92,29 @@ describe("frontend data flow", () => {
                 status: "draft",
                 position: 0,
               },
+              {
+                id: "node-3",
+                novel_id: "novel-1",
+                parent_id: null,
+                document_id: "doc-3",
+                title: "Second Chapter",
+                node_type: "chapter",
+                status: "draft",
+                position: 1,
+              },
             ]),
           );
         }
         if (url.endsWith("/documents/doc-1")) {
+          if (init?.method === "PATCH") {
+            return Promise.resolve(
+              jsonResponse({
+                id: "doc-1",
+                novel_id: "novel-1",
+                content: JSON.parse(String(init.body)).content,
+              }),
+            );
+          }
           return Promise.resolve(
             jsonResponse({
               id: "doc-1",
@@ -52,6 +127,21 @@ describe("frontend data flow", () => {
           );
         }
         if (url.endsWith("/documents/doc-1/versions")) {
+          return Promise.resolve(jsonResponse([]));
+        }
+        if (url.endsWith("/documents/doc-3")) {
+          return Promise.resolve(
+            jsonResponse({
+              id: "doc-3",
+              novel_id: "novel-1",
+              content: {
+                type: "doc",
+                content: [{ type: "paragraph", content: [{ type: "text", text: "Second chapter content" }] }],
+              },
+            }),
+          );
+        }
+        if (url.endsWith("/documents/doc-3/versions")) {
           return Promise.resolve(jsonResponse([]));
         }
         if (url.endsWith("/novels/novel-1/memory-review-items")) {
@@ -129,24 +219,106 @@ describe("frontend data flow", () => {
   it("loads workspace nodes and selected document content from APIs", async () => {
     const user = userEvent.setup();
 
-    render(<WorkspacePage token="token" novelId="novel-1" />);
+    const { rerender } = render(<WorkspacePage activeSection="workspace" token="token" novelId="novel-1" />);
 
-    expect(screen.getByRole("tab", { name: "Editor", selected: true })).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "Workspace" }));
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Agent" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "共创 Agent" })).toBeInTheDocument();
     await user.click(await screen.findByText("Chapter From API"));
 
-    expect(screen.getByRole("tab", { name: "Editor", selected: true })).toBeInTheDocument();
     expect(await screen.findByText("Loaded chapter content")).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "Memory" }));
+    rerender(<WorkspacePage activeSection="memory" token="token" novelId="novel-1" />);
     expect(await screen.findByText("Core vow")).toBeInTheDocument();
     expect(screen.getByText("OpenAI Default")).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "Confirmations" }));
+    expect(screen.getByRole("heading", { name: "章节" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "共创 Agent" })).toBeInTheDocument();
+    rerender(<WorkspacePage activeSection="confirmations" token="token" novelId="novel-1" />);
     expect(await screen.findByText("rewrite_selection")).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "Materials" }));
+    rerender(<WorkspacePage activeSection="materials" token="token" novelId="novel-1" />);
     expect(await screen.findAllByText("Mira")).toHaveLength(2);
     expect(screen.getByText("Storm Night")).toBeInTheDocument();
     expect(screen.getByText("Hiding the map")).toBeInTheDocument();
     expect(screen.getByText("distrusts")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "章节" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "共创 Agent" })).toBeInTheDocument();
     await waitFor(() => expect(fetch).toHaveBeenCalledWith("http://localhost:8000/documents/doc-1", expect.anything()));
+  });
+
+  it("creates a new chapter from the workspace button", async () => {
+    const user = userEvent.setup();
+
+    render(<WorkspacePage activeSection="workspace" token="token" novelId="novel-1" />);
+    await user.click(screen.getByRole("button", { name: /新建章节/ }));
+
+    expect(await screen.findByText("新章节")).toBeInTheDocument();
+    await waitFor(() => {
+      const createCall = vi.mocked(fetch).mock.calls.find(
+        ([url, init]) => String(url).endsWith("/novels/novel-1/nodes") && init?.method === "POST",
+      );
+      expect(createCall).toBeTruthy();
+      expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({
+        node_type: "chapter",
+        parent_id: null,
+        title: "新章节",
+      });
+    });
+  });
+
+  it("renames a workspace node from the chapter tree", async () => {
+    const user = userEvent.setup();
+
+    render(<WorkspacePage activeSection="workspace" token="token" novelId="novel-1" />);
+    await user.click(await screen.findByRole("button", { name: "重命名 Chapter From API" }));
+    const renameInputs = await screen.findAllByLabelText("章节名称");
+    const modalInput = renameInputs.at(-1);
+    expect(modalInput).toBeTruthy();
+    await user.clear(modalInput as HTMLElement);
+    await user.type(modalInput as HTMLElement, "重命名章节");
+    await user.click(screen.getByRole("button", { name: /确\s*定/ }));
+
+    await waitFor(() => expect(screen.getAllByText("重命名章节").length).toBeGreaterThanOrEqual(1));
+    await waitFor(() => {
+      const renameCall = vi.mocked(fetch).mock.calls.find(
+        ([url, init]) => String(url).endsWith("/novels/novel-1/nodes/node-1") && init?.method === "PATCH",
+      );
+      expect(renameCall).toBeTruthy();
+      expect(JSON.parse(String(renameCall?.[1]?.body))).toMatchObject({ title: "重命名章节" });
+    });
+  });
+
+  it("moves workspace nodes to the recycle bin and restores them", async () => {
+    const user = userEvent.setup();
+
+    render(<WorkspacePage activeSection="workspace" token="token" novelId="novel-1" />);
+    await user.click(await screen.findByRole("button", { name: "删除 Chapter From API" }));
+
+    await waitFor(() => {
+      const trashCall = vi.mocked(fetch).mock.calls.find(
+        ([url, init]) => String(url).endsWith("/novels/novel-1/nodes/reorder") && String(init?.body).includes("\"status\":\"trashed\""),
+      );
+      expect(trashCall).toBeTruthy();
+    });
+    expect(await screen.findByLabelText("回收站")).toBeInTheDocument();
+
+    await user.click(await screen.findByRole("button", { name: "恢复 Chapter From API" }));
+    await waitFor(() => {
+      const restoreCall = vi.mocked(fetch).mock.calls.find(
+        ([url, init]) => String(url).endsWith("/novels/novel-1/nodes/reorder") && String(init?.body).includes("\"status\":\"draft\""),
+      );
+      expect(restoreCall).toBeTruthy();
+    });
+  });
+
+  it("switches chapters without leaking the previous document and shows save feedback", async () => {
+    const user = userEvent.setup();
+
+    render(<WorkspacePage activeSection="workspace" token="token" novelId="novel-1" />);
+    await user.click(await screen.findByText("Second Chapter"));
+    expect(await screen.findByText("Second chapter content")).toBeInTheDocument();
+    await user.click(await screen.findByText("Chapter From API"));
+
+    expect(await screen.findByText("Loaded chapter content")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /保\s*存/ }));
+    expect(await screen.findByText("已保存")).toBeInTheDocument();
   });
 });
