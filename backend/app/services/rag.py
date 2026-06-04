@@ -6,7 +6,8 @@ from uuid import UUID
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import RagChunk
+from app.agent.model_runtime import embed_with_model_profile
+from app.models import ModelProfile, Novel, RagChunk
 
 EMBEDDING_DIMENSIONS = 64
 
@@ -29,12 +30,29 @@ def extract_text_from_prosemirror(content: dict[str, Any]) -> str:
     return " ".join(part.strip() for part in parts if part.strip())
 
 
-def embed_text(text: str) -> list[float]:
+def embed_text_hash(text: str) -> list[float]:
     vector = [0.0] * EMBEDDING_DIMENSIONS
     for token in re.findall(r"\w+", text.lower()):
         vector[hash(token) % EMBEDDING_DIMENSIONS] += 1.0
     length = math.sqrt(sum(value * value for value in vector)) or 1.0
     return [value / length for value in vector]
+
+
+async def embed_text(text: str, model_profile: ModelProfile | None = None) -> list[float]:
+    if model_profile is not None:
+        return await embed_with_model_profile(model_profile, text)
+    return embed_text_hash(text)
+
+
+async def get_embedding_model_profile(session: AsyncSession, novel: Novel) -> ModelProfile | None:
+    if novel.default_model_profile_id is None:
+        return None
+    return await session.scalar(
+        select(ModelProfile).where(
+            ModelProfile.id == novel.default_model_profile_id,
+            ModelProfile.owner_id == novel.owner_id,
+        )
+    )
 
 
 def _similarity(left: list[float], right: list[float]) -> float:
@@ -48,6 +66,7 @@ async def index_text(
     source_type: str,
     source_id: str,
     text: str,
+    model_profile: ModelProfile | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> None:
     normalized = text.strip()
@@ -66,7 +85,7 @@ async def index_text(
             source_type=source_type,
             source_id=source_id,
             text=normalized,
-            embedding=embed_text(normalized),
+            embedding=await embed_text(normalized, model_profile),
             extra_metadata=metadata or {},
         )
     )
@@ -78,11 +97,12 @@ async def search_rag_chunks(
     novel_id: UUID,
     query: str,
     limit: int = 8,
+    model_profile: ModelProfile | None = None,
 ) -> list[RagChunk]:
     chunks = list(
         await session.scalars(select(RagChunk).where(RagChunk.novel_id == novel_id))
     )
-    query_embedding = embed_text(query)
+    query_embedding = await embed_text(query, model_profile)
     return sorted(
         chunks,
         key=lambda chunk: _similarity(query_embedding, chunk.embedding),

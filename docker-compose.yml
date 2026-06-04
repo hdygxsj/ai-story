@@ -22,6 +22,25 @@ services:
     volumes:
       - milvus_data:/var/lib/milvus
 
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "${OLLAMA_HOST_PORT:-11434}:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      - ollama
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint:
+      - /bin/sh
+      - -c
+      - until ollama list >/dev/null 2>&1; do sleep 2; done; ollama pull ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+    restart: "no"
+
   api:
     build:
       context: ./backend
@@ -29,12 +48,14 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://ai_story:ai_story@postgres:5432/ai_story}
       JWT_SECRET: ${JWT_SECRET:-local-development-secret}
       MILVUS_URI: ${MILVUS_URI:-http://milvus:19530}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       PROVIDER_API_KEY_ENCRYPTION_SECRET: ${PROVIDER_API_KEY_ENCRYPTION_SECRET:-local-provider-key-secret}
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
       - postgres
       - milvus
+      - ollama
 
   web:
     build:
@@ -49,3 +70,4 @@ services:
 volumes:
   postgres_data:
   milvus_data:
+  ollama_data:

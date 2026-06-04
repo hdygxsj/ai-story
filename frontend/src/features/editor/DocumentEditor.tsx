@@ -113,6 +113,7 @@ export function DocumentEditor({
     if (!editor) {
       return;
     }
+    commitChapterTitle();
     onSave?.(editor.getJSON() as DocumentBody);
   }
 

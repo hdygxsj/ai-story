@@ -4,7 +4,7 @@ import "antd/dist/reset.css";
 import { useEffect, useState } from "react";
 
 import type { Novel } from "./api/novels";
-import { createNovel, exportNovel, listNovels } from "./api/novels";
+import { createNovel, exportNovel, importNovel, listNovels } from "./api/novels";
 import { AuthPage } from "./features/auth/AuthPage";
 import { NovelList } from "./features/novels/NovelList";
 import type { WorkspaceSection } from "./features/workspace/WorkspacePage";
@@ -12,26 +12,93 @@ import { WorkspacePage } from "./features/workspace/WorkspacePage";
 
 const workspaceMenuItems: { key: WorkspaceSection; label: string }[] = [
   { key: "workspace", label: "工作台" },
-  { key: "agent-config", label: "Agent配置" },
   { key: "memory", label: "记忆" },
   { key: "materials", label: "素材" },
+  { key: "agent-config", label: "Agent配置" },
 ];
+
+const toolbarButtonBaseStyle = {
+  alignItems: "center",
+  borderRadius: 999,
+  cursor: "pointer",
+  display: "inline-flex",
+  fontSize: 12,
+  height: 30,
+  justifyContent: "center",
+  lineHeight: 1,
+  padding: "0 12px",
+  whiteSpace: "nowrap",
+} as const;
+
+const tokenStorageKey = "ai-story-token";
+const novelStorageKey = "ai-story-novel-id";
+
+const sectionPathByKey: Record<WorkspaceSection | "novels", string> = {
+  "agent-config": "/agent-config",
+  confirmations: "/confirmations",
+  materials: "/materials",
+  memory: "/memory",
+  novels: "/novels",
+  workspace: "/workspace",
+};
+
+function sectionFromPath(pathname: string): WorkspaceSection | "novels" {
+  const normalized = pathname.replace(/\/+$/, "") || "/";
+  if (normalized === "/agent-config") {
+    return "agent-config";
+  }
+  if (normalized === "/memory") {
+    return "memory";
+  }
+  if (normalized === "/materials") {
+    return "materials";
+  }
+  if (normalized === "/confirmations") {
+    return "confirmations";
+  }
+  if (normalized === "/novels") {
+    return "novels";
+  }
+  return "workspace";
+}
+
+function pushSectionPath(section: WorkspaceSection | "novels") {
+  const nextPath = sectionPathByKey[section];
+  if (window.location.pathname !== nextPath) {
+    window.history.pushState(null, "", nextPath);
+  }
+}
 
 export function App() {
   const [form] = Form.useForm<{ title: string }>();
-  const [token, setToken] = useState<string | null>(null);
+  const [importForm] = Form.useForm<{ importTitle: string; content: string }>();
+  const [token, setToken] = useState<string | null>(() => window.localStorage.getItem(tokenStorageKey));
   const [novelId, setNovelId] = useState<string | null>(null);
   const [novels, setNovels] = useState<Novel[]>([]);
-  const [activeSection, setActiveSection] = useState<WorkspaceSection | "novels">("workspace");
+  const [activeSection, setActiveSection] = useState<WorkspaceSection | "novels">(() => sectionFromPath(window.location.pathname));
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [creatingNovel, setCreatingNovel] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importingNovel, setImportingNovel] = useState(false);
+
+  useEffect(() => {
+    function handlePopState() {
+      setActiveSection(sectionFromPath(window.location.pathname));
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   useEffect(() => {
     if (!token) {
       setNovels([]);
       setNovelId(null);
+      window.localStorage.removeItem(tokenStorageKey);
+      window.localStorage.removeItem(novelStorageKey);
       return;
     }
+    window.localStorage.setItem(tokenStorageKey, token);
 
     let cancelled = false;
 
@@ -40,8 +107,16 @@ export function App() {
         const loaded = await listNovels(token as string);
         if (!cancelled) {
           setNovels(loaded);
-          setNovelId((current) => current ?? loaded[0]?.id ?? null);
-          setActiveSection((current) => (current === "novels" ? current : "workspace"));
+          setNovelId((current) => {
+            const storedNovelId = window.localStorage.getItem(novelStorageKey);
+            if (current && loaded.some((novel) => novel.id === current)) {
+              return current;
+            }
+            if (storedNovelId && loaded.some((novel) => novel.id === storedNovelId)) {
+              return storedNovelId;
+            }
+            return loaded[0]?.id ?? null;
+          });
         }
       } catch {
         if (!cancelled) {
@@ -59,6 +134,25 @@ export function App() {
 
   const selectedNovel = novels.find((novel) => novel.id === novelId) ?? null;
 
+  useEffect(() => {
+    if (novelId) {
+      window.localStorage.setItem(novelStorageKey, novelId);
+    }
+  }, [novelId]);
+
+  function handleAuthenticated(nextToken: string) {
+    window.localStorage.setItem(tokenStorageKey, nextToken);
+    setToken(nextToken);
+    if (window.location.pathname === "/" || window.location.pathname === "/login") {
+      pushSectionPath("workspace");
+    }
+  }
+
+  function navigateSection(section: WorkspaceSection | "novels") {
+    setActiveSection(section);
+    pushSectionPath(section);
+  }
+
   async function handleCreateNovel(values: { title: string }) {
     if (!token) {
       return;
@@ -69,7 +163,7 @@ export function App() {
       const novel = await createNovel(token, values.title);
       setNovels((current) => [...current, novel]);
       setNovelId(novel.id);
-      setActiveSection("workspace");
+      navigateSection("workspace");
       setCreateModalOpen(false);
       form.resetFields();
     } finally {
@@ -79,20 +173,42 @@ export function App() {
 
   function handleSelectNovel(nextNovelId: string) {
     setNovelId(nextNovelId);
-    setActiveSection("workspace");
+    navigateSection("workspace");
   }
 
   async function handleExportNovel() {
     if (!token || !selectedNovel) {
       return;
     }
-    const blob = await exportNovel(token, selectedNovel.id, "markdown");
+    const blob = await exportNovel(token, selectedNovel.id, "txt");
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `${selectedNovel.title}.md`;
+    anchor.download = `${selectedNovel.title}.txt`;
     anchor.click();
     URL.revokeObjectURL(url);
+  }
+
+  async function handleImportNovel(values: { importTitle: string; content: string }) {
+    if (!token) {
+      return;
+    }
+
+    setImportingNovel(true);
+    try {
+      const novel = await importNovel(token, {
+        title: values.importTitle,
+        content: values.content,
+        format: "txt",
+      });
+      setNovels((current) => [...current, novel]);
+      setNovelId(novel.id);
+      navigateSection("workspace");
+      setImportModalOpen(false);
+      importForm.resetFields();
+    } finally {
+      setImportingNovel(false);
+    }
   }
 
   return (
@@ -143,7 +259,7 @@ export function App() {
             {token && novelId ? (
               <Menu
                 mode="horizontal"
-                onClick={({ key }) => setActiveSection(key as WorkspaceSection)}
+                onClick={({ key }) => navigateSection(key as WorkspaceSection)}
                 selectedKeys={activeSection === "novels" ? [] : [activeSection]}
                 items={workspaceMenuItems}
                 style={{
@@ -154,6 +270,37 @@ export function App() {
                   minWidth: 0,
                 }}
               />
+            ) : null}
+            {token && novelId ? (
+              <Flex gap={8} style={{ flexShrink: 0 }}>
+                <button
+                  aria-label="导入小说"
+                  onMouseDown={() => setImportModalOpen(true)}
+                  onClick={() => setImportModalOpen(true)}
+                  style={{
+                    ...toolbarButtonBaseStyle,
+                    background: "#fff7ed",
+                    border: "1px solid rgba(255,122,24,0.28)",
+                    color: "#c2410c",
+                  }}
+                  type="button"
+                >
+                  导入小说
+                </button>
+                <button
+                  aria-label="导出 TXT"
+                  onClick={() => void handleExportNovel()}
+                  style={{
+                    ...toolbarButtonBaseStyle,
+                    background: "#ff7a18",
+                    border: "1px solid #ff7a18",
+                    color: "#ffffff",
+                  }}
+                  type="button"
+                >
+                  导出 TXT
+                </button>
+              </Flex>
             ) : null}
             {token ? (
               <Dropdown
@@ -174,26 +321,26 @@ export function App() {
                       ),
                     })),
                     { type: "divider" as const },
-                    { key: "export-md", label: "导出 Markdown" },
+                    { key: "export-txt", label: "导出 TXT" },
                     { key: "manage", icon: <SettingOutlined />, label: "管理小说" },
                     { key: "create", icon: <PlusOutlined />, label: "新建小说" },
                   ],
                   onClick: ({ key }) => {
                     if (key === "manage") {
-                      setActiveSection("novels");
+                      navigateSection("novels");
                       return;
                     }
                     if (key === "create") {
                       setCreateModalOpen(true);
                       return;
                     }
-                    if (key === "export-md") {
+                    if (key === "export-txt") {
                       void handleExportNovel();
                       return;
                     }
                     if (key.startsWith("novel:")) {
                       setNovelId(key.replace("novel:", ""));
-                      setActiveSection("workspace");
+                      navigateSection("workspace");
                     }
                   },
                 }}
@@ -240,7 +387,7 @@ export function App() {
               placeItems: token && novelId && activeSection !== "novels" ? "stretch" : "start center",
             }}
           >
-            {!token ? <AuthPage onAuthenticated={setToken} /> : null}
+            {!token ? <AuthPage onAuthenticated={handleAuthenticated} /> : null}
             {token && (!novelId || activeSection === "novels") ? (
               <NovelList novels={novels} token={token} onNovelsChange={setNovels} onSelectNovel={handleSelectNovel} />
             ) : null}
@@ -260,6 +407,23 @@ export function App() {
           <Form form={form} initialValues={{ title: "新小说" }} layout="vertical" onFinish={handleCreateNovel}>
             <Form.Item label="小说标题" name="title" rules={[{ required: true, message: "请输入小说标题" }]}>
               <Input />
+            </Form.Item>
+          </Form>
+        </Modal>
+        <Modal
+          confirmLoading={importingNovel}
+          okText="导入"
+          onCancel={() => setImportModalOpen(false)}
+          onOk={() => importForm.submit()}
+          open={importModalOpen}
+          title="导入小说"
+        >
+          <Form form={importForm} layout="vertical" onFinish={handleImportNovel}>
+            <Form.Item label="导入小说标题" name="importTitle" rules={[{ required: true, message: "请输入小说标题" }]}>
+              <Input aria-label="导入小说标题" placeholder="例如：海灯记" />
+            </Form.Item>
+            <Form.Item label="导入正文" name="content" rules={[{ required: true, message: "请粘贴正文内容" }]}>
+              <Input.TextArea aria-label="导入正文" autoSize={{ minRows: 8, maxRows: 14 }} placeholder="第一章&#10;正文内容..." />
             </Form.Item>
           </Form>
         </Modal>

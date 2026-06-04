@@ -13,6 +13,7 @@ function jsonResponse(body: unknown) {
 
 describe("WorkspacePage", () => {
   afterEach(() => {
+    window.localStorage.clear();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -31,7 +32,29 @@ describe("WorkspacePage", () => {
       height: "100%",
     });
     expect(screen.getByTestId("workspace-grid")).toHaveStyle({
-      gridTemplateColumns: "clamp(220px, 18vw, 260px) minmax(0, 1fr) clamp(300px, 28vw, 390px)",
+      gridTemplateColumns: "260px 6px minmax(0, 1fr) clamp(300px, 28vw, 390px)",
+      minHeight: "0",
+      overflow: "hidden",
+    });
+    expect(screen.getByTestId("workspace-grid")).not.toHaveStyle({ height: "100%" });
+  });
+
+  it("resizes and persists the chapter tree panel width", () => {
+    window.localStorage.setItem("ai-story-workspace-tree-width", "330");
+
+    render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
+
+    expect(screen.getByTestId("workspace-grid")).toHaveStyle({
+      gridTemplateColumns: "330px 6px minmax(0, 1fr) clamp(300px, 28vw, 390px)",
+    });
+
+    fireEvent.mouseDown(screen.getByRole("separator", { name: "调整章节面板宽度" }), { clientX: 330 });
+    fireEvent.mouseMove(window, { clientX: 390 });
+    fireEvent.mouseUp(window);
+
+    expect(window.localStorage.getItem("ai-story-workspace-tree-width")).toBe("390");
+    expect(screen.getByTestId("workspace-grid")).toHaveStyle({
+      gridTemplateColumns: "390px 6px minmax(0, 1fr) clamp(300px, 28vw, 390px)",
     });
   });
 
@@ -156,6 +179,53 @@ describe("WorkspacePage", () => {
     });
   });
 
+  it("commits the focused chapter title when saving with shortcut", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/novels/novel-1/nodes")) {
+        return Promise.resolve(
+          jsonResponse([
+            { id: "node-1", title: "第一章", node_type: "chapter", parent_id: null, document_id: "doc-1", position: 0 },
+          ]),
+        );
+      }
+      if (url.endsWith("/novels/novel-1/nodes/node-1") && init?.method === "PATCH") {
+        return Promise.resolve(
+          jsonResponse({ id: "node-1", title: "第一章 即时保存", node_type: "chapter", parent_id: null, document_id: "doc-1", position: 0 }),
+        );
+      }
+      if (url.endsWith("/documents/doc-1") && init?.method === "PATCH") {
+        return Promise.resolve(jsonResponse({ id: "doc-1", content: JSON.parse(String(init.body)).content }));
+      }
+      if (url.endsWith("/documents/doc-1")) {
+        return Promise.resolve(jsonResponse({ id: "doc-1", content: { type: "doc", content: [] } }));
+      }
+      if (url.endsWith("/documents/doc-1/versions")) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
+    const titleInput = await screen.findByLabelText("章节名称");
+    await user.clear(titleInput);
+    await user.type(titleInput, "第一章 即时保存");
+
+    const saveEvent = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ctrlKey: true, key: "s" });
+    document.dispatchEvent(saveEvent);
+
+    expect(await screen.findByText("第一章 即时保存")).toBeInTheDocument();
+    await waitFor(() => {
+      const renameCall = fetchMock.mock.calls.find(
+        ([url, init]) => String(url).endsWith("/novels/novel-1/nodes/node-1") && init?.method === "PATCH",
+      );
+      expect(renameCall).toBeTruthy();
+      expect(String(renameCall?.[1]?.body)).toContain("\"title\":\"第一章 即时保存\"");
+    });
+  });
+
   it("opens the Agent configuration tab for model profile setup", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -172,13 +242,23 @@ describe("WorkspacePage", () => {
             writing_model: "writing-model",
             summary_provider_kind: "openai",
             summary_model: "summary-model",
-            embedding_provider_kind: "openai-compatible",
-            embedding_model: "embedding-model",
+            embedding_provider_kind: "ollama",
+            embedding_model: "nomic-embed-text",
           }),
         );
       }
       if (url.endsWith("/model-profiles")) {
         return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith("/novels/novel-1") && init?.method === "PATCH") {
+        return Promise.resolve(
+          jsonResponse({
+            default_model_profile_id: "profile-created",
+            description: "",
+            id: "novel-1",
+            title: "Novel",
+          }),
+        );
       }
       return Promise.resolve(jsonResponse([]));
     });
@@ -210,6 +290,9 @@ describe("WorkspacePage", () => {
     await user.click(screen.getByRole("tab", { name: "向量" }));
     expect(screen.getByLabelText("向量场景供应商")).toBeInTheDocument();
     expect(screen.getByLabelText("向量 API Key")).toBeInTheDocument();
+    await user.click(screen.getByLabelText("向量场景供应商"));
+    await user.click(await screen.findByText("Ollama 本地"));
+    expect(screen.getByDisplayValue("nomic-embed-text")).toBeInTheDocument();
 
     await user.clear(screen.getByLabelText("配置名称"));
     await user.type(screen.getByLabelText("配置名称"), "多模型配置");
@@ -217,7 +300,7 @@ describe("WorkspacePage", () => {
     await user.type(screen.getByLabelText("默认 API Key"), "sk-default");
     await user.click(screen.getByRole("tab", { name: "对话" }));
     await user.click(screen.getByLabelText("对话场景供应商"));
-    await user.click(await screen.findByText("Anthropic"));
+    await user.click((await screen.findAllByText("Anthropic")).at(-1) as HTMLElement);
     await user.clear(screen.getByLabelText("对话 API Key"));
     await user.type(screen.getByLabelText("对话 API Key"), "sk-chat");
     await user.click(screen.getByRole("tab", { name: "写作" }));
@@ -228,7 +311,6 @@ describe("WorkspacePage", () => {
     await user.type(screen.getByLabelText("总结 API Key"), "sk-summary");
     await user.click(screen.getByRole("tab", { name: "向量" }));
     await user.clear(screen.getByLabelText("向量 API Key"));
-    await user.type(screen.getByLabelText("向量 API Key"), "sk-embedding");
     await user.click(screen.getByRole("button", { name: "保存 Agent 配置" }));
 
     await waitFor(() => {
@@ -236,7 +318,17 @@ describe("WorkspacePage", () => {
       expect(createCall).toBeTruthy();
       const body = String(createCall?.[1]?.body);
       expect(body).toContain("\"chat_provider_kind\":\"anthropic\"");
+      expect(body).toContain("\"embedding_provider_kind\":\"ollama\"");
+      expect(body).toContain("\"embedding_model\":\"nomic-embed-text\"");
+      expect(body).toContain("\"embedding_base_url\":\"http://ollama:11434\"");
       expect(body).toContain("sk-writing");
+    });
+    await waitFor(() => {
+      const updateNovelCall = fetchMock.mock.calls.find(
+        ([url, init]) => String(url).endsWith("/novels/novel-1") && init?.method === "PATCH",
+      );
+      expect(updateNovelCall).toBeTruthy();
+      expect(String(updateNovelCall?.[1]?.body)).toContain("\"default_model_profile_id\":\"profile-created\"");
     });
   });
 
@@ -261,6 +353,11 @@ describe("WorkspacePage", () => {
 
     expect(await screen.findByText("已引用选中段落")).toBeInTheDocument();
     expect(screen.getByText("被选中的段落")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-message-scroll")).toHaveStyle({
+      flex: "1 1 0",
+      minHeight: "0",
+      overflow: "auto",
+    });
     expect(screen.getByTestId("agent-input-shell")).toHaveStyle({ flexShrink: "0" });
     expect(screen.getByPlaceholderText("让 Agent 规划、改写、记录记忆或检索上下文")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "改写引用" }));

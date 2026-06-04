@@ -9,7 +9,7 @@ from app.db.session import get_session
 from app.models import RagChunk, User
 from app.schemas.rag import RagChunkResponse
 from app.services.novels import get_owned_novel
-from app.services.rag import search_rag_chunks
+from app.services.rag import get_embedding_model_profile, search_rag_chunks
 
 router = APIRouter(tags=["rag"])
 
@@ -22,5 +22,11 @@ async def search_rag(
     session: Annotated[AsyncSession, Depends(get_session)],
     limit: int = 8,
 ) -> list[RagChunk]:
-    await get_owned_novel(session, current_user, novel_id)
-    return await search_rag_chunks(session, novel_id=novel_id, query=query, limit=limit)
+    novel = await get_owned_novel(session, current_user, novel_id)
+    return await search_rag_chunks(
+        session,
+        novel_id=novel_id,
+        query=query,
+        limit=limit,
+        model_profile=await get_embedding_model_profile(session, novel),
+    )

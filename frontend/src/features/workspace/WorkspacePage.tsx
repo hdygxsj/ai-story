@@ -1,6 +1,6 @@
 import { Button, Card, Form, Input, List, Select, Space, Statistic, Tabs, Tag, Typography } from "antd";
-import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { AgentPanel } from "../agent/AgentPanel";
 import { DocumentEditor } from "../editor/DocumentEditor";
@@ -21,6 +21,7 @@ import {
 } from "../../api/materials";
 import type { ModelProfile } from "../../api/modelProfiles";
 import { createModelProfile, listModelProfiles } from "../../api/modelProfiles";
+import { updateNovel } from "../../api/novels";
 import type { WorkspaceNode } from "../../api/workspace";
 import { createWorkspaceNode, listWorkspaceNodes, reorderWorkspaceNodes, updateWorkspaceNode } from "../../api/workspace";
 
@@ -37,6 +38,21 @@ const providerOptions = [
   { label: "Anthropic", value: "anthropic" },
   { label: "OpenAI 兼容协议", value: "openai-compatible" },
 ];
+
+const embeddingProviderOptions = [...providerOptions, { label: "Ollama 本地", value: "ollama" }];
+const treePanelWidthStorageKey = "ai-story-workspace-tree-width";
+const defaultTreePanelWidth = 260;
+const minTreePanelWidth = 220;
+const maxTreePanelWidth = 480;
+
+function clampTreePanelWidth(width: number) {
+  return Math.min(maxTreePanelWidth, Math.max(minTreePanelWidth, Math.round(width)));
+}
+
+function initialTreePanelWidth() {
+  const stored = Number(window.localStorage.getItem(treePanelWidthStorageKey));
+  return Number.isFinite(stored) && stored > 0 ? clampTreePanelWidth(stored) : defaultTreePanelWidth;
+}
 
 function providerLabel(value?: string | null): string {
   return providerOptions.find((option) => option.value === value)?.label ?? value ?? "未配置";
@@ -87,6 +103,47 @@ export function WorkspacePage({ activeSection = "workspace", token, novelId }: W
   const [saving, setSaving] = useState(false);
   const [modelProfileSaving, setModelProfileSaving] = useState(false);
   const [modelProfileForm] = Form.useForm();
+  const [treePanelWidth, setTreePanelWidth] = useState(initialTreePanelWidth);
+  const treeResizeStart = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  function handleEmbeddingProviderChange(providerKind: string) {
+    if (providerKind !== "ollama") {
+      return;
+    }
+    modelProfileForm.setFieldsValue({
+      embedding_base_url: "http://ollama:11434",
+      embedding_model: "nomic-embed-text",
+    });
+  }
+
+  function handleTreeResizeStart(event: ReactMouseEvent<HTMLDivElement>) {
+    treeResizeStart.current = { startWidth: treePanelWidth, startX: event.clientX };
+    event.preventDefault();
+  }
+
+  useEffect(() => {
+    function handleMouseMove(event: MouseEvent) {
+      if (!treeResizeStart.current) {
+        return;
+      }
+      const nextWidth = clampTreePanelWidth(
+        treeResizeStart.current.startWidth + event.clientX - treeResizeStart.current.startX,
+      );
+      setTreePanelWidth(nextWidth);
+      window.localStorage.setItem(treePanelWidthStorageKey, String(nextWidth));
+    }
+
+    function handleMouseUp() {
+      treeResizeStart.current = null;
+    }
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -287,15 +344,16 @@ export function WorkspacePage({ activeSection = "workspace", token, novelId }: W
       });
       setModelProfiles((current) => [...current, profile]);
       setModelProfileCount((current) => current + 1);
+      await updateNovel(token, novelId, { default_model_profile_id: profile.id });
       modelProfileForm.resetFields();
     } finally {
       setModelProfileSaving(false);
     }
   }
 
-  async function handleCreateWorkspaceNode(nodeType: "chapter" | "folder") {
+  async function handleCreateWorkspaceNode(nodeType: "chapter" | "folder", parentId: string | null = null) {
     const title = nodeType === "chapter" ? "新章节" : "新文件夹";
-    const node = await createWorkspaceNode(token, novelId, title, nodeType);
+    const node = await createWorkspaceNode(token, novelId, title, nodeType, parentId);
     setNodes((current) => [...current, node]);
     if (node.document_id) {
       setDocumentId(node.document_id);
@@ -403,8 +461,8 @@ export function WorkspacePage({ activeSection = "workspace", token, novelId }: W
   const chapterTreePanel = (
     <WorkspaceTree
       nodes={nodes}
-      onCreateChapter={() => void handleCreateWorkspaceNode("chapter")}
-      onCreateFolder={() => void handleCreateWorkspaceNode("folder")}
+      onCreateChapter={(parentId) => void handleCreateWorkspaceNode("chapter", parentId ?? null)}
+      onCreateFolder={(parentId) => void handleCreateWorkspaceNode("folder", parentId ?? null)}
       onMoveNode={(nodeId, parentId, position) =>
         void handleUpdateWorkspaceNode(nodeId, { parent_id: parentId, position })
       }
@@ -451,13 +509,36 @@ export function WorkspacePage({ activeSection = "workspace", token, novelId }: W
           style={{
             display: "grid",
             gap: 14,
-            gridTemplateColumns: "clamp(220px, 18vw, 260px) minmax(0, 1fr) clamp(300px, 28vw, 390px)",
+            gridTemplateColumns: `${treePanelWidth}px 6px minmax(0, 1fr) clamp(300px, 28vw, 390px)`,
             minHeight: 0,
             minWidth: 0,
             overflow: "hidden",
           }}
         >
           {chapterTreePanel}
+          <div
+            aria-label="调整章节面板宽度"
+            role="separator"
+            aria-orientation="vertical"
+            onMouseDown={handleTreeResizeStart}
+            style={{
+              alignSelf: "stretch",
+              cursor: "col-resize",
+              marginInline: -4,
+              position: "relative",
+              zIndex: 2,
+            }}
+          >
+            <div
+              style={{
+                background: "rgba(15,23,42,0.08)",
+                borderRadius: 999,
+                height: "100%",
+                margin: "0 auto",
+                width: 2,
+              }}
+            />
+          </div>
           {centerContent}
           {agentPanel}
         </div>
@@ -611,7 +692,7 @@ export function WorkspacePage({ activeSection = "workspace", token, novelId }: W
               children: (
                 <>
                   <Form.Item label="向量场景供应商" name="embedding_provider_kind">
-                    <Select options={providerOptions} />
+                    <Select onChange={handleEmbeddingProviderChange} options={embeddingProviderOptions} />
                   </Form.Item>
                   <Form.Item label="向量模型" name="embedding_model" rules={[{ required: true, message: "请输入向量模型" }]}>
                     <Input />

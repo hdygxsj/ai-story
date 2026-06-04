@@ -14,6 +14,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5174",
     ]
     milvus_uri: str = "http://localhost:19530"
+    ollama_base_url: str = "http://localhost:11434"
     provider_api_key_encryption_secret: str = "local-provider-key-secret"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")

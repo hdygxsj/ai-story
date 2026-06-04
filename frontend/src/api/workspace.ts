@@ -23,11 +23,17 @@ export function listWorkspaceNodes(token: string, novelId: string) {
   return apiRequest<WorkspaceNode[]>(`/novels/${novelId}/nodes`, { token });
 }
 
-export function createWorkspaceNode(token: string, novelId: string, title: string, nodeType: string) {
+export function createWorkspaceNode(
+  token: string,
+  novelId: string,
+  title: string,
+  nodeType: string,
+  parentId: string | null = null,
+) {
   return apiRequest<WorkspaceNode>(`/novels/${novelId}/nodes`, {
     method: "POST",
     token,
-    body: JSON.stringify({ title, node_type: nodeType, parent_id: null }),
+    body: JSON.stringify({ title, node_type: nodeType, parent_id: parentId }),
   });
 }
 

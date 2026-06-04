@@ -264,6 +264,26 @@ describe("frontend data flow", () => {
     });
   });
 
+  it("creates a sibling chapter from a chapter context menu", async () => {
+    const user = userEvent.setup();
+
+    render(<WorkspacePage activeSection="workspace" token="token" novelId="novel-1" />);
+    await user.pointer({ keys: "[MouseRight]", target: await screen.findByText("Chapter From API") });
+    await user.click(await screen.findByRole("menuitem", { name: "新建章节" }));
+
+    await waitFor(() => {
+      const createCall = vi.mocked(fetch).mock.calls.find(
+        ([url, init]) => String(url).endsWith("/novels/novel-1/nodes") && init?.method === "POST",
+      );
+      expect(createCall).toBeTruthy();
+      expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({
+        node_type: "chapter",
+        parent_id: null,
+        title: "新章节",
+      });
+    });
+  });
+
   it("renames a workspace node from the chapter tree", async () => {
     const user = userEvent.setup();
 

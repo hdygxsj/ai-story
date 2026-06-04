@@ -68,7 +68,7 @@ export function NovelList({ token, novels = [], onNovelsChange, onSelectNovel }:
   async function handleImport(values: { importTitle: string; content: string }) {
     setImporting(true);
     try {
-      const novel = await importNovel(token, { title: values.importTitle, content: values.content, format: "markdown" });
+      const novel = await importNovel(token, { title: values.importTitle, content: values.content, format: "txt" });
       const nextNovels = [...localNovels, novel];
       setLocalNovels(nextNovels);
       onNovelsChange?.(nextNovels);
@@ -133,7 +133,7 @@ export function NovelList({ token, novels = [], onNovelsChange, onSelectNovel }:
             <Input aria-label="导入小说标题" placeholder="例如：海灯记" />
           </Form.Item>
           <Form.Item label="导入正文" name="content" rules={[{ required: true, message: "请粘贴正文内容" }]}>
-            <Input.TextArea aria-label="导入正文" autoSize={{ minRows: 8, maxRows: 14 }} placeholder="# 第一章&#10;正文内容..." />
+            <Input.TextArea aria-label="导入正文" autoSize={{ minRows: 8, maxRows: 14 }} placeholder="第一章&#10;正文内容..." />
           </Form.Item>
         </Form>
       </Modal>

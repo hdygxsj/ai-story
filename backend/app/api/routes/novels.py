@@ -10,9 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db.session import get_session
-from app.models import Document, DocumentVersion, Novel, User, WorkspaceNode
+from app.models import Document, DocumentVersion, ModelProfile, Novel, User, WorkspaceNode
 from app.schemas.document import DocumentResponse, DocumentUpdate, DocumentVersionResponse
-from app.schemas.novel import NovelCreate, NovelImport, NovelResponse
+from app.schemas.novel import NovelCreate, NovelImport, NovelResponse, NovelUpdate
 from app.schemas.workspace import (
     WorkspaceNodeCreate,
     WorkspaceNodeReorderRequest,
@@ -20,7 +20,7 @@ from app.schemas.workspace import (
     WorkspaceNodeUpdate,
 )
 from app.services.novels import get_owned_novel
-from app.services.rag import extract_text_from_prosemirror, index_text
+from app.services.rag import extract_text_from_prosemirror, get_embedding_model_profile, index_text
 
 router = APIRouter(tags=["novels"])
 
@@ -128,12 +128,35 @@ async def list_novels(
     return list(novels)
 
 
+@router.patch("/novels/{novel_id}", response_model=NovelResponse)
+async def update_novel(
+    novel_id: UUID,
+    payload: NovelUpdate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> Novel:
+    novel = await get_owned_novel(session, current_user, novel_id)
+    if payload.default_model_profile_id is not None:
+        model_profile = await session.scalar(
+            select(ModelProfile).where(
+                ModelProfile.id == payload.default_model_profile_id,
+                ModelProfile.owner_id == current_user.id,
+            )
+        )
+        if model_profile is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model profile not found")
+    novel.default_model_profile_id = payload.default_model_profile_id
+    await session.commit()
+    await session.refresh(novel)
+    return novel
+
+
 @router.get("/novels/{novel_id}/export")
 async def export_novel(
     novel_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
-    export_format: str = Query("markdown", alias="format"),
+    export_format: str = Query("txt", alias="format"),
 ) -> Response:
     novel = await get_owned_novel(session, current_user, novel_id)
     if export_format not in {"markdown", "txt"}:
@@ -188,10 +211,11 @@ async def create_node(
             select(WorkspaceNode).where(
                 WorkspaceNode.id == payload.parent_id,
                 WorkspaceNode.novel_id == novel.id,
+                WorkspaceNode.node_type == "folder",
             )
         )
         if parent is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent not found")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent folder not found")
 
     document_id = None
     if payload.node_type != "folder":
@@ -200,12 +224,21 @@ async def create_node(
         await session.flush()
         document_id = document.id
 
+    siblings = list(
+        await session.scalars(
+            select(WorkspaceNode).where(
+                WorkspaceNode.novel_id == novel.id,
+                WorkspaceNode.parent_id == payload.parent_id,
+            )
+        )
+    )
     node = WorkspaceNode(
         novel_id=novel.id,
         parent_id=payload.parent_id,
         document_id=document_id,
         title=payload.title,
         node_type=payload.node_type,
+        position=(max((sibling.position for sibling in siblings), default=-1) + 1),
     )
     session.add(node)
     await session.commit()
@@ -239,6 +272,39 @@ def _assert_no_workspace_cycles(nodes: dict[UUID, WorkspaceNode], parent_by_id: 
             parent_id = parent_by_id.get(parent_id, nodes[parent_id].parent_id if parent_id in nodes else None)
 
 
+def _sort_workspace_nodes(nodes: list[WorkspaceNode]) -> list[WorkspaceNode]:
+    return sorted(
+        nodes,
+        key=lambda node: (
+            "" if node.parent_id is None else str(node.parent_id),
+            node.position,
+            node.created_at,
+            str(node.id),
+        ),
+    )
+
+
+def _normalize_workspace_positions(
+    nodes: dict[UUID, WorkspaceNode],
+    parent_ids: set[UUID | None],
+    priority_by_id: dict[UUID, int] | None = None,
+) -> None:
+    priority_by_id = priority_by_id or {}
+    for parent_id in parent_ids:
+        siblings = [node for node in nodes.values() if node.parent_id == parent_id]
+        siblings.sort(
+            key=lambda node: (
+                node.position,
+                0 if node.id in priority_by_id else 1,
+                priority_by_id.get(node.id, 0),
+                node.created_at,
+                str(node.id),
+            )
+        )
+        for position, node in enumerate(siblings):
+            node.position = position
+
+
 @router.patch("/novels/{novel_id}/nodes/reorder", response_model=list[WorkspaceNodeResponse])
 async def reorder_nodes(
     novel_id: UUID,
@@ -259,7 +325,10 @@ async def reorder_nodes(
         )
 
     parent_by_id = {node_id: node.parent_id for node_id, node in nodes.items()}
+    affected_parent_ids: set[UUID | None] = set()
     for item in payload.items:
+        affected_parent_ids.add(nodes[item.id].parent_id)
+        affected_parent_ids.add(item.parent_id)
         parent_by_id[item.id] = item.parent_id
         if item.parent_id is not None:
             parent = nodes.get(item.parent_id)
@@ -279,6 +348,12 @@ async def reorder_nodes(
         if item.status is not None:
             node.status = item.status
 
+    _normalize_workspace_positions(
+        nodes,
+        affected_parent_ids,
+        priority_by_id={item.id: index for index, item in enumerate(payload.items)},
+    )
+
     await session.commit()
     updated_nodes = list(
         await session.scalars(
@@ -287,7 +362,7 @@ async def reorder_nodes(
             .order_by(WorkspaceNode.position, WorkspaceNode.created_at)
         )
     )
-    return updated_nodes
+    return _sort_workspace_nodes(updated_nodes)
 
 
 @router.patch("/novels/{novel_id}/nodes/{node_id}", response_model=WorkspaceNodeResponse)
@@ -308,6 +383,11 @@ async def update_node(
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
 
+    all_nodes = {
+        item.id: item
+        for item in await session.scalars(select(WorkspaceNode).where(WorkspaceNode.novel_id == novel.id))
+    }
+    old_parent_id = node.parent_id
     if payload.parent_id is not None:
         if payload.parent_id == node.id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Node cannot parent itself")
@@ -329,6 +409,13 @@ async def update_node(
     if payload.position is not None:
         node.position = payload.position
 
+    _assert_no_workspace_cycles(all_nodes, {item_id: item.parent_id for item_id, item in all_nodes.items()})
+    _normalize_workspace_positions(
+        all_nodes,
+        {old_parent_id, node.parent_id},
+        priority_by_id={node.id: 0} if payload.position is not None or old_parent_id != node.parent_id else {},
+    )
+
     await session.commit()
     await session.refresh(node)
     return node
@@ -343,7 +430,7 @@ async def get_document(
     document = await session.scalar(select(Document).where(Document.id == document_id))
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
-    await get_owned_novel(session, current_user, document.novel_id)
+    novel = await get_owned_novel(session, current_user, document.novel_id)
     return document
 
 
@@ -357,7 +444,7 @@ async def update_document(
     document = await session.scalar(select(Document).where(Document.id == document_id))
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
-    await get_owned_novel(session, current_user, document.novel_id)
+    novel = await get_owned_novel(session, current_user, document.novel_id)
 
     version = DocumentVersion(document_id=document.id, source="user", content=document.content)
     session.add(version)
@@ -368,6 +455,7 @@ async def update_document(
         source_type="document",
         source_id=str(document.id),
         text=extract_text_from_prosemirror(payload.content),
+        model_profile=await get_embedding_model_profile(session, novel),
     )
     await session.commit()
     await session.refresh(document)

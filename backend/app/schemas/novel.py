@@ -15,9 +15,14 @@ class NovelImport(BaseModel):
     description: str = ""
 
 
+class NovelUpdate(BaseModel):
+    default_model_profile_id: UUID | None = None
+
+
 class NovelResponse(BaseModel):
     id: UUID
     title: str
     description: str
+    default_model_profile_id: UUID | None
 
     model_config = ConfigDict(from_attributes=True)

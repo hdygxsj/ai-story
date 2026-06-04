@@ -43,6 +43,37 @@ def test_create_novel_chapter_and_update_document_version() -> None:
     assert len(versions.json()) == 1
 
 
+def test_update_novel_default_model_profile() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client, email="novel-profile@example.com", username="novelprofile")
+
+    novel = client.post("/novels", headers=headers, json={"title": "Profile Book"}).json()
+    profile = client.post(
+        "/model-profiles",
+        headers=headers,
+        json={
+            "name": "Local Vectors",
+            "provider_kind": "openai",
+            "api_key": "sk-default",
+            "chat_model": "gpt-4o",
+            "writing_model": "gpt-4o",
+            "summary_model": "gpt-4o-mini",
+            "embedding_provider_kind": "ollama",
+            "embedding_model": "nomic-embed-text",
+            "embedding_base_url": "http://ollama:11434",
+        },
+    ).json()
+
+    response = client.patch(
+        f"/novels/{novel['id']}",
+        headers=headers,
+        json={"default_model_profile_id": profile["id"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["default_model_profile_id"] == profile["id"]
+
+
 def test_folder_node_does_not_create_document() -> None:
     client = TestClient(app)
     headers = auth_headers(client, email="folder@example.com", username="folderuser")
@@ -56,6 +87,38 @@ def test_folder_node_does_not_create_document() -> None:
 
     assert folder.status_code == 201
     assert folder.json()["document_id"] is None
+
+
+def test_new_workspace_nodes_append_to_the_bottom_of_their_parent() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client, email="append@example.com", username="appenduser")
+
+    novel = client.post("/novels", headers=headers, json={"title": "Append Book"}).json()
+    first = client.post(
+        f"/novels/{novel['id']}/nodes",
+        headers=headers,
+        json={"title": "第一章", "node_type": "chapter", "parent_id": None},
+    ).json()
+    second = client.post(
+        f"/novels/{novel['id']}/nodes",
+        headers=headers,
+        json={"title": "第二章", "node_type": "chapter", "parent_id": None},
+    ).json()
+    folder = client.post(
+        f"/novels/{novel['id']}/nodes",
+        headers=headers,
+        json={"title": "草稿箱", "node_type": "folder", "parent_id": None},
+    ).json()
+    draft = client.post(
+        f"/novels/{novel['id']}/nodes",
+        headers=headers,
+        json={"title": "草稿一", "node_type": "chapter", "parent_id": folder["id"]},
+    ).json()
+
+    assert first["position"] == 0
+    assert second["position"] == 1
+    assert folder["position"] == 2
+    assert draft["position"] == 0
 
 
 def test_update_workspace_node_title_parent_and_position() -> None:
@@ -84,7 +147,7 @@ def test_update_workspace_node_title_parent_and_position() -> None:
     body = response.json()
     assert body["title"] == "第一章 雾港"
     assert body["parent_id"] == folder["id"]
-    assert body["position"] == 7
+    assert body["position"] == 0
 
 
 def test_bulk_reorder_workspace_nodes_moves_root_item_to_top_and_into_folder() -> None:
@@ -124,9 +187,46 @@ def test_bulk_reorder_workspace_nodes_moves_root_item_to_top_and_into_folder() -
     nodes = response.json()
     by_id = {node["id"]: node for node in nodes}
     assert by_id[second["id"]]["position"] == 0
+    assert by_id[folder["id"]]["position"] == 1
     assert by_id[first["id"]]["parent_id"] == folder["id"]
     assert by_id[first["id"]]["position"] == 0
     assert by_id[first["id"]]["status"] == "trashed"
+
+
+def test_bulk_reorder_normalizes_omitted_siblings_after_move() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client, email="normalize@example.com", username="normalizeuser")
+
+    novel = client.post("/novels", headers=headers, json={"title": "Normalize Book"}).json()
+    first = client.post(
+        f"/novels/{novel['id']}/nodes",
+        headers=headers,
+        json={"title": "第一章", "node_type": "chapter", "parent_id": None},
+    ).json()
+    second = client.post(
+        f"/novels/{novel['id']}/nodes",
+        headers=headers,
+        json={"title": "第二章", "node_type": "chapter", "parent_id": None},
+    ).json()
+    third = client.post(
+        f"/novels/{novel['id']}/nodes",
+        headers=headers,
+        json={"title": "第三章", "node_type": "chapter", "parent_id": None},
+    ).json()
+
+    response = client.patch(
+        f"/novels/{novel['id']}/nodes/reorder",
+        headers=headers,
+        json={"items": [{"id": third["id"], "parent_id": None, "position": 0}]},
+    )
+
+    assert response.status_code == 200
+    root_nodes = [node for node in response.json() if node["parent_id"] is None]
+    assert [(node["id"], node["position"]) for node in root_nodes] == [
+        (third["id"], 0),
+        (first["id"], 1),
+        (second["id"], 2),
+    ]
 
 
 def test_bulk_reorder_workspace_nodes_rejects_parent_cycles() -> None:
@@ -177,7 +277,7 @@ def test_import_markdown_novel_creates_chapter_nodes_and_documents() -> None:
     assert first_document["content"]["content"][0]["content"][0]["text"] == "开场内容。"
 
 
-def test_export_novel_as_markdown_includes_all_chapters_in_order() -> None:
+def test_export_novel_as_txt_includes_plain_chapters_in_order() -> None:
     client = TestClient(app)
     headers = auth_headers(client, email="export@example.com", username="exportuser")
     novel = client.post("/novels", headers=headers, json={"title": "导出的小说"}).json()
@@ -197,11 +297,12 @@ def test_export_novel_as_markdown_includes_all_chapters_in_order() -> None:
         },
     )
 
-    response = client.get(f"/novels/{novel['id']}/export?format=markdown", headers=headers)
+    response = client.get(f"/novels/{novel['id']}/export?format=txt", headers=headers)
 
     assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/markdown")
-    assert "# 第一章 雾港" in response.text
+    assert response.headers["content-type"].startswith("text/plain")
+    assert "第一章 雾港" in response.text
+    assert "# 第一章 雾港" not in response.text
     assert "开场内容。" in response.text
 
 

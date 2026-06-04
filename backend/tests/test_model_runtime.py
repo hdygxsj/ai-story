@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from app.agent.model_runtime import build_chat_model
+from app.agent.model_runtime import build_chat_model, embed_with_model_profile
 from app.core.crypto import decrypt_api_key, encrypt_api_key
 from app.main import app
 from app.models import ModelProfile
@@ -100,6 +100,54 @@ def test_provider_factory_uses_purpose_specific_provider_kind() -> None:
     assert chat_model.model == "claude-3-5-sonnet-latest"
     assert writing_model.model_name == "writing-model"
     assert str(writing_model.openai_api_base) == "https://writing.example/v1"
+
+
+async def test_ollama_embedding_provider_calls_local_embeddings_endpoint(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"embedding": [0.1, 0.2, 0.3]}
+
+    class FakeClient:
+        def __init__(self, **_: object) -> None:
+            return None
+
+        async def __aenter__(self) -> "FakeClient":
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def post(self, url: str, json: dict[str, object], headers: dict[str, str] | None = None) -> FakeResponse:
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return FakeResponse()
+
+    monkeypatch.setattr("app.agent.model_runtime.httpx.AsyncClient", FakeClient)
+    profile = ModelProfile(
+        owner_id="00000000-0000-0000-0000-000000000001",
+        name="Local Ollama",
+        provider_kind="openai-compatible",
+        api_key_ciphertext=encrypt_api_key("sk-default"),
+        chat_model="chat-model",
+        writing_model="writing-model",
+        summary_model="summary-model",
+        embedding_provider_kind="ollama",
+        embedding_model="nomic-embed-text",
+        embedding_base_url="http://ollama:11434",
+    )
+
+    vector = await embed_with_model_profile(profile, "lighthouse map")
+
+    assert vector == [0.1, 0.2, 0.3]
+    assert captured["url"] == "http://ollama:11434/api/embeddings"
+    assert captured["json"] == {"model": "nomic-embed-text", "prompt": "lighthouse map"}
+    assert captured["headers"] is None
 
 
 def test_model_profile_route_encrypts_api_key_before_storage() -> None:

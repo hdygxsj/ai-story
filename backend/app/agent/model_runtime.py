@@ -1,16 +1,20 @@
 from typing import Literal
 
+import httpx
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
+from app.core.config import settings
 from app.core.crypto import decrypt_api_key
 from app.models import ModelProfile
 
-ModelPurpose = Literal["chat", "writing", "summary"]
+ModelPurpose = Literal["chat", "writing", "summary", "embedding"]
 
 
 def _model_name(profile: ModelProfile, purpose: ModelPurpose) -> str:
+    if purpose == "embedding":
+        return profile.embedding_model
     if purpose == "writing":
         return profile.writing_model
     if purpose == "summary":
@@ -19,6 +23,8 @@ def _model_name(profile: ModelProfile, purpose: ModelPurpose) -> str:
 
 
 def _api_key_ciphertext(profile: ModelProfile, purpose: ModelPurpose) -> str:
+    if purpose == "embedding" and profile.embedding_api_key_ciphertext:
+        return profile.embedding_api_key_ciphertext
     if purpose == "writing" and profile.writing_api_key_ciphertext:
         return profile.writing_api_key_ciphertext
     if purpose == "summary" and profile.summary_api_key_ciphertext:
@@ -29,6 +35,8 @@ def _api_key_ciphertext(profile: ModelProfile, purpose: ModelPurpose) -> str:
 
 
 def _base_url(profile: ModelProfile, purpose: ModelPurpose) -> str | None:
+    if purpose == "embedding" and profile.embedding_base_url:
+        return profile.embedding_base_url
     if purpose == "writing" and profile.writing_base_url:
         return profile.writing_base_url
     if purpose == "summary" and profile.summary_base_url:
@@ -39,6 +47,8 @@ def _base_url(profile: ModelProfile, purpose: ModelPurpose) -> str | None:
 
 
 def _provider_kind(profile: ModelProfile, purpose: ModelPurpose) -> str:
+    if purpose == "embedding" and profile.embedding_provider_kind:
+        return profile.embedding_provider_kind
     if purpose == "writing" and profile.writing_provider_kind:
         return profile.writing_provider_kind
     if purpose == "summary" and profile.summary_provider_kind:
@@ -74,3 +84,42 @@ def build_chat_model(profile: ModelProfile, purpose: ModelPurpose = "chat") -> B
         return ChatOpenAI(**kwargs)
 
     raise ValueError(f"Unsupported model provider: {provider_kind}")
+
+
+async def embed_with_model_profile(profile: ModelProfile, text: str) -> list[float]:
+    model_name = _model_name(profile, "embedding")
+    provider_kind = _provider_kind(profile, "embedding").lower()
+
+    if provider_kind == "ollama":
+        base_url = (_base_url(profile, "embedding") or settings.ollama_base_url).rstrip("/")
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                f"{base_url}/api/embeddings",
+                json={"model": model_name, "prompt": text},
+            )
+        response.raise_for_status()
+        embedding = response.json().get("embedding")
+        if not isinstance(embedding, list):
+            raise ValueError("Ollama embedding response did not include an embedding vector")
+        return [float(value) for value in embedding]
+
+    if provider_kind in {"openai", "openai-compatible", "openai_compatible"}:
+        base_url = (_base_url(profile, "embedding") or "https://api.openai.com/v1").rstrip("/")
+        api_key = decrypt_api_key(_api_key_ciphertext(profile, "embedding"))
+        headers = {"Authorization": f"Bearer {api_key}"}
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                f"{base_url}/embeddings",
+                json={"model": model_name, "input": text},
+                headers=headers,
+            )
+        response.raise_for_status()
+        data = response.json().get("data")
+        if not isinstance(data, list) or not data:
+            raise ValueError("Embedding response did not include data")
+        embedding = data[0].get("embedding") if isinstance(data[0], dict) else None
+        if not isinstance(embedding, list):
+            raise ValueError("Embedding response did not include an embedding vector")
+        return [float(value) for value in embedding]
+
+    raise ValueError(f"Unsupported embedding provider: {provider_kind}")

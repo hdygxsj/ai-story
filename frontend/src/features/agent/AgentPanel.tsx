@@ -115,19 +115,21 @@ export function AgentPanel({
       }}
       styles={{ body: { display: "flex", flex: 1, flexDirection: "column", gap: 16, minHeight: 0, overflow: "hidden" } }}
     >
-      <Bubble.List
-        autoScroll
-        items={messages.map((item, index) => ({
-          key: `${item.role}-${index}`,
-          role: item.role === "assistant" ? "ai" : "user",
-          content: item.content,
-        }))}
-        role={{
-          ai: { placement: "start", variant: "shadow" },
-          user: { placement: "end", variant: "filled" },
-        }}
-        style={{ flex: "1 1 0", minHeight: 120, overflow: "auto" }}
-      />
+      <div data-testid="agent-message-scroll" style={{ flex: "1 1 0", minHeight: 0, overflow: "auto" }}>
+        <Bubble.List
+          autoScroll
+          items={messages.map((item, index) => ({
+            key: `${item.role}-${index}`,
+            role: item.role === "assistant" ? "ai" : "user",
+            content: item.content,
+          }))}
+          role={{
+            ai: { placement: "start", variant: "shadow" },
+            user: { placement: "end", variant: "filled" },
+          }}
+          style={{ minHeight: 0 }}
+        />
+      </div>
       {error ? <Alert message={error} showIcon style={{ flexShrink: 0 }} type="error" /> : null}
       {workspaceDiff ? (
         <div
