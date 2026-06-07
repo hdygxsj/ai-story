@@ -36,8 +36,44 @@ export function listModelProfiles(token: string) {
   return apiRequest<ModelProfile[]>("/model-profiles", { token });
 }
 
+export type ModelProfileUpdate = Partial<ModelProfileCreate>;
+
 export function createModelProfile(token: string, payload: ModelProfileCreate) {
   return apiRequest<ModelProfile>("/model-profiles", {
+    method: "POST",
+    token,
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateModelProfile(token: string, profileId: string, payload: ModelProfileUpdate) {
+  return apiRequest<ModelProfile>(`/model-profiles/${profileId}`, {
+    method: "PATCH",
+    token,
+    body: JSON.stringify(payload),
+  });
+}
+
+export type ModelProfileConnectivityResult = {
+  purpose: string;
+  label: string;
+  ok: boolean;
+  message: string;
+  model: string;
+};
+
+export type ModelProfileTestPayload = Partial<ModelProfileCreate> & {
+  profile_id?: string | null;
+  chat_model: string;
+  embedding_model: string;
+  name: string;
+  provider_kind: string;
+  summary_model: string;
+  writing_model: string;
+};
+
+export function testModelProfileConnectivity(token: string, payload: ModelProfileTestPayload) {
+  return apiRequest<{ results: ModelProfileConnectivityResult[] }>("/model-profiles/test-connectivity", {
     method: "POST",
     token,
     body: JSON.stringify(payload),

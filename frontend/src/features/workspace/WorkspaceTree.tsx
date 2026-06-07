@@ -1,4 +1,4 @@
-import { DeleteOutlined, EditOutlined, FileTextOutlined, FolderOutlined, PlusOutlined, UndoOutlined } from "@ant-design/icons";
+import { FileTextOutlined, FolderOutlined, PlusOutlined, UndoOutlined } from "@ant-design/icons";
 import { Button, Dropdown, Input, Modal, Space, Tree, Typography } from "antd";
 import type { MenuProps } from "antd";
 import { useMemo, useState } from "react";
@@ -11,6 +11,7 @@ type WorkspaceTreeProps = {
   onMoveNode?: (nodeId: string, parentId: string | null, position: number) => void;
   onReorderNodes?: (changes: WorkspaceNodePositionChange[]) => void;
   onRenameNode?: (nodeId: string, title: string) => void;
+  onExportNode?: (nodeId: string, title: string) => void;
   onRestoreNode?: (nodeId: string) => void;
   onSelectDocument?: (documentId: string) => void;
   onTrashNode?: (nodeId: string) => void;
@@ -128,6 +129,7 @@ export function WorkspaceTree({
   onCreateFolder,
   onMoveNode,
   onReorderNodes,
+  onExportNode,
   onRenameNode,
   onRestoreNode,
   onSelectDocument,
@@ -172,11 +174,40 @@ export function WorkspaceTree({
     return node.node_type === "folder" ? node.id : node.parent_id;
   }
 
+  function createNodeContextMenu(node: WorkspaceNode): MenuProps {
+    const parentId = contextParentId(node);
+    return {
+      items: [
+        { key: "chapter", label: "新建章节" },
+        { key: "folder", label: "新建文件夹" },
+        { type: "divider" },
+        { key: "export", label: "导出 TXT" },
+        { key: "rename", label: "重命名" },
+        { danger: true, key: "trash", label: "删除" },
+      ],
+      onClick: ({ domEvent, key }) => {
+        domEvent.stopPropagation();
+        if (key === "chapter") {
+          onCreateChapter?.(parentId);
+        } else if (key === "folder") {
+          onCreateFolder?.(parentId);
+        } else if (key === "export") {
+          onExportNode?.(node.id, node.title);
+        } else if (key === "rename") {
+          setRenamingNode(node);
+          setRenameTitle(node.title);
+        } else if (key === "trash") {
+          onTrashNode?.(node.id);
+        }
+      },
+    };
+  }
+
   function buildTree(parentId: string | null): Array<Record<string, unknown>> {
     return (childrenByParent.get(parentId) ?? []).map((node) => ({
       key: node.id,
       title: (
-        <Dropdown menu={createContextMenu(contextParentId(node))} trigger={["contextMenu"]}>
+        <Dropdown menu={createNodeContextMenu(node)} trigger={["contextMenu"]}>
           <span
             onContextMenu={(event) => event.stopPropagation()}
             style={{ alignItems: "center", display: "inline-flex", gap: 6, maxWidth: "100%", minWidth: 0, width: "100%" }}
@@ -197,29 +228,6 @@ export function WorkspaceTree({
             >
               {node.title}
             </span>
-            <Button
-              aria-label={`重命名 ${node.title}`}
-              icon={<EditOutlined />}
-              style={{ flexShrink: 0 }}
-              onClick={(event) => {
-                event.stopPropagation();
-                setRenamingNode(node);
-                setRenameTitle(node.title);
-              }}
-              size="small"
-              type="text"
-            />
-            <Button
-              aria-label={`删除 ${node.title}`}
-              icon={<DeleteOutlined />}
-              style={{ flexShrink: 0 }}
-              onClick={(event) => {
-                event.stopPropagation();
-                onTrashNode?.(node.id);
-              }}
-              size="small"
-              type="text"
-            />
           </span>
         </Dropdown>
       ),
@@ -262,14 +270,11 @@ export function WorkspaceTree({
             </Typography.Title>
             <Typography.Text type="secondary">章节、草稿和笔记</Typography.Text>
           </div>
-          <Space>
-            <Button icon={<PlusOutlined />} onClick={() => onCreateChapter?.(null)} size="small" type="primary">
-              新建章节
+          <Dropdown menu={createContextMenu(null)} trigger={["click"]}>
+            <Button icon={<PlusOutlined />} size="small" type="primary">
+              新建
             </Button>
-            <Button icon={<FolderOutlined />} onClick={() => onCreateFolder?.(null)} size="small">
-              文件夹
-            </Button>
-          </Space>
+          </Dropdown>
           <Tree
             blockNode
             defaultExpandAll

@@ -74,11 +74,57 @@ describe("calculateWorkspaceDrop", () => {
     const user = userEvent.setup();
     render(<WorkspaceTree nodes={nodes} />);
 
-    await user.click(screen.getByRole("button", { name: "重命名 资料" }));
+    await user.pointer({ keys: "[MouseRight]", target: screen.getByText("资料") });
+    await user.click(await screen.findByRole("menuitem", { name: "重命名" }));
 
     expect(screen.getByText("重命名文件夹")).toBeInTheDocument();
     expect(screen.getByLabelText("文件夹名称")).toHaveValue("资料");
     expect(screen.queryByText("重命名章节")).not.toBeInTheDocument();
+  });
+
+  it("moves rename and delete actions into the node context menu", async () => {
+    const user = userEvent.setup();
+    const onTrashNode = vi.fn();
+    render(<WorkspaceTree nodes={nodes} onTrashNode={onTrashNode} />);
+
+    expect(screen.queryByRole("button", { name: "重命名 第一章" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "删除 第一章" })).not.toBeInTheDocument();
+
+    await user.pointer({ keys: "[MouseRight]", target: screen.getByText("第一章") });
+    await user.click(await screen.findByRole("menuitem", { name: "删除" }));
+
+    expect(onTrashNode).toHaveBeenCalledWith("chapter-1");
+  });
+
+  it("creates nodes from the toolbar button", async () => {
+    const user = userEvent.setup();
+    const onCreateChapter = vi.fn();
+    const onCreateFolder = vi.fn();
+    render(<WorkspaceTree nodes={nodes} onCreateChapter={onCreateChapter} onCreateFolder={onCreateFolder} />);
+
+    await user.click(screen.getByRole("button", { name: /新建/ }));
+    await user.click(await screen.findByRole("menuitem", { name: "新建章节" }));
+
+    expect(onCreateChapter).toHaveBeenCalledWith(null);
+
+    await user.click(screen.getByRole("button", { name: /新建/ }));
+    await user.click(await screen.findByRole("menuitem", { name: "新建文件夹" }));
+
+    expect(onCreateFolder).toHaveBeenCalledWith(null);
+  });
+
+  it("exports chapters and folders from the node context menu", async () => {
+    const user = userEvent.setup();
+    const onExportNode = vi.fn();
+    render(<WorkspaceTree nodes={nodes} onExportNode={onExportNode} />);
+
+    await user.pointer({ keys: "[MouseRight]", target: screen.getByText("资料") });
+    await user.click(await screen.findByRole("menuitem", { name: "导出 TXT" }));
+    expect(onExportNode).toHaveBeenCalledWith("folder-1", "资料");
+
+    await user.pointer({ keys: "[MouseRight]", target: screen.getByText("第一章") });
+    await user.click(await screen.findByRole("menuitem", { name: "导出 TXT" }));
+    expect(onExportNode).toHaveBeenCalledWith("chapter-1", "第一章");
   });
 
   it("creates nodes from a folder context menu", async () => {

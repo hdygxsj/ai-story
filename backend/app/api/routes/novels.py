@@ -151,6 +151,51 @@ async def update_novel(
     return novel
 
 
+def _format_export_heading(title: str, export_format: str, depth: int = 0) -> str:
+    if export_format == "markdown":
+        level = min(1 + depth, 3)
+        return f"{'#' * level} {title}"
+    return title
+
+
+def _sorted_active_children(nodes: list[WorkspaceNode], parent_id: UUID | None) -> list[WorkspaceNode]:
+    return sorted(
+        [node for node in nodes if node.parent_id == parent_id and node.status != "trashed"],
+        key=lambda node: (node.position, node.created_at, str(node.id)),
+    )
+
+
+def _collect_export_sections(
+    nodes: list[WorkspaceNode],
+    documents: dict[UUID, Document],
+    parent_id: UUID | None,
+    export_format: str,
+    *,
+    depth: int = 0,
+) -> list[str]:
+    sections: list[str] = []
+    for node in _sorted_active_children(nodes, parent_id):
+        if node.node_type == "folder":
+            sections.append(_format_export_heading(node.title, export_format, depth).strip())
+            sections.extend(_collect_export_sections(nodes, documents, node.id, export_format, depth=depth + 1))
+            continue
+        document = documents.get(node.document_id)
+        body = extract_text_from_prosemirror(document.content) if document else ""
+        prefix = _format_export_heading(node.title, export_format, depth)
+        sections.append(f"{prefix}\n\n{body}".strip())
+    return sections
+
+
+def _build_export_response(content: str, filename_stem: str, export_format: str) -> Response:
+    media_type = "text/markdown; charset=utf-8" if export_format == "markdown" else "text/plain; charset=utf-8"
+    filename = quote(f"{filename_stem}.{'md' if export_format == 'markdown' else 'txt'}")
+    return Response(
+        content,
+        media_type=media_type,
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+    )
+
+
 @router.get("/novels/{novel_id}/export")
 async def export_novel(
     novel_id: UUID,
@@ -185,13 +230,49 @@ async def export_novel(
         prefix = f"# {node.title}" if export_format == "markdown" else node.title
         sections.append(f"{prefix}\n\n{body}".strip())
 
-    media_type = "text/markdown; charset=utf-8" if export_format == "markdown" else "text/plain; charset=utf-8"
-    filename = quote(f"{novel.title}.{'md' if export_format == 'markdown' else 'txt'}")
-    return Response(
-        "\n\n".join(sections),
-        media_type=media_type,
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+    return _build_export_response("\n\n".join(sections), novel.title, export_format)
+
+
+@router.get("/novels/{novel_id}/nodes/{node_id}/export")
+async def export_workspace_node(
+    novel_id: UUID,
+    node_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    export_format: str = Query("txt", alias="format"),
+) -> Response:
+    novel = await get_owned_novel(session, current_user, novel_id)
+    if export_format not in {"markdown", "txt"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported export format")
+
+    node = await session.scalar(
+        select(WorkspaceNode).where(
+            WorkspaceNode.id == node_id,
+            WorkspaceNode.novel_id == novel.id,
+        )
     )
+    if node is None or node.status == "trashed":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+
+    all_nodes = list(
+        await session.scalars(select(WorkspaceNode).where(WorkspaceNode.novel_id == novel.id))
+    )
+    document_ids = [item.document_id for item in all_nodes if item.document_id is not None]
+    documents = {
+        document.id: document
+        for document in await session.scalars(select(Document).where(Document.id.in_(document_ids)))
+    }
+
+    if node.node_type == "folder":
+        sections = [_format_export_heading(node.title, export_format, 0).strip()]
+        sections.extend(_collect_export_sections(all_nodes, documents, node.id, export_format, depth=1))
+    else:
+        document = documents.get(node.document_id)
+        body = extract_text_from_prosemirror(document.content) if document else ""
+        prefix = _format_export_heading(node.title, export_format, 0)
+        sections = [f"{prefix}\n\n{body}".strip()]
+
+    return _build_export_response("\n\n".join(section for section in sections if section), node.title, export_format)
 
 
 @router.post(

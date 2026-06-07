@@ -64,10 +64,12 @@ describe("App", () => {
     expect(screen.getByRole("menuitem", { name: "记忆" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "确认" })).not.toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "素材" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "时间线" })).toBeInTheDocument();
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
       "工作台",
       "记忆",
       "素材",
+      "时间线",
       "Agent配置",
     ]);
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
@@ -115,6 +117,9 @@ describe("App", () => {
 
     await user.click(screen.getByRole("menuitem", { name: "素材" }));
     expect(window.location.pathname).toBe("/materials");
+
+    await user.click(screen.getByRole("menuitem", { name: "时间线" }));
+    expect(window.location.pathname).toBe("/timeline");
 
     await user.click(screen.getByRole("menuitem", { name: "Agent配置" }));
     expect(window.location.pathname).toBe("/agent-config");

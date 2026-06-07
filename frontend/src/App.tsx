@@ -15,6 +15,7 @@ const workspaceMenuItems: { key: WorkspaceSection; label: string }[] = [
   { key: "workspace", label: "工作台" },
   { key: "memory", label: "记忆" },
   { key: "materials", label: "素材" },
+  { key: "timeline", label: "时间线" },
   { key: "agent-config", label: "Agent配置" },
 ];
 
@@ -40,6 +41,7 @@ const sectionPathByKey: Record<WorkspaceSection | "novels", string> = {
   materials: "/materials",
   memory: "/memory",
   novels: "/novels",
+  timeline: "/timeline",
   workspace: "/workspace",
 };
 
@@ -53,6 +55,9 @@ function sectionFromPath(pathname: string): WorkspaceSection | "novels" {
   }
   if (normalized === "/materials") {
     return "materials";
+  }
+  if (normalized === "/timeline") {
+    return "timeline";
   }
   if (normalized === "/confirmations") {
     return "confirmations";
@@ -397,7 +402,19 @@ export function App() {
               <NovelList novels={novels} token={token} onNovelsChange={setNovels} onSelectNovel={handleSelectNovel} />
             ) : null}
             {token && novelId && activeSection !== "novels" ? (
-              <WorkspacePage activeSection={activeSection} token={token} novelId={novelId} />
+              <WorkspacePage
+                activeSection={activeSection}
+                defaultModelProfileId={selectedNovel?.default_model_profile_id ?? null}
+                novelId={novelId}
+                onDefaultModelProfileChange={(profileId) => {
+                  setNovels((current) =>
+                    current.map((novel) =>
+                      novel.id === novelId ? { ...novel, default_model_profile_id: profileId } : novel,
+                    ),
+                  );
+                }}
+                token={token}
+              />
             ) : null}
           </Layout.Content>
         </Layout>

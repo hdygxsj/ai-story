@@ -1,4 +1,4 @@
-import { Button, Card, Form, Input, List, Select, Space, Statistic, Tabs, Tag, Typography } from "antd";
+import { Button, Card, Empty, Form, Input, List, message, Select, Space, Statistic, Tabs, Tag, Timeline, Typography } from "antd";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 
@@ -20,18 +20,32 @@ import {
   listTimelineEvents,
 } from "../../api/materials";
 import type { ModelProfile } from "../../api/modelProfiles";
-import { createModelProfile, listModelProfiles } from "../../api/modelProfiles";
+import type { ModelProfileConnectivityResult } from "../../api/modelProfiles";
+import {
+  createModelProfile,
+  listModelProfiles,
+  testModelProfileConnectivity,
+  updateModelProfile,
+} from "../../api/modelProfiles";
 import { updateNovel } from "../../api/novels";
 import type { WorkspaceNode } from "../../api/workspace";
-import { createWorkspaceNode, listWorkspaceNodes, reorderWorkspaceNodes, updateWorkspaceNode } from "../../api/workspace";
+import {
+  createWorkspaceNode,
+  exportWorkspaceNode,
+  listWorkspaceNodes,
+  reorderWorkspaceNodes,
+  updateWorkspaceNode,
+} from "../../api/workspace";
 
 type WorkspacePageProps = {
   activeSection?: WorkspaceSection;
+  defaultModelProfileId?: string | null;
+  onDefaultModelProfileChange?: (profileId: string | null) => void;
   token: string;
   novelId: string;
 };
 
-export type WorkspaceSection = "workspace" | "agent-config" | "memory" | "confirmations" | "materials";
+export type WorkspaceSection = "workspace" | "agent-config" | "memory" | "confirmations" | "materials" | "timeline";
 
 const providerOptions = [
   { label: "OpenAI", value: "openai" },
@@ -40,6 +54,39 @@ const providerOptions = [
 ];
 
 const embeddingProviderOptions = [...providerOptions, { label: "Ollama 本地", value: "ollama" }];
+
+const defaultModelProfileFormValues = {
+  chat_model: "gpt-4o",
+  chat_provider_kind: "openai",
+  embedding_model: "text-embedding-3-small",
+  embedding_provider_kind: "openai",
+  name: "默认 OpenAI",
+  provider_kind: "openai",
+  summary_model: "gpt-4o-mini",
+  summary_provider_kind: "openai",
+  writing_model: "gpt-4o",
+  writing_provider_kind: "openai",
+};
+
+function profileToFormValues(profile: ModelProfile) {
+  return {
+    base_url: profile.base_url ?? undefined,
+    chat_base_url: profile.chat_base_url ?? undefined,
+    chat_model: profile.chat_model,
+    chat_provider_kind: profile.chat_provider_kind ?? undefined,
+    embedding_base_url: profile.embedding_base_url ?? undefined,
+    embedding_model: profile.embedding_model,
+    embedding_provider_kind: profile.embedding_provider_kind ?? undefined,
+    name: profile.name,
+    provider_kind: profile.provider_kind,
+    summary_base_url: profile.summary_base_url ?? undefined,
+    summary_model: profile.summary_model,
+    summary_provider_kind: profile.summary_provider_kind ?? undefined,
+    writing_base_url: profile.writing_base_url ?? undefined,
+    writing_model: profile.writing_model,
+    writing_provider_kind: profile.writing_provider_kind ?? undefined,
+  };
+}
 const treePanelWidthStorageKey = "ai-story-workspace-tree-width";
 const defaultTreePanelWidth = 260;
 const minTreePanelWidth = 220;
@@ -82,7 +129,13 @@ function extractDocumentText(content: DocumentBody | null): string {
   return parts.join("");
 }
 
-export function WorkspacePage({ activeSection = "workspace", token, novelId }: WorkspacePageProps) {
+export function WorkspacePage({
+  activeSection = "workspace",
+  defaultModelProfileId = null,
+  onDefaultModelProfileChange,
+  token,
+  novelId,
+}: WorkspacePageProps) {
   const [nodes, setNodes] = useState<WorkspaceNode[]>([]);
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [document, setDocument] = useState<DocumentRecord | null>(null);
@@ -102,6 +155,9 @@ export function WorkspacePage({ activeSection = "workspace", token, novelId }: W
   const [workspaceDiff, setWorkspaceDiff] = useState<WorkspaceDiff | null>(null);
   const [saving, setSaving] = useState(false);
   const [modelProfileSaving, setModelProfileSaving] = useState(false);
+  const [connectivityTesting, setConnectivityTesting] = useState(false);
+  const [connectivityResults, setConnectivityResults] = useState<ModelProfileConnectivityResult[]>([]);
+  const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [modelProfileForm] = Form.useForm();
   const [treePanelWidth, setTreePanelWidth] = useState(initialTreePanelWidth);
   const treeResizeStart = useRef<{ startX: number; startWidth: number } | null>(null);
@@ -297,8 +353,8 @@ export function WorkspacePage({ activeSection = "workspace", token, novelId }: W
     setDocumentId(nextDocumentId);
   }
 
-  async function handleCreateModelProfile(values: {
-    api_key: string;
+  function buildModelProfilePayload(values: {
+    api_key?: string;
     base_url?: string;
     chat_api_key?: string;
     chat_base_url?: string;
@@ -319,36 +375,160 @@ export function WorkspacePage({ activeSection = "workspace", token, novelId }: W
     writing_model: string;
     writing_provider_kind?: string;
   }) {
+    const payload = {
+      ...values,
+      base_url: values.base_url || null,
+      chat_base_url: values.chat_base_url || null,
+      chat_provider_kind: values.chat_provider_kind || null,
+      embedding_base_url: values.embedding_base_url || null,
+      embedding_provider_kind: values.embedding_provider_kind || null,
+      summary_base_url: values.summary_base_url || null,
+      summary_provider_kind: values.summary_provider_kind || null,
+      writing_base_url: values.writing_base_url || null,
+      writing_provider_kind: values.writing_provider_kind || null,
+    };
+    if (values.api_key) {
+      payload.api_key = values.api_key;
+    }
+    if (values.chat_api_key) {
+      payload.chat_api_key = values.chat_api_key;
+    }
+    if (values.embedding_api_key) {
+      payload.embedding_api_key = values.embedding_api_key;
+    }
+    if (values.summary_api_key) {
+      payload.summary_api_key = values.summary_api_key;
+    }
+    if (values.writing_api_key) {
+      payload.writing_api_key = values.writing_api_key;
+    }
+    return payload;
+  }
+
+  async function handleSaveModelProfile(values: {
+    api_key?: string;
+    base_url?: string;
+    chat_api_key?: string;
+    chat_base_url?: string;
+    chat_model: string;
+    chat_provider_kind?: string;
+    embedding_api_key?: string;
+    embedding_base_url?: string;
+    embedding_model: string;
+    embedding_provider_kind?: string;
+    name: string;
+    provider_kind: string;
+    summary_api_key?: string;
+    summary_base_url?: string;
+    summary_model: string;
+    summary_provider_kind?: string;
+    writing_api_key?: string;
+    writing_base_url?: string;
+    writing_model: string;
+    writing_provider_kind?: string;
+  }) {
+    if (!editingProfileId && !values.api_key) {
+      message.error("新建配置时请填写默认 API Key");
+      return;
+    }
+
     setModelProfileSaving(true);
     try {
-      const profile = await createModelProfile(token, {
-        ...values,
-        base_url: values.base_url || null,
-        chat_api_key: values.chat_api_key || null,
-        chat_base_url: values.chat_base_url || null,
-        chat_provider_kind: values.chat_provider_kind || null,
-        context_window: 128000,
-        embedding_api_key: values.embedding_api_key || null,
-        embedding_base_url: values.embedding_base_url || null,
-        embedding_dimensions: 1536,
-        embedding_provider_kind: values.embedding_provider_kind || null,
-        summary_api_key: values.summary_api_key || null,
-        summary_base_url: values.summary_base_url || null,
-        summary_provider_kind: values.summary_provider_kind || null,
-        supports_json_mode: true,
-        supports_streaming: true,
-        supports_tool_calling: true,
-        writing_api_key: values.writing_api_key || null,
-        writing_base_url: values.writing_base_url || null,
-        writing_provider_kind: values.writing_provider_kind || null,
-      });
-      setModelProfiles((current) => [...current, profile]);
-      setModelProfileCount((current) => current + 1);
-      await updateNovel(token, novelId, { default_model_profile_id: profile.id });
-      modelProfileForm.resetFields();
+      const wasEditing = Boolean(editingProfileId);
+      const payload = buildModelProfilePayload(values);
+      const profile = editingProfileId
+        ? await updateModelProfile(token, editingProfileId, payload)
+        : await createModelProfile(token, {
+            ...payload,
+            api_key: values.api_key as string,
+            context_window: 128000,
+            embedding_dimensions: 1536,
+            supports_json_mode: true,
+            supports_streaming: true,
+            supports_tool_calling: true,
+          });
+      setModelProfiles((current) =>
+        wasEditing
+          ? current.map((item) => (item.id === profile.id ? profile : item))
+          : [...current, profile],
+      );
+      if (!wasEditing) {
+        setModelProfileCount((current) => current + 1);
+      }
+      await handleSelectDefaultModelProfile(profile.id);
+      setEditingProfileId(profile.id);
+      modelProfileForm.setFieldsValue(profileToFormValues(profile));
+      message.success(wasEditing ? "模型配置已更新" : "模型配置已保存");
     } finally {
       setModelProfileSaving(false);
     }
+  }
+
+  async function handleSelectDefaultModelProfile(profileId: string | null) {
+    await updateNovel(token, novelId, { default_model_profile_id: profileId });
+    onDefaultModelProfileChange?.(profileId);
+  }
+
+  function handleStartNewModelProfile() {
+    setEditingProfileId(null);
+    setConnectivityResults([]);
+    modelProfileForm.resetFields();
+    modelProfileForm.setFieldsValue(defaultModelProfileFormValues);
+  }
+
+  function handleEditModelProfile(profile: ModelProfile) {
+    setEditingProfileId(profile.id);
+    setConnectivityResults([]);
+    modelProfileForm.setFieldsValue(profileToFormValues(profile));
+  }
+
+  async function handleTestModelProfileConnectivity() {
+    let values: Parameters<typeof handleSaveModelProfile>[0];
+    try {
+      values = await modelProfileForm.validateFields();
+    } catch {
+      return;
+    }
+    if (!editingProfileId && !values.api_key) {
+      message.error("新建配置时请填写默认 API Key");
+      return;
+    }
+
+    setConnectivityTesting(true);
+    try {
+      const response = await testModelProfileConnectivity(token, {
+        ...buildModelProfilePayload(values),
+        profile_id: editingProfileId,
+        api_key: values.api_key,
+        chat_model: values.chat_model,
+        embedding_model: values.embedding_model,
+        name: values.name,
+        provider_kind: values.provider_kind,
+        summary_model: values.summary_model,
+        writing_model: values.writing_model,
+      });
+      setConnectivityResults(response.results);
+      if (response.results.every((result) => result.ok)) {
+        message.success("全部模型连通正常");
+      } else {
+        message.warning("部分模型连通失败，请查看测试结果");
+      }
+    } catch (error) {
+      setConnectivityResults([]);
+      message.error(error instanceof Error ? error.message : "连通性测试失败");
+    } finally {
+      setConnectivityTesting(false);
+    }
+  }
+
+  async function handleExportWorkspaceNode(nodeId: string, title: string) {
+    const blob = await exportWorkspaceNode(token, novelId, nodeId, "txt");
+    const url = URL.createObjectURL(blob);
+    const anchor = window.document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${title}.txt`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   }
 
   async function handleCreateWorkspaceNode(nodeType: "chapter" | "folder", parentId: string | null = null) {
@@ -467,6 +647,7 @@ export function WorkspacePage({ activeSection = "workspace", token, novelId }: W
         void handleUpdateWorkspaceNode(nodeId, { parent_id: parentId, position })
       }
       onReorderNodes={(changes) => void handleReorderWorkspaceNodes(changes)}
+      onExportNode={(nodeId, title) => void handleExportWorkspaceNode(nodeId, title)}
       onRenameNode={(nodeId, title) => void handleUpdateWorkspaceNode(nodeId, { title })}
       onRestoreNode={(nodeId) => void handleWorkspaceNodeStatus(nodeId, "draft")}
       onSelectDocument={handleSelectDocument}
@@ -579,33 +760,32 @@ export function WorkspacePage({ activeSection = "workspace", token, novelId }: W
       <Typography.Paragraph type="secondary">
         配置 OpenAI、Anthropic 或兼容 OpenAI 协议的模型供应商，供 Agent 对话、写作、总结和向量检索使用。
       </Typography.Paragraph>
+      <Form.Item label="当前小说使用" style={{ marginBottom: 16, maxWidth: 720 }}>
+        <Select
+          allowClear
+          onChange={(value) => void handleSelectDefaultModelProfile(value ?? null)}
+          options={modelProfiles.map((profile) => ({ label: profile.name, value: profile.id }))}
+          placeholder="选择模型配置"
+          value={defaultModelProfileId ?? undefined}
+        />
+      </Form.Item>
       <Form
         form={modelProfileForm}
-        initialValues={{
-          chat_model: "gpt-4o",
-          chat_api_key: "",
-          chat_provider_kind: "openai",
-          embedding_model: "text-embedding-3-small",
-          embedding_api_key: "",
-          embedding_provider_kind: "openai",
-          name: "默认 OpenAI",
-          provider_kind: "openai",
-          summary_model: "gpt-4o-mini",
-          summary_api_key: "",
-          summary_provider_kind: "openai",
-          writing_model: "gpt-4o",
-          writing_api_key: "",
-          writing_provider_kind: "openai",
-        }}
+        initialValues={defaultModelProfileFormValues}
         layout="vertical"
-        onFinish={handleCreateModelProfile}
+        onFinish={handleSaveModelProfile}
         style={{ maxWidth: 720 }}
       >
+        <Space style={{ marginBottom: 16, width: "100%" }}>
+          <Typography.Text strong>{editingProfileId ? "编辑配置" : "新建配置"}</Typography.Text>
+          {editingProfileId ? (
+            <Button onClick={handleStartNewModelProfile} size="small" type="link">
+              新建配置
+            </Button>
+          ) : null}
+        </Space>
         <Form.Item label="配置名称" name="name" rules={[{ required: true, message: "请输入配置名称" }]}>
           <Input />
-        </Form.Item>
-        <Form.Item label="供应商" name="provider_kind" rules={[{ required: true, message: "请选择供应商" }]}>
-          <Select options={providerOptions} />
         </Form.Item>
         <Tabs
           destroyOnHidden={false}
@@ -616,13 +796,35 @@ export function WorkspacePage({ activeSection = "workspace", token, novelId }: W
               children: (
                 <>
                   <Typography.Paragraph type="secondary">
-                    默认配置作为所有模型的回退。某个模型 Tab 不填 API Key 或 Base URL 时，会使用这里的值。
+                    默认配置作为所有模型的回退。可在这里统一设置各场景模型；某个模型 Tab 不填供应商、模型、API Key 或 Base URL 时，会使用这里的值。
                   </Typography.Paragraph>
+                  <Form.Item label="默认供应商" name="provider_kind" rules={[{ required: true, message: "请选择供应商" }]}>
+                    <Select options={providerOptions} />
+                  </Form.Item>
                   <Form.Item label="默认 Base URL（可选）" name="base_url">
                     <Input placeholder="https://api.openai.com/v1" />
                   </Form.Item>
-                  <Form.Item label="默认 API Key" name="api_key" rules={[{ required: true, message: "请输入默认 API Key" }]}>
-                    <Input.Password />
+                  <Form.Item
+                    label="默认 API Key"
+                    name="api_key"
+                    rules={editingProfileId ? [] : [{ required: true, message: "请输入默认 API Key" }]}
+                  >
+                    <Input.Password placeholder={editingProfileId ? "留空则保持不变" : undefined} />
+                  </Form.Item>
+                  <Form.Item label="默认对话模型" name="chat_model" rules={[{ required: true, message: "请输入默认对话模型" }]}>
+                    <Input placeholder="gpt-4o" />
+                  </Form.Item>
+                  <Form.Item label="默认写作模型" name="writing_model" rules={[{ required: true, message: "请输入默认写作模型" }]}>
+                    <Input placeholder="gpt-4o" />
+                  </Form.Item>
+                  <Form.Item label="默认总结模型" name="summary_model" rules={[{ required: true, message: "请输入默认总结模型" }]}>
+                    <Input placeholder="gpt-4o-mini" />
+                  </Form.Item>
+                  <Form.Item label="默认向量供应商" name="embedding_provider_kind">
+                    <Select onChange={handleEmbeddingProviderChange} options={embeddingProviderOptions} />
+                  </Form.Item>
+                  <Form.Item label="默认向量模型" name="embedding_model" rules={[{ required: true, message: "请输入默认向量模型" }]}>
+                    <Input placeholder="text-embedding-3-small" />
                   </Form.Item>
                 </>
               ),
@@ -635,14 +837,14 @@ export function WorkspacePage({ activeSection = "workspace", token, novelId }: W
                   <Form.Item label="对话场景供应商" name="chat_provider_kind">
                     <Select options={providerOptions} />
                   </Form.Item>
-                  <Form.Item label="对话模型" name="chat_model" rules={[{ required: true, message: "请输入对话模型" }]}>
-                    <Input />
+                  <Form.Item label="对话模型" name="chat_model">
+                    <Input placeholder="不填则使用默认对话模型" />
                   </Form.Item>
                   <Form.Item label="对话 Base URL" name="chat_base_url">
                     <Input placeholder="不填则使用默认 Base URL" />
                   </Form.Item>
                   <Form.Item label="对话 API Key" name="chat_api_key">
-                    <Input.Password placeholder="不填则使用默认 API Key" />
+                    <Input.Password placeholder={editingProfileId ? "留空则保持不变" : "不填则使用默认 API Key"} />
                   </Form.Item>
                 </>
               ),
@@ -655,14 +857,14 @@ export function WorkspacePage({ activeSection = "workspace", token, novelId }: W
                   <Form.Item label="写作场景供应商" name="writing_provider_kind">
                     <Select options={providerOptions} />
                   </Form.Item>
-                  <Form.Item label="写作模型" name="writing_model" rules={[{ required: true, message: "请输入写作模型" }]}>
-                    <Input />
+                  <Form.Item label="写作模型" name="writing_model">
+                    <Input placeholder="不填则使用默认写作模型" />
                   </Form.Item>
                   <Form.Item label="写作 Base URL" name="writing_base_url">
                     <Input placeholder="不填则使用默认 Base URL" />
                   </Form.Item>
                   <Form.Item label="写作 API Key" name="writing_api_key">
-                    <Input.Password placeholder="不填则使用默认 API Key" />
+                    <Input.Password placeholder={editingProfileId ? "留空则保持不变" : "不填则使用默认 API Key"} />
                   </Form.Item>
                 </>
               ),
@@ -675,14 +877,14 @@ export function WorkspacePage({ activeSection = "workspace", token, novelId }: W
                   <Form.Item label="总结场景供应商" name="summary_provider_kind">
                     <Select options={providerOptions} />
                   </Form.Item>
-                  <Form.Item label="总结模型" name="summary_model" rules={[{ required: true, message: "请输入总结模型" }]}>
-                    <Input />
+                  <Form.Item label="总结模型" name="summary_model">
+                    <Input placeholder="不填则使用默认总结模型" />
                   </Form.Item>
                   <Form.Item label="总结 Base URL" name="summary_base_url">
                     <Input placeholder="不填则使用默认 Base URL" />
                   </Form.Item>
                   <Form.Item label="总结 API Key" name="summary_api_key">
-                    <Input.Password placeholder="不填则使用默认 API Key" />
+                    <Input.Password placeholder={editingProfileId ? "留空则保持不变" : "不填则使用默认 API Key"} />
                   </Form.Item>
                 </>
               ),
@@ -695,23 +897,45 @@ export function WorkspacePage({ activeSection = "workspace", token, novelId }: W
                   <Form.Item label="向量场景供应商" name="embedding_provider_kind">
                     <Select onChange={handleEmbeddingProviderChange} options={embeddingProviderOptions} />
                   </Form.Item>
-                  <Form.Item label="向量模型" name="embedding_model" rules={[{ required: true, message: "请输入向量模型" }]}>
-                    <Input />
+                  <Form.Item label="向量模型" name="embedding_model">
+                    <Input placeholder="不填则使用默认向量模型" />
                   </Form.Item>
                   <Form.Item label="向量 Base URL" name="embedding_base_url">
                     <Input placeholder="不填则使用默认 Base URL" />
                   </Form.Item>
                   <Form.Item label="向量 API Key" name="embedding_api_key">
-                    <Input.Password placeholder="不填则使用默认 API Key" />
+                    <Input.Password placeholder={editingProfileId ? "留空则保持不变" : "不填则使用默认 API Key"} />
                   </Form.Item>
                 </>
               ),
             },
           ]}
         />
-        <Button htmlType="submit" loading={modelProfileSaving} type="primary">
-          保存 Agent 配置
-        </Button>
+        <Space wrap>
+          <Button loading={connectivityTesting} onClick={() => void handleTestModelProfileConnectivity()}>
+            测试连通性
+          </Button>
+          <Button htmlType="submit" loading={modelProfileSaving} type="primary">
+            保存 Agent 配置
+          </Button>
+        </Space>
+        {connectivityResults.length > 0 ? (
+          <List
+            dataSource={connectivityResults}
+            renderItem={(result) => (
+              <List.Item>
+                <Space direction="vertical" size={2} style={{ width: "100%" }}>
+                  <Space wrap>
+                    <Tag color={result.ok ? "success" : "error"}>{result.label}</Tag>
+                    <Typography.Text>{result.model}</Typography.Text>
+                  </Space>
+                  <Typography.Text type={result.ok ? "success" : "danger"}>{result.message}</Typography.Text>
+                </Space>
+              </List.Item>
+            )}
+            style={{ marginTop: 16, maxWidth: 720 }}
+          />
+        ) : null}
       </Form>
       <List
         dataSource={modelProfiles}
@@ -720,7 +944,14 @@ export function WorkspacePage({ activeSection = "workspace", token, novelId }: W
         renderItem={(profile) => {
           const fallbackProvider = profile.provider_kind;
           return (
-            <List.Item>
+            <List.Item
+              actions={[
+                defaultModelProfileId === profile.id ? <Tag color="green">当前使用</Tag> : null,
+                <Button key="edit" onClick={() => handleEditModelProfile(profile)} size="small" type="link">
+                  编辑
+                </Button>,
+              ].filter(Boolean)}
+            >
               <List.Item.Meta
                 description={
                   <Space size={[8, 8]} wrap>
@@ -870,11 +1101,56 @@ export function WorkspacePage({ activeSection = "workspace", token, novelId }: W
     </Card>
   );
 
+  const timelineContent = renderWorkspaceShell(
+    <Card
+      data-testid="timeline-card"
+      style={{
+        border: "none",
+        boxShadow: "0 18px 45px rgba(15,23,42,0.08)",
+        height: "100%",
+        minWidth: 0,
+      }}
+      styles={{ body: { height: "100%", overflow: "auto" } }}
+    >
+      <Typography.Title level={3}>时间线</Typography.Title>
+      <Typography.Paragraph type="secondary">
+        梳理故事中的关键事件，按时间顺序回顾剧情脉络。
+      </Typography.Paragraph>
+      <Tag color="orange" style={{ marginBottom: 16 }}>
+        {timelineEvents.length} 个事件
+      </Tag>
+      {timelineEvents.length === 0 ? (
+        <Empty description="还没有时间线事件，可以让 Agent 帮你梳理故事线" />
+      ) : (
+        <Timeline
+          items={timelineEvents.map((event) => ({
+            key: event.id,
+            color: "#ff7a18",
+            children: (
+              <Space direction="vertical" size={2}>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {event.event_time}
+                </Typography.Text>
+                <Typography.Text strong>{event.title}</Typography.Text>
+                {event.summary ? (
+                  <Typography.Paragraph style={{ margin: 0 }} type="secondary">
+                    {event.summary}
+                  </Typography.Paragraph>
+                ) : null}
+              </Space>
+            ),
+          }))}
+        />
+      )}
+    </Card>,
+  );
+
   const sectionContent: Record<WorkspaceSection, ReactNode> = {
     "agent-config": agentConfigContent,
     confirmations: confirmationsContent,
     materials: materialsContent,
     memory: memoryContent,
+    timeline: timelineContent,
     workspace: workspaceContent,
   };
 

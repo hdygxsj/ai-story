@@ -111,6 +111,207 @@ def test_model_profiles_are_scoped_to_current_user() -> None:
     assert response.json() == []
 
 
+def test_test_connectivity_returns_results(monkeypatch) -> None:
+    from app.services import model_profile_connectivity
+
+    async def fake_run_tests(profile) -> list[model_profile_connectivity.ConnectivityResult]:
+        return [
+            model_profile_connectivity.ConnectivityResult(
+                purpose="chat",
+                ok=True,
+                message="连通正常",
+                model=profile.chat_model,
+            ),
+            model_profile_connectivity.ConnectivityResult(
+                purpose="writing",
+                ok=False,
+                message="timeout",
+                model=profile.writing_model,
+            ),
+            model_profile_connectivity.ConnectivityResult(
+                purpose="summary",
+                ok=True,
+                message="连通正常",
+                model=profile.summary_model,
+            ),
+            model_profile_connectivity.ConnectivityResult(
+                purpose="embedding",
+                ok=True,
+                message="连通正常，向量维度 3",
+                model=profile.embedding_model,
+            ),
+        ]
+
+    monkeypatch.setattr(
+        model_profile_connectivity,
+        "run_model_profile_connectivity_tests",
+        fake_run_tests,
+    )
+
+    client = TestClient(app)
+    headers = auth_headers(client, email="connectivity@example.com", username="connectivityuser")
+    response = client.post(
+        "/model-profiles/test-connectivity",
+        headers=headers,
+        json={
+            "name": "测试配置",
+            "provider_kind": "openai",
+            "api_key": "sk-test",
+            "chat_model": "gpt-4o",
+            "writing_model": "gpt-4o",
+            "summary_model": "gpt-4o-mini",
+            "embedding_model": "text-embedding-3-small",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["results"]) == 4
+    assert body["results"][0] == {
+        "purpose": "chat",
+        "label": "对话",
+        "ok": True,
+        "message": "连通正常",
+        "model": "gpt-4o",
+    }
+    assert body["results"][1]["ok"] is False
+    assert body["results"][1]["label"] == "写作"
+
+
+def test_test_connectivity_uses_stored_api_key_when_editing(monkeypatch) -> None:
+    from app.services import model_profile_connectivity
+
+    captured: dict[str, object] = {}
+
+    async def fake_run_tests(profile) -> list[model_profile_connectivity.ConnectivityResult]:
+        captured["profile"] = profile
+        return [
+            model_profile_connectivity.ConnectivityResult(
+                purpose="chat",
+                ok=True,
+                message="连通正常",
+                model=profile.chat_model,
+            ),
+            model_profile_connectivity.ConnectivityResult(
+                purpose="writing",
+                ok=True,
+                message="连通正常",
+                model=profile.writing_model,
+            ),
+            model_profile_connectivity.ConnectivityResult(
+                purpose="summary",
+                ok=True,
+                message="连通正常",
+                model=profile.summary_model,
+            ),
+            model_profile_connectivity.ConnectivityResult(
+                purpose="embedding",
+                ok=True,
+                message="连通正常，向量维度 3",
+                model=profile.embedding_model,
+            ),
+        ]
+
+    monkeypatch.setattr(
+        model_profile_connectivity,
+        "run_model_profile_connectivity_tests",
+        fake_run_tests,
+    )
+
+    client = TestClient(app)
+    headers = auth_headers(client, email="stored-key@example.com", username="storedkeyuser")
+    created = client.post(
+        "/model-profiles",
+        headers=headers,
+        json={
+            "name": "默认 OpenAI",
+            "provider_kind": "openai",
+            "api_key": "sk-stored",
+            "chat_model": "gpt-4o",
+            "writing_model": "gpt-4o",
+            "summary_model": "gpt-4o-mini",
+            "embedding_model": "text-embedding-3-small",
+        },
+    ).json()
+
+    response = client.post(
+        "/model-profiles/test-connectivity",
+        headers=headers,
+        json={
+            "profile_id": created["id"],
+            "name": "默认 OpenAI",
+            "provider_kind": "openai",
+            "chat_model": "gpt-4o",
+            "writing_model": "gpt-4o",
+            "summary_model": "gpt-4o-mini",
+            "embedding_model": "text-embedding-3-small",
+        },
+    )
+
+    assert response.status_code == 200
+    profile = captured["profile"]
+    from app.core.crypto import decrypt_api_key
+
+    assert decrypt_api_key(profile.api_key_ciphertext) == "sk-stored"
+
+
+def test_test_connectivity_requires_api_key_for_new_profile() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client, email="missing-key@example.com", username="missingkeyuser")
+
+    response = client.post(
+        "/model-profiles/test-connectivity",
+        headers=headers,
+        json={
+            "name": "测试配置",
+            "provider_kind": "openai",
+            "chat_model": "gpt-4o",
+            "writing_model": "gpt-4o",
+            "summary_model": "gpt-4o-mini",
+            "embedding_model": "text-embedding-3-small",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "API Key" in response.json()["detail"]
+
+
+def test_update_model_profile_changes_models_without_requiring_api_key() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client, email="update@example.com", username="updateuser")
+    created = client.post(
+        "/model-profiles",
+        headers=headers,
+        json={
+            "name": "默认 OpenAI",
+            "provider_kind": "openai",
+            "api_key": "default-key",
+            "chat_model": "gpt-4o",
+            "writing_model": "gpt-4o",
+            "summary_model": "gpt-4o-mini",
+            "embedding_model": "text-embedding-3-small",
+        },
+    ).json()
+
+    response = client.patch(
+        f"/model-profiles/{created['id']}",
+        headers=headers,
+        json={
+            "name": "更新后的配置",
+            "embedding_provider_kind": "ollama",
+            "embedding_model": "nomic-embed-text",
+            "embedding_base_url": "http://ollama:11434",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "更新后的配置"
+    assert body["embedding_provider_kind"] == "ollama"
+    assert body["embedding_model"] == "nomic-embed-text"
+    assert body["chat_model"] == "gpt-4o"
+
+
 def test_model_profile_defaults_match_agent_capabilities() -> None:
     client = TestClient(app)
     headers = auth_headers(

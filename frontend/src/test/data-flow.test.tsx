@@ -201,6 +201,14 @@ describe("frontend data flow", () => {
             jsonResponse([{ id: "edge-1", source_character: "Mira", target_character: "Jon", relationship_type: "distrusts" }]),
           );
         }
+        if (url.endsWith("/novels/novel-1/nodes/node-1/export?format=txt")) {
+          return Promise.resolve(
+            new Response("Chapter From API\n\nLoaded chapter content", {
+              headers: { "Content-Type": "text/plain" },
+              status: 200,
+            }),
+          );
+        }
         return Promise.resolve(jsonResponse([]));
       }),
     );
@@ -248,7 +256,8 @@ describe("frontend data flow", () => {
     const user = userEvent.setup();
 
     render(<WorkspacePage activeSection="workspace" token="token" novelId="novel-1" />);
-    await user.click(screen.getByRole("button", { name: /新建章节/ }));
+    await user.click(screen.getByRole("button", { name: /新建/ }));
+    await user.click(await screen.findByRole("menuitem", { name: "新建章节" }));
 
     expect(await screen.findByText("新章节")).toBeInTheDocument();
     await waitFor(() => {
@@ -288,7 +297,8 @@ describe("frontend data flow", () => {
     const user = userEvent.setup();
 
     render(<WorkspacePage activeSection="workspace" token="token" novelId="novel-1" />);
-    await user.click(await screen.findByRole("button", { name: "重命名 Chapter From API" }));
+    await user.pointer({ keys: "[MouseRight]", target: await screen.findByText("Chapter From API") });
+    await user.click(await screen.findByRole("menuitem", { name: "重命名" }));
     const renameInputs = await screen.findAllByLabelText("章节名称");
     const modalInput = renameInputs.at(-1);
     expect(modalInput).toBeTruthy();
@@ -306,11 +316,30 @@ describe("frontend data flow", () => {
     });
   });
 
+  it("exports a workspace node from the chapter tree", async () => {
+    const user = userEvent.setup();
+
+    render(<WorkspacePage activeSection="workspace" token="token" novelId="novel-1" />);
+    await user.pointer({ keys: "[MouseRight]", target: await screen.findByText("Chapter From API") });
+    await user.click(await screen.findByRole("menuitem", { name: "导出 TXT" }));
+
+    await waitFor(() => {
+      const exportCall = vi.mocked(fetch).mock.calls.find(([url]) =>
+        String(url).endsWith("/novels/novel-1/nodes/node-1/export?format=txt"),
+      );
+      expect(exportCall).toBeTruthy();
+      expect(exportCall?.[1]).toMatchObject({
+        headers: { Authorization: "Bearer token" },
+      });
+    });
+  });
+
   it("moves workspace nodes to the recycle bin and restores them", async () => {
     const user = userEvent.setup();
 
     render(<WorkspacePage activeSection="workspace" token="token" novelId="novel-1" />);
-    await user.click(await screen.findByRole("button", { name: "删除 Chapter From API" }));
+    await user.pointer({ keys: "[MouseRight]", target: await screen.findByText("Chapter From API") });
+    await user.click(await screen.findByRole("menuitem", { name: "删除" }));
 
     await waitFor(() => {
       const trashCall = vi.mocked(fetch).mock.calls.find(

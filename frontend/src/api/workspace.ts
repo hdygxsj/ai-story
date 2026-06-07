@@ -57,3 +57,21 @@ export function reorderWorkspaceNodes(token: string, novelId: string, items: Wor
     body: JSON.stringify({ items }),
   });
 }
+
+export async function exportWorkspaceNode(
+  token: string,
+  novelId: string,
+  nodeId: string,
+  format: "markdown" | "txt",
+) {
+  const response = await fetch(
+    `${import.meta.env.VITE_API_BASE ?? "http://localhost:8000"}/novels/${novelId}/nodes/${nodeId}/export?format=${format}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return response.blob();
+}

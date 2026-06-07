@@ -306,6 +306,86 @@ def test_export_novel_as_txt_includes_plain_chapters_in_order() -> None:
     assert "开场内容。" in response.text
 
 
+def test_export_chapter_node_as_txt() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client, email="chapter-export@example.com", username="chapterexport")
+    novel = client.post("/novels", headers=headers, json={"title": "章节导出"}).json()
+    chapter = client.post(
+        f"/novels/{novel['id']}/nodes",
+        headers=headers,
+        json={"title": "第一章 雾港", "node_type": "chapter", "parent_id": None},
+    ).json()
+    client.patch(
+        f"/documents/{chapter['document_id']}",
+        headers=headers,
+        json={
+            "content": {
+                "type": "doc",
+                "content": [{"type": "paragraph", "content": [{"type": "text", "text": "开场内容。"}]}],
+            }
+        },
+    )
+
+    response = client.get(
+        f"/novels/{novel['id']}/nodes/{chapter['id']}/export?format=txt",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert "第一章 雾港" in response.text
+    assert "开场内容。" in response.text
+    assert "资料" not in response.text
+
+
+def test_export_folder_node_includes_descendants_in_tree_order() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client, email="folder-export@example.com", username="folderexport")
+    novel = client.post("/novels", headers=headers, json={"title": "文件夹导出"}).json()
+    folder = client.post(
+        f"/novels/{novel['id']}/nodes",
+        headers=headers,
+        json={"title": "资料", "node_type": "folder", "parent_id": None},
+    ).json()
+    first_chapter = client.post(
+        f"/novels/{novel['id']}/nodes",
+        headers=headers,
+        json={"title": "参考一", "node_type": "chapter", "parent_id": folder["id"]},
+    ).json()
+    nested_folder = client.post(
+        f"/novels/{novel['id']}/nodes",
+        headers=headers,
+        json={"title": "草稿", "node_type": "folder", "parent_id": folder["id"]},
+    ).json()
+    second_chapter = client.post(
+        f"/novels/{novel['id']}/nodes",
+        headers=headers,
+        json={"title": "草稿一", "node_type": "chapter", "parent_id": nested_folder["id"]},
+    ).json()
+    for chapter, body in ((first_chapter, "参考内容。"), (second_chapter, "草稿内容。")):
+        client.patch(
+            f"/documents/{chapter['document_id']}",
+            headers=headers,
+            json={
+                "content": {
+                    "type": "doc",
+                    "content": [{"type": "paragraph", "content": [{"type": "text", "text": body}]}],
+                }
+            },
+        )
+
+    response = client.get(
+        f"/novels/{novel['id']}/nodes/{folder['id']}/export?format=txt",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert response.text.index("资料") < response.text.index("参考一") < response.text.index("参考内容。")
+    assert response.text.index("参考内容。") < response.text.index("草稿") < response.text.index("草稿一")
+    assert "草稿内容。" in response.text
+
+
 def test_document_access_is_scoped_to_owner() -> None:
     client = TestClient(app)
     owner_headers = auth_headers(client, email="owner@example.com", username="owneruser")
