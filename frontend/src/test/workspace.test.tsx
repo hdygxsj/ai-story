@@ -272,6 +272,8 @@ describe("WorkspacePage", () => {
 
     expect(screen.getByRole("heading", { name: "Agent配置" })).toBeInTheDocument();
     expect(screen.getByTestId("agent-config-card")).toHaveStyle({ maxWidth: "960px" });
+    expect(screen.getByText("当前还没有可用的模型配置")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "测试连通性" })).toBeInTheDocument();
     expect(screen.getByText("当前小说使用")).toBeInTheDocument();
     expect(screen.getByText("新建配置")).toBeInTheDocument();
     expect(screen.getByLabelText("配置名称")).toBeInTheDocument();
@@ -365,6 +367,7 @@ describe("WorkspacePage", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorkspacePage activeSection="agent-config" token="test-token" novelId="novel-1" />);
+    expect(screen.getByRole("button", { name: "测试连通性" })).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "默认" }));
     await user.type(screen.getByLabelText("默认 API Key"), "sk-default");
     await user.click(screen.getByRole("button", { name: "测试连通性" }));
@@ -377,7 +380,7 @@ describe("WorkspacePage", () => {
       expect(String(testCall?.[1]?.body)).toContain("sk-default");
     });
     expect(await screen.findByText("401 Unauthorized")).toBeInTheDocument();
-    expect(screen.getByText("部分模型连通失败，请查看测试结果")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-config-connectivity-results")).toBeInTheDocument();
   });
 
   it("updates an existing model profile from the configured list", async () => {

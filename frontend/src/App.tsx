@@ -284,6 +284,22 @@ export function App() {
             {token && novelId ? (
               <Flex gap={8} style={{ flexShrink: 0 }}>
                 <button
+                  aria-label="模型配置"
+                  onClick={() => navigateSection("agent-config")}
+                  style={{
+                    ...toolbarButtonBaseStyle,
+                    background: selectedNovel?.default_model_profile_id ? "#ffffff" : "#fff7ed",
+                    border: selectedNovel?.default_model_profile_id
+                      ? "1px solid rgba(255,122,24,0.18)"
+                      : "1px solid rgba(255,122,24,0.42)",
+                    color: selectedNovel?.default_model_profile_id ? "#374151" : "#c2410c",
+                    fontWeight: selectedNovel?.default_model_profile_id ? 400 : 600,
+                  }}
+                  type="button"
+                >
+                  模型配置
+                </button>
+                <button
                   aria-label="导入小说"
                   onMouseDown={() => setImportModalOpen(true)}
                   onClick={() => setImportModalOpen(true)}
@@ -406,6 +422,7 @@ export function App() {
                 activeSection={activeSection}
                 defaultModelProfileId={selectedNovel?.default_model_profile_id ?? null}
                 novelId={novelId}
+                onOpenAgentConfig={() => navigateSection("agent-config")}
                 onDefaultModelProfileChange={(profileId) => {
                   setNovels((current) =>
                     current.map((novel) =>

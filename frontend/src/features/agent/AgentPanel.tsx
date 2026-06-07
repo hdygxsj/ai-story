@@ -9,6 +9,8 @@ import { sendAgentMessage } from "../../api/agent";
 import type { WorkspaceNode } from "../../api/workspace";
 
 type AgentPanelProps = {
+  hasModelProfile?: boolean;
+  onOpenModelConfig?: () => void;
   token: string;
   novelId: string;
   documentId?: string | null;
@@ -26,6 +28,8 @@ type ChatMessage = {
 };
 
 export function AgentPanel({
+  hasModelProfile = true,
+  onOpenModelConfig,
   token,
   novelId,
   documentId,
@@ -115,6 +119,22 @@ export function AgentPanel({
       }}
       styles={{ body: { display: "flex", flex: 1, flexDirection: "column", gap: 16, minHeight: 0, overflow: "hidden" } }}
     >
+      {!hasModelProfile ? (
+        <Alert
+          action={
+            onOpenModelConfig ? (
+              <Button onClick={onOpenModelConfig} size="small" type="primary">
+                去配置模型
+              </Button>
+            ) : undefined
+          }
+          description="配置模型后可测试连通性，并让 Agent 正常对话、写作和检索。"
+          showIcon
+          style={{ flexShrink: 0 }}
+          title="尚未配置模型"
+          type="warning"
+        />
+      ) : null}
       <div data-testid="agent-message-scroll" style={{ flex: "1 1 0", minHeight: 0, overflow: "auto" }}>
         <Bubble.List
           autoScroll

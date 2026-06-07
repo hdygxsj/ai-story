@@ -1,4 +1,4 @@
-import { Button, Card, Empty, Form, Input, List, message, Select, Space, Statistic, Tabs, Tag, Timeline, Typography } from "antd";
+import { Alert, Button, Card, Empty, Form, Input, List, message, Select, Space, Statistic, Tabs, Tag, Timeline, Typography } from "antd";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 
@@ -41,6 +41,7 @@ type WorkspacePageProps = {
   activeSection?: WorkspaceSection;
   defaultModelProfileId?: string | null;
   onDefaultModelProfileChange?: (profileId: string | null) => void;
+  onOpenAgentConfig?: () => void;
   token: string;
   novelId: string;
 };
@@ -133,6 +134,7 @@ export function WorkspacePage({
   activeSection = "workspace",
   defaultModelProfileId = null,
   onDefaultModelProfileChange,
+  onOpenAgentConfig,
   token,
   novelId,
 }: WorkspacePageProps) {
@@ -657,6 +659,8 @@ export function WorkspacePage({
 
   const agentPanel = (
     <AgentPanel
+      hasModelProfile={Boolean(defaultModelProfileId)}
+      onOpenModelConfig={onOpenAgentConfig}
       token={token}
       novelId={novelId}
       documentId={documentId}
@@ -745,6 +749,47 @@ export function WorkspacePage({
     />,
   );
 
+  const agentConfigActionBar = (
+    <Space
+      data-testid="agent-config-actions"
+      style={{
+        background: "#ffffff",
+        paddingBottom: 8,
+        position: "sticky",
+        top: 0,
+        zIndex: 2,
+      }}
+      wrap
+    >
+      <Button loading={connectivityTesting} onClick={() => void handleTestModelProfileConnectivity()} type="default">
+        测试连通性
+      </Button>
+      <Button loading={modelProfileSaving} onClick={() => modelProfileForm.submit()} type="primary">
+        保存 Agent 配置
+      </Button>
+    </Space>
+  );
+
+  const agentConfigConnectivityResults =
+    connectivityResults.length > 0 ? (
+      <List
+        data-testid="agent-config-connectivity-results"
+        dataSource={connectivityResults}
+        renderItem={(result) => (
+          <List.Item>
+            <Space direction="vertical" size={2} style={{ width: "100%" }}>
+              <Space wrap>
+                <Tag color={result.ok ? "success" : "error"}>{result.label}</Tag>
+                <Typography.Text>{result.model}</Typography.Text>
+              </Space>
+              <Typography.Text type={result.ok ? "success" : "danger"}>{result.message}</Typography.Text>
+            </Space>
+          </List.Item>
+        )}
+        style={{ marginTop: 16, maxWidth: 720 }}
+      />
+    ) : null;
+
   const agentConfigContent = (
     <Card
       data-testid="agent-config-card"
@@ -760,7 +805,18 @@ export function WorkspacePage({
       <Typography.Paragraph type="secondary">
         配置 OpenAI、Anthropic 或兼容 OpenAI 协议的模型供应商，供 Agent 对话、写作、总结和向量检索使用。
       </Typography.Paragraph>
-      <Form.Item label="当前小说使用" style={{ marginBottom: 16, maxWidth: 720 }}>
+      {modelProfiles.length === 0 || !defaultModelProfileId ? (
+        <Alert
+          showIcon
+          description="填写下方表单，先点「测试连通性」确认可用，再保存为当前小说的默认模型。"
+          style={{ marginBottom: 16, maxWidth: 720 }}
+          title="当前还没有可用的模型配置"
+          type="warning"
+        />
+      ) : null}
+      {agentConfigActionBar}
+      {agentConfigConnectivityResults}
+      <Form.Item label="当前小说使用" style={{ marginBottom: 16, marginTop: 16, maxWidth: 720 }}>
         <Select
           allowClear
           onChange={(value) => void handleSelectDefaultModelProfile(value ?? null)}
@@ -911,31 +967,6 @@ export function WorkspacePage({
             },
           ]}
         />
-        <Space wrap>
-          <Button loading={connectivityTesting} onClick={() => void handleTestModelProfileConnectivity()}>
-            测试连通性
-          </Button>
-          <Button htmlType="submit" loading={modelProfileSaving} type="primary">
-            保存 Agent 配置
-          </Button>
-        </Space>
-        {connectivityResults.length > 0 ? (
-          <List
-            dataSource={connectivityResults}
-            renderItem={(result) => (
-              <List.Item>
-                <Space direction="vertical" size={2} style={{ width: "100%" }}>
-                  <Space wrap>
-                    <Tag color={result.ok ? "success" : "error"}>{result.label}</Tag>
-                    <Typography.Text>{result.model}</Typography.Text>
-                  </Space>
-                  <Typography.Text type={result.ok ? "success" : "danger"}>{result.message}</Typography.Text>
-                </Space>
-              </List.Item>
-            )}
-            style={{ marginTop: 16, maxWidth: 720 }}
-          />
-        ) : null}
       </Form>
       <List
         dataSource={modelProfiles}
@@ -1154,5 +1185,16 @@ export function WorkspacePage({
     workspace: workspaceContent,
   };
 
-  return <div style={{ height: "100%", minHeight: 0, minWidth: 0 }}>{sectionContent[activeSection]}</div>;
+  return (
+    <div
+      style={{
+        height: "100%",
+        minHeight: 0,
+        minWidth: 0,
+        overflow: activeSection === "workspace" ? "hidden" : "auto",
+      }}
+    >
+      {sectionContent[activeSection]}
+    </div>
+  );
 }
