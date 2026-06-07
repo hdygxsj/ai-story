@@ -175,13 +175,15 @@ export function WorkspaceTree({
   function buildTree(parentId: string | null): Array<Record<string, unknown>> {
     return (childrenByParent.get(parentId) ?? []).map((node) => ({
       key: node.id,
-      icon: node.node_type === "folder" ? <FolderOutlined /> : <FileTextOutlined />,
       title: (
         <Dropdown menu={createContextMenu(contextParentId(node))} trigger={["contextMenu"]}>
           <span
             onContextMenu={(event) => event.stopPropagation()}
             style={{ alignItems: "center", display: "inline-flex", gap: 6, maxWidth: "100%", minWidth: 0, width: "100%" }}
           >
+            <span aria-hidden style={{ alignItems: "center", color: "#94a3b8", display: "inline-flex", flexShrink: 0 }}>
+              {node.node_type === "folder" ? <FolderOutlined /> : <FileTextOutlined />}
+            </span>
             <span
               data-testid={`workspace-node-title-${node.id}`}
               title={node.title}
@@ -272,7 +274,6 @@ export function WorkspaceTree({
             blockNode
             defaultExpandAll
             draggable={{ icon: false }}
-            showIcon
             treeData={treeData}
             onDrop={(info) => {
               const draggedId = String(info.dragNode.key);

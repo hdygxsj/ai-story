@@ -125,6 +125,19 @@ describe("calculateWorkspaceDrop", () => {
     expect(screen.getByTestId("workspace-node-title-long-title")).toHaveAttribute("title", longTitle);
   });
 
+  it("renders the node icon inline with the title in a single row", () => {
+    render(<WorkspaceTree nodes={nodes} />);
+
+    const folderTitle = screen.getByTestId("workspace-node-title-folder-1");
+    const folderRow = folderTitle.parentElement as HTMLElement;
+    expect(folderRow).toHaveStyle({ alignItems: "center", display: "inline-flex" });
+    expect(folderRow.querySelector(".anticon-folder")).toBeTruthy();
+
+    const chapterTitle = screen.getByTestId("workspace-node-title-chapter-1");
+    const chapterRow = chapterTitle.parentElement as HTMLElement;
+    expect(chapterRow.querySelector(".anticon-file-text")).toBeTruthy();
+  });
+
   it("keeps tree nodes draggable without showing a drag-handle icon", () => {
     const { container } = render(<WorkspaceTree nodes={nodes} />);
 
