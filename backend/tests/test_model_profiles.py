@@ -341,3 +341,112 @@ def test_model_profile_defaults_match_agent_capabilities() -> None:
     assert body["supports_streaming"] is True
     assert body["context_window"] == 128000
     assert body["embedding_dimensions"] == 1536
+
+
+def test_create_profile_without_embedding_model() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client, email="no-embed@example.com", username="noembeduser")
+    response = client.post(
+        "/model-profiles",
+        headers=headers,
+        json={
+            "name": "Chat only",
+            "provider_kind": "openai",
+            "api_key": "sk-test",
+            "chat_model": "gpt-4o",
+            "writing_model": "gpt-4o",
+            "summary_model": "gpt-4o-mini",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["embedding_model"] == ""
+
+
+def test_test_connectivity_filters_by_purpose(monkeypatch) -> None:
+    from app.services import model_profile_connectivity
+
+    calls: list[str] = []
+
+    async def fake_chat_purpose(profile, purpose):
+        calls.append(purpose)
+        return model_profile_connectivity.ConnectivityResult(
+            purpose=purpose,
+            ok=True,
+            message="连通正常",
+            model=getattr(profile, f"{purpose}_model"),
+        )
+
+    monkeypatch.setattr(model_profile_connectivity, "_test_chat_purpose", fake_chat_purpose)
+    monkeypatch.setattr(
+        model_profile_connectivity,
+        "_test_embedding_purpose",
+        lambda profile: (_ for _ in ()).throw(AssertionError("embedding test should not run")),
+    )
+
+    client = TestClient(app)
+    headers = auth_headers(client, email="purpose-filter@example.com", username="purposefilter")
+    response = client.post(
+        "/model-profiles/test-connectivity",
+        headers=headers,
+        json={
+            "name": "测试配置",
+            "provider_kind": "openai",
+            "api_key": "sk-test",
+            "chat_model": "gpt-4o",
+            "writing_model": "gpt-4o",
+            "summary_model": "gpt-4o-mini",
+            "purposes": ["chat"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["results"]) == 1
+    assert body["results"][0]["purpose"] == "chat"
+    assert calls == ["chat"]
+
+
+def test_test_connectivity_skips_embedding_when_not_configured(monkeypatch) -> None:
+    from app.services import model_profile_connectivity
+
+    async def fake_chat_purpose(profile, purpose):
+        return model_profile_connectivity.ConnectivityResult(
+            purpose=purpose,
+            ok=True,
+            message="连通正常",
+            model=getattr(profile, f"{purpose}_model"),
+        )
+
+    monkeypatch.setattr(model_profile_connectivity, "_test_chat_purpose", fake_chat_purpose)
+    monkeypatch.setattr(
+        model_profile_connectivity,
+        "_test_embedding_purpose",
+        lambda profile: (_ for _ in ()).throw(AssertionError("embedding test should be skipped")),
+    )
+
+    client = TestClient(app)
+    headers = auth_headers(client, email="skip-embed@example.com", username="skipembeduser")
+    response = client.post(
+        "/model-profiles/test-connectivity",
+        headers=headers,
+        json={
+            "name": "测试配置",
+            "provider_kind": "openai",
+            "api_key": "sk-test",
+            "chat_model": "gpt-4o",
+            "writing_model": "gpt-4o",
+            "summary_model": "gpt-4o-mini",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["results"]) == 4
+    assert body["results"][3] == {
+        "purpose": "embedding",
+        "label": "向量",
+        "ok": True,
+        "message": "未配置，已跳过",
+        "model": "未配置",
+    }

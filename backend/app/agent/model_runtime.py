@@ -11,6 +11,14 @@ from app.models import ModelProfile
 
 ModelPurpose = Literal["chat", "writing", "summary", "embedding"]
 
+OLLAMA_EMBEDDING_MODELS = frozenset(
+    {
+        "nomic-embed-text",
+        "mxbai-embed-large",
+        "snowflake-arctic-embed",
+    }
+)
+
 
 def _model_name(profile: ModelProfile, purpose: ModelPurpose) -> str:
     if purpose == "embedding":
@@ -34,9 +42,36 @@ def _api_key_ciphertext(profile: ModelProfile, purpose: ModelPurpose) -> str:
     return profile.api_key_ciphertext
 
 
+def _looks_like_ollama_base_url(base_url: str | None) -> bool:
+    if not base_url:
+        return False
+    normalized = base_url.lower().rstrip("/")
+    return ":11434" in normalized or "ollama:" in normalized or normalized.endswith("/ollama")
+
+
+def _resolve_embedding_provider_kind(profile: ModelProfile) -> str:
+    if _looks_like_ollama_base_url(profile.embedding_base_url):
+        return "ollama"
+    model = (profile.embedding_model or "").strip().lower()
+    if model in OLLAMA_EMBEDDING_MODELS:
+        return "ollama"
+    if profile.embedding_provider_kind:
+        return profile.embedding_provider_kind.lower()
+    if model:
+        raise ValueError("请先在向量 Tab 选择向量场景供应商")
+    return profile.provider_kind.lower()
+
+
 def _base_url(profile: ModelProfile, purpose: ModelPurpose) -> str | None:
-    if purpose == "embedding" and profile.embedding_base_url:
-        return profile.embedding_base_url
+    if purpose == "embedding":
+        if profile.embedding_base_url:
+            return profile.embedding_base_url
+        provider_kind = _resolve_embedding_provider_kind(profile)
+        if provider_kind == "ollama":
+            return settings.ollama_base_url
+        if provider_kind in {"openai", "openai-compatible", "openai_compatible"}:
+            return profile.base_url
+        return None
     if purpose == "writing" and profile.writing_base_url:
         return profile.writing_base_url
     if purpose == "summary" and profile.summary_base_url:
@@ -47,8 +82,8 @@ def _base_url(profile: ModelProfile, purpose: ModelPurpose) -> str | None:
 
 
 def _provider_kind(profile: ModelProfile, purpose: ModelPurpose) -> str:
-    if purpose == "embedding" and profile.embedding_provider_kind:
-        return profile.embedding_provider_kind
+    if purpose == "embedding":
+        return _resolve_embedding_provider_kind(profile)
     if purpose == "writing" and profile.writing_provider_kind:
         return profile.writing_provider_kind
     if purpose == "summary" and profile.summary_provider_kind:
@@ -86,9 +121,16 @@ def build_chat_model(profile: ModelProfile, purpose: ModelPurpose = "chat") -> B
     raise ValueError(f"Unsupported model provider: {provider_kind}")
 
 
+def embedding_runtime_label(profile: ModelProfile) -> str:
+    model_name = _model_name(profile, "embedding")
+    provider_kind = _resolve_embedding_provider_kind(profile)
+    base_url = _base_url(profile, "embedding") or settings.ollama_base_url
+    return f"{provider_kind} @ {base_url} · {model_name}"
+
+
 async def embed_with_model_profile(profile: ModelProfile, text: str) -> list[float]:
     model_name = _model_name(profile, "embedding")
-    provider_kind = _provider_kind(profile, "embedding").lower()
+    provider_kind = _resolve_embedding_provider_kind(profile)
 
     if provider_kind == "ollama":
         base_url = (_base_url(profile, "embedding") or settings.ollama_base_url).rstrip("/")

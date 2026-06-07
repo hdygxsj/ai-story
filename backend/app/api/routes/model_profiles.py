@@ -52,7 +52,7 @@ async def create_model_profile(
         summary_base_url=payload.summary_base_url,
         summary_api_key_ciphertext=encrypt_api_key(payload.summary_api_key) if payload.summary_api_key else None,
         embedding_provider_kind=payload.embedding_provider_kind,
-        embedding_model=payload.embedding_model,
+        embedding_model=payload.embedding_model or "",
         embedding_base_url=payload.embedding_base_url,
         embedding_api_key_ciphertext=encrypt_api_key(payload.embedding_api_key) if payload.embedding_api_key else None,
         supports_tool_calling=payload.supports_tool_calling,
@@ -170,7 +170,7 @@ async def test_model_profile_connectivity(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    results = await run_model_profile_connectivity_tests(profile)
+    results = await run_model_profile_connectivity_tests(profile, purposes=payload.purposes)
     return ModelProfileConnectivityResponse(
         results=[
             ModelProfileConnectivityResult(

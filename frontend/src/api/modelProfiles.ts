@@ -19,7 +19,8 @@ export type ModelProfile = {
   embedding_model: string;
 };
 
-export type ModelProfileCreate = Omit<ModelProfile, "id"> & {
+export type ModelProfileCreate = Omit<ModelProfile, "id" | "embedding_model"> & {
+  embedding_model?: string;
   api_key: string;
   base_url?: string | null;
   chat_api_key?: string | null;
@@ -55,6 +56,8 @@ export function updateModelProfile(token: string, profileId: string, payload: Mo
   });
 }
 
+export type ModelProfilePurpose = "chat" | "writing" | "summary" | "embedding";
+
 export type ModelProfileConnectivityResult = {
   purpose: string;
   label: string;
@@ -66,9 +69,10 @@ export type ModelProfileConnectivityResult = {
 export type ModelProfileTestPayload = Partial<ModelProfileCreate> & {
   profile_id?: string | null;
   chat_model: string;
-  embedding_model: string;
+  embedding_model?: string;
   name: string;
   provider_kind: string;
+  purposes?: ModelProfilePurpose[];
   summary_model: string;
   writing_model: string;
 };

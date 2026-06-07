@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -273,7 +273,7 @@ describe("WorkspacePage", () => {
     expect(screen.getByRole("heading", { name: "Agent配置" })).toBeInTheDocument();
     expect(screen.getByTestId("agent-config-card")).toHaveStyle({ maxWidth: "960px" });
     expect(screen.getByText("当前还没有可用的模型配置")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "测试连通性" })).toBeInTheDocument();
+    expect(screen.getByTestId("model-tab-connectivity-default")).toBeInTheDocument();
     expect(screen.getByText("当前小说使用")).toBeInTheDocument();
     expect(screen.getByText("新建配置")).toBeInTheDocument();
     expect(screen.getByLabelText("配置名称")).toBeInTheDocument();
@@ -282,7 +282,7 @@ describe("WorkspacePage", () => {
     expect(screen.getByLabelText("默认对话模型")).toBeInTheDocument();
     expect(screen.getByLabelText("默认写作模型")).toBeInTheDocument();
     expect(screen.getByLabelText("默认总结模型")).toBeInTheDocument();
-    expect(screen.getByLabelText("默认向量模型")).toBeInTheDocument();
+    expect(screen.queryByLabelText("默认向量模型")).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "默认" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "对话" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "写作" })).toBeInTheDocument();
@@ -300,11 +300,6 @@ describe("WorkspacePage", () => {
     await user.click(screen.getByRole("tab", { name: "向量" }));
     expect(screen.getByLabelText("向量场景供应商")).toBeInTheDocument();
     expect(screen.getByLabelText("向量 API Key")).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "默认" }));
-    await user.click(screen.getByLabelText("默认向量供应商"));
-    await user.click(await screen.findByText("Ollama 本地"));
-    expect(screen.getByLabelText("默认向量模型")).toHaveValue("nomic-embed-text");
-
     await user.clear(screen.getByLabelText("配置名称"));
     await user.type(screen.getByLabelText("配置名称"), "多模型配置");
     await user.click(screen.getByRole("tab", { name: "默认" }));
@@ -321,6 +316,9 @@ describe("WorkspacePage", () => {
     await user.clear(screen.getByLabelText("总结 API Key"));
     await user.type(screen.getByLabelText("总结 API Key"), "sk-summary");
     await user.click(screen.getByRole("tab", { name: "向量" }));
+    await user.click(screen.getByLabelText("向量场景供应商"));
+    await user.click(await screen.findByText("Ollama 本地"));
+    expect(screen.getByLabelText("向量模型")).toHaveValue("nomic-embed-text");
     await user.clear(screen.getByLabelText("向量 API Key"));
     await user.click(screen.getByRole("button", { name: "保存 Agent 配置" }));
 
@@ -367,20 +365,159 @@ describe("WorkspacePage", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorkspacePage activeSection="agent-config" token="test-token" novelId="novel-1" />);
-    expect(screen.getByRole("button", { name: "测试连通性" })).toBeInTheDocument();
+    expect(screen.getByTestId("model-tab-connectivity-default")).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "默认" }));
     await user.type(screen.getByLabelText("默认 API Key"), "sk-default");
-    await user.click(screen.getByRole("button", { name: "测试连通性" }));
+    await user.click(within(screen.getByTestId("model-tab-connectivity-default")).getByRole("button", { name: "测试连通性" }));
 
     await waitFor(() => {
       const testCall = fetchMock.mock.calls.find(
         ([url, init]) => String(url).endsWith("/model-profiles/test-connectivity") && init?.method === "POST",
       );
       expect(testCall).toBeTruthy();
-      expect(String(testCall?.[1]?.body)).toContain("sk-default");
+      const body = String(testCall?.[1]?.body);
+      expect(body).toContain("sk-default");
+      expect(body).toContain("\"purposes\":[\"chat\",\"writing\",\"summary\"]");
     });
     expect(await screen.findByText("401 Unauthorized")).toBeInTheDocument();
-    expect(screen.getByTestId("agent-config-connectivity-results")).toBeInTheDocument();
+    expect(screen.getByTestId("model-tab-connectivity-default")).toBeInTheDocument();
+  });
+
+  it("tests only the chat model from the chat tab", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/model-profiles/test-connectivity") && init?.method === "POST") {
+        return Promise.resolve(
+          jsonResponse({
+            results: [{ purpose: "chat", label: "对话", ok: true, message: "连通正常", model: "gpt-4o" }],
+          }),
+        );
+      }
+      if (url.endsWith("/model-profiles")) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorkspacePage activeSection="agent-config" token="test-token" novelId="novel-1" />);
+    await user.click(screen.getByRole("tab", { name: "默认" }));
+    await user.type(screen.getByLabelText("默认 API Key"), "sk-default");
+    await user.click(screen.getByRole("tab", { name: "对话" }));
+    await user.click(within(screen.getByTestId("model-tab-connectivity-chat")).getByRole("button", { name: "测试连通性" }));
+
+    await waitFor(() => {
+      const testCall = fetchMock.mock.calls.find(
+        ([url, init]) => String(url).endsWith("/model-profiles/test-connectivity") && init?.method === "POST",
+      );
+      expect(testCall).toBeTruthy();
+      expect(String(testCall?.[1]?.body)).toContain("\"purposes\":[\"chat\"]");
+    });
+    expect(await screen.findByText("连通正常")).toBeInTheDocument();
+  });
+
+  it("restores the active model profile into the form on load", async () => {
+    const existingProfile = {
+      id: "profile-existing",
+      name: "DeepSeek 配置",
+      provider_kind: "openai-compatible",
+      base_url: "https://api.deepseek.com",
+      chat_provider_kind: "openai-compatible",
+      chat_model: "deepseek-v4-pro",
+      writing_provider_kind: "openai-compatible",
+      writing_model: "deepseek-v4-pro",
+      summary_provider_kind: "openai-compatible",
+      summary_model: "deepseek-v4-pro",
+      embedding_provider_kind: "openai",
+      embedding_model: "text-embedding-3-small",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/model-profiles")) {
+          return Promise.resolve(jsonResponse([existingProfile]));
+        }
+        return Promise.resolve(jsonResponse([]));
+      }),
+    );
+
+    render(
+      <WorkspacePage
+        activeSection="agent-config"
+        defaultModelProfileId="profile-existing"
+        token="test-token"
+        novelId="novel-1"
+      />,
+    );
+
+    expect(await screen.findByDisplayValue("DeepSeek 配置")).toBeInTheDocument();
+    expect(screen.getByLabelText("默认对话模型")).toHaveValue("deepseek-v4-pro");
+    expect(screen.getByLabelText("默认写作模型")).toHaveValue("deepseek-v4-pro");
+    expect(screen.getByLabelText("默认总结模型")).toHaveValue("deepseek-v4-pro");
+    expect(screen.getByDisplayValue("https://api.deepseek.com")).toBeInTheDocument();
+    expect(screen.getByText("编辑配置")).toBeInTheDocument();
+  });
+
+  it("keeps ollama embedding settings when saving from the default tab", async () => {
+    const user = userEvent.setup();
+    const existingProfile = {
+      id: "profile-existing",
+      name: "默认 OpenAI",
+      provider_kind: "openai-compatible",
+      base_url: "https://api.deepseek.com",
+      chat_model: "deepseek-v4-pro",
+      writing_model: "deepseek-v4-pro",
+      summary_model: "deepseek-v4-pro",
+      embedding_provider_kind: "ollama",
+      embedding_model: "nomic-embed-text",
+      embedding_base_url: "http://ollama:11434",
+    };
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/model-profiles/profile-existing") && init?.method === "PATCH") {
+        return Promise.resolve(jsonResponse(existingProfile));
+      }
+      if (url.endsWith("/model-profiles")) {
+        return Promise.resolve(jsonResponse([existingProfile]));
+      }
+      if (url.endsWith("/novels/novel-1") && init?.method === "PATCH") {
+        return Promise.resolve(
+          jsonResponse({
+            default_model_profile_id: "profile-existing",
+            description: "",
+            id: "novel-1",
+            title: "Novel",
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <WorkspacePage
+        activeSection="agent-config"
+        defaultModelProfileId="profile-existing"
+        token="test-token"
+        novelId="novel-1"
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "编辑" }));
+    await user.click(screen.getByRole("tab", { name: "默认" }));
+    await user.click(screen.getByRole("button", { name: "保存 Agent 配置" }));
+
+    await waitFor(() => {
+      const updateCall = fetchMock.mock.calls.find(
+        ([url, init]) => String(url).endsWith("/model-profiles/profile-existing") && init?.method === "PATCH",
+      );
+      expect(updateCall).toBeTruthy();
+      const body = String(updateCall?.[1]?.body);
+      expect(body).not.toContain("\"embedding_provider_kind\":null");
+      expect(body).not.toContain("\"embedding_provider_kind\": null");
+    });
   });
 
   it("updates an existing model profile from the configured list", async () => {

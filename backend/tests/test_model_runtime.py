@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from app.agent.model_runtime import build_chat_model, embed_with_model_profile
@@ -100,6 +101,157 @@ def test_provider_factory_uses_purpose_specific_provider_kind() -> None:
     assert chat_model.model == "claude-3-5-sonnet-latest"
     assert writing_model.model_name == "writing-model"
     assert str(writing_model.openai_api_base) == "https://writing.example/v1"
+
+
+async def test_embedding_infers_ollama_from_base_url_without_provider_kind(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"embedding": [0.4, 0.5]}
+
+    class FakeClient:
+        def __init__(self, **_: object) -> None:
+            return None
+
+        async def __aenter__(self) -> "FakeClient":
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def post(self, url: str, json: dict[str, object], headers: dict[str, str] | None = None) -> FakeResponse:
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return FakeResponse()
+
+    monkeypatch.setattr("app.agent.model_runtime.httpx.AsyncClient", FakeClient)
+    profile = ModelProfile(
+        owner_id="00000000-0000-0000-0000-000000000001",
+        name="DeepSeek default",
+        provider_kind="openai-compatible",
+        base_url="https://api.deepseek.com",
+        api_key_ciphertext=encrypt_api_key("sk-default"),
+        chat_model="deepseek-v4-pro",
+        writing_model="deepseek-v4-pro",
+        summary_model="deepseek-v4-pro",
+        embedding_model="nomic-embed-text",
+        embedding_base_url="http://ollama:11434",
+    )
+
+    vector = await embed_with_model_profile(profile, "ping")
+
+    assert vector == [0.4, 0.5]
+    assert captured["url"] == "http://ollama:11434/api/embeddings"
+    assert captured["headers"] is None
+
+
+async def test_embedding_infers_ollama_from_model_name_without_provider_kind(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"embedding": [0.6, 0.7]}
+
+    class FakeClient:
+        def __init__(self, **_: object) -> None:
+            return None
+
+        async def __aenter__(self) -> "FakeClient":
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def post(self, url: str, json: dict[str, object], headers: dict[str, str] | None = None) -> FakeResponse:
+            captured["url"] = url
+            return FakeResponse()
+
+    monkeypatch.setattr("app.agent.model_runtime.httpx.AsyncClient", FakeClient)
+    monkeypatch.setattr("app.agent.model_runtime.settings.ollama_base_url", "http://ollama:11434")
+    profile = ModelProfile(
+        owner_id="00000000-0000-0000-0000-000000000001",
+        name="DeepSeek default",
+        provider_kind="openai-compatible",
+        base_url="https://api.deepseek.com",
+        api_key_ciphertext=encrypt_api_key("sk-default"),
+        chat_model="deepseek-v4-pro",
+        writing_model="deepseek-v4-pro",
+        summary_model="deepseek-v4-pro",
+        embedding_model="nomic-embed-text",
+    )
+
+    await embed_with_model_profile(profile, "ping")
+
+    assert captured["url"] == "http://ollama:11434/api/embeddings"
+
+
+async def test_embedding_prefers_ollama_base_url_over_generic_provider_kind(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"embedding": [0.8, 0.9]}
+
+    class FakeClient:
+        def __init__(self, **_: object) -> None:
+            return None
+
+        async def __aenter__(self) -> "FakeClient":
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def post(self, url: str, json: dict[str, object], headers: dict[str, str] | None = None) -> FakeResponse:
+            captured["url"] = url
+            return FakeResponse()
+
+    monkeypatch.setattr("app.agent.model_runtime.httpx.AsyncClient", FakeClient)
+    profile = ModelProfile(
+        owner_id="00000000-0000-0000-0000-000000000001",
+        name="DeepSeek default",
+        provider_kind="openai-compatible",
+        base_url="https://api.deepseek.com",
+        api_key_ciphertext=encrypt_api_key("sk-default"),
+        chat_model="deepseek-v4-pro",
+        writing_model="deepseek-v4-pro",
+        summary_model="deepseek-v4-pro",
+        embedding_provider_kind="openai-compatible",
+        embedding_model="nomic-embed-text",
+        embedding_base_url="http://ollama:11434",
+    )
+
+    await embed_with_model_profile(profile, "ping")
+
+    assert captured["url"] == "http://ollama:11434/api/embeddings"
+
+
+async def test_embedding_without_provider_kind_does_not_fall_back_to_default_chat_provider() -> None:
+    profile = ModelProfile(
+        owner_id="00000000-0000-0000-0000-000000000001",
+        name="DeepSeek default",
+        provider_kind="openai-compatible",
+        base_url="https://api.deepseek.com",
+        api_key_ciphertext=encrypt_api_key("sk-default"),
+        chat_model="deepseek-v4-pro",
+        writing_model="deepseek-v4-pro",
+        summary_model="deepseek-v4-pro",
+        embedding_model="custom-embedding-model",
+    )
+
+    with pytest.raises(ValueError, match="向量场景供应商"):
+        await embed_with_model_profile(profile, "ping")
 
 
 async def test_ollama_embedding_provider_calls_local_embeddings_endpoint(monkeypatch) -> None:

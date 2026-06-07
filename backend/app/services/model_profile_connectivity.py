@@ -24,6 +24,10 @@ class ConnectivityResult:
     model: str
 
 
+def _embedding_configured(model_name: str | None) -> bool:
+    return bool(model_name and model_name.strip())
+
+
 def _api_key_ciphertext(value: str | None, stored: str | None, *, required: bool = True) -> str | None:
     if value:
         return encrypt_api_key(value)
@@ -76,7 +80,7 @@ def build_test_model_profile(
             required=False,
         ),
         embedding_provider_kind=payload.embedding_provider_kind,
-        embedding_model=payload.embedding_model,
+        embedding_model=payload.embedding_model or (stored.embedding_model if stored else ""),
         embedding_base_url=payload.embedding_base_url,
         embedding_api_key_ciphertext=_api_key_ciphertext(
             payload.embedding_api_key,
@@ -105,26 +109,43 @@ async def _test_chat_purpose(profile: ModelProfile, purpose: ModelPurpose) -> Co
 
 
 async def _test_embedding_purpose(profile: ModelProfile) -> ConnectivityResult:
-    from app.agent.model_runtime import _model_name
+    from app.agent.model_runtime import embedding_runtime_label
 
-    model_name = _model_name(profile, "embedding")
+    runtime_label = embedding_runtime_label(profile)
     try:
         vector = await embed_with_model_profile(profile, "ping")
         if not vector:
-            return ConnectivityResult(purpose="embedding", ok=False, message="未返回向量", model=model_name)
+            return ConnectivityResult(purpose="embedding", ok=False, message="未返回向量", model=runtime_label)
         return ConnectivityResult(
             purpose="embedding",
             ok=True,
             message=f"连通正常，向量维度 {len(vector)}",
-            model=model_name,
+            model=runtime_label,
         )
     except Exception as exc:
-        return ConnectivityResult(purpose="embedding", ok=False, message=str(exc), model=model_name)
+        return ConnectivityResult(purpose="embedding", ok=False, message=str(exc), model=runtime_label)
 
 
-async def run_model_profile_connectivity_tests(profile: ModelProfile) -> list[ConnectivityResult]:
-    chat_result = await _test_chat_purpose(profile, "chat")
-    writing_result = await _test_chat_purpose(profile, "writing")
-    summary_result = await _test_chat_purpose(profile, "summary")
-    embedding_result = await _test_embedding_purpose(profile)
-    return [chat_result, writing_result, summary_result, embedding_result]
+async def run_model_profile_connectivity_tests(
+    profile: ModelProfile,
+    *,
+    purposes: list[ModelPurpose] | None = None,
+) -> list[ConnectivityResult]:
+    selected: tuple[ModelPurpose, ...] = tuple(purposes or ("chat", "writing", "summary", "embedding"))
+    results: list[ConnectivityResult] = []
+    for purpose in ("chat", "writing", "summary"):
+        if purpose in selected:
+            results.append(await _test_chat_purpose(profile, purpose))
+    if "embedding" in selected:
+        if _embedding_configured(profile.embedding_model):
+            results.append(await _test_embedding_purpose(profile))
+        else:
+            results.append(
+                ConnectivityResult(
+                    purpose="embedding",
+                    ok=True,
+                    message="未配置，已跳过",
+                    model="未配置",
+                )
+            )
+    return results

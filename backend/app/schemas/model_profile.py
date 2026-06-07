@@ -1,8 +1,10 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+ModelProfilePurpose = Literal["chat", "writing", "summary", "embedding"]
 
 
 class ModelProfileCreate(BaseModel):
@@ -23,7 +25,7 @@ class ModelProfileCreate(BaseModel):
     summary_base_url: str | None = Field(default=None, max_length=2048)
     summary_api_key: str | None = Field(default=None, max_length=4096)
     embedding_provider_kind: str | None = Field(default=None, max_length=50)
-    embedding_model: str = Field(min_length=1, max_length=255)
+    embedding_model: str | None = Field(default=None, max_length=255)
     embedding_base_url: str | None = Field(default=None, max_length=2048)
     embedding_api_key: str | None = Field(default=None, max_length=4096)
     supports_tool_calling: bool = True
@@ -82,7 +84,7 @@ class ModelProfileTestRequest(BaseModel):
     summary_base_url: str | None = Field(default=None, max_length=2048)
     summary_api_key: str | None = Field(default=None, max_length=4096)
     embedding_provider_kind: str | None = Field(default=None, max_length=50)
-    embedding_model: str = Field(min_length=1, max_length=255)
+    embedding_model: str | None = Field(default=None, max_length=255)
     embedding_base_url: str | None = Field(default=None, max_length=2048)
     embedding_api_key: str | None = Field(default=None, max_length=4096)
     supports_tool_calling: bool = True
@@ -91,6 +93,7 @@ class ModelProfileTestRequest(BaseModel):
     context_window: int = Field(default=128000, gt=0)
     embedding_dimensions: int = Field(default=1536, gt=0)
     extra_headers: dict[str, Any] = Field(default_factory=dict)
+    purposes: list[ModelProfilePurpose] | None = Field(default=None, min_length=1, max_length=4)
 
 
 class ModelProfileConnectivityResult(BaseModel):
