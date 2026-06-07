@@ -4,6 +4,7 @@ export type ModelProfile = {
   id: string;
   name: string;
   provider_kind: string;
+  base_url?: string | null;
   chat_provider_kind?: string | null;
   chat_base_url?: string | null;
   chat_model: string;
