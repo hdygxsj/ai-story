@@ -11,6 +11,13 @@ function jsonResponse(body: unknown) {
   });
 }
 
+function unauthorizedResponse() {
+  return new Response(JSON.stringify({ detail: "Could not validate credentials" }), {
+    headers: { "Content-Type": "application/json" },
+    status: 401,
+  });
+}
+
 describe("App", () => {
   afterEach(() => {
     window.localStorage.clear();
@@ -132,6 +139,26 @@ describe("App", () => {
     expect(screen.queryByRole("heading", { name: "登录" })).not.toBeInTheDocument();
     expect(await screen.findByRole("menuitem", { name: "素材" })).toHaveClass("ant-menu-item-selected");
     expect(await screen.findByRole("heading", { name: "素材" })).toBeInTheDocument();
+  });
+
+  it("logs out and returns to login when the stored token is rejected", async () => {
+    window.localStorage.setItem("ai-story-token", "expired-token");
+    window.history.replaceState(null, "", "/workspace");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/novels")) {
+          return Promise.resolve(unauthorizedResponse());
+        }
+        return Promise.resolve(unauthorizedResponse());
+      }),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "登录" })).toBeInTheDocument();
+    expect(window.localStorage.getItem("ai-story-token")).toBeNull();
   });
 
   it("imports a novel from the management page", async () => {

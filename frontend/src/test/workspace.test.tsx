@@ -33,6 +33,7 @@ describe("WorkspacePage", () => {
     });
     expect(screen.getByTestId("workspace-grid")).toHaveStyle({
       gridTemplateColumns: "260px 6px minmax(0, 1fr) clamp(300px, 28vw, 390px)",
+      gridTemplateRows: "minmax(0, 1fr)",
       minHeight: "0",
       overflow: "hidden",
     });

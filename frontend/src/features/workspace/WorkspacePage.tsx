@@ -510,6 +510,7 @@ export function WorkspacePage({ activeSection = "workspace", token, novelId }: W
             display: "grid",
             gap: 14,
             gridTemplateColumns: `${treePanelWidth}px 6px minmax(0, 1fr) clamp(300px, 28vw, 390px)`,
+            gridTemplateRows: "minmax(0, 1fr)",
             minHeight: 0,
             minWidth: 0,
             overflow: "hidden",

@@ -3,6 +3,7 @@ import { App as AntApp, Avatar, Button, ConfigProvider, Dropdown, Flex, Form, In
 import "antd/dist/reset.css";
 import { useEffect, useState } from "react";
 
+import { ApiError } from "./api/http";
 import type { Novel } from "./api/novels";
 import { createNovel, exportNovel, importNovel, listNovels } from "./api/novels";
 import { AuthPage } from "./features/auth/AuthPage";
@@ -118,8 +119,12 @@ export function App() {
             return loaded[0]?.id ?? null;
           });
         }
-      } catch {
+      } catch (error) {
         if (!cancelled) {
+          if (error instanceof ApiError && error.status === 401) {
+            setToken(null);
+            return;
+          }
           setNovels([]);
         }
       }
