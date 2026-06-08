@@ -2,11 +2,22 @@ import Bubble from "@ant-design/x/es/bubble";
 import Sender from "@ant-design/x/es/sender";
 import { CloseOutlined, PushpinOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Flex, Space, Tag, Typography } from "antd";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { WorkspaceDiff } from "../../api/agent";
-import { sendAgentMessage } from "../../api/agent";
+import type { ContextDetail, WorkspaceDiff } from "../../api/agent";
+import { streamAgentMessage } from "../../api/agent";
+import type { Conversation } from "../../api/conversations";
+import {
+  createConversation,
+  deleteConversation,
+  listConversationMessages,
+  listConversations,
+} from "../../api/conversations";
 import type { WorkspaceNode } from "../../api/workspace";
+import { AgentMarkdown } from "./AgentMarkdown";
+import { ContextSettingsDrawer } from "./ContextSettingsDrawer";
+import { ContextStatusBar } from "./ContextStatusBar";
+import { ConversationSidebar } from "./ConversationSidebar";
 
 type AgentPanelProps = {
   hasModelProfile?: boolean;
@@ -23,9 +34,20 @@ type AgentPanelProps = {
 };
 
 type ChatMessage = {
+  id: string;
   role: "user" | "assistant";
   content: string;
 };
+
+const WELCOME_MESSAGE = "告诉我你想创建、改写、记录或检索什么。";
+
+function createMessageId(role: ChatMessage["role"]) {
+  return `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function welcomeMessages(): ChatMessage[] {
+  return [{ id: createMessageId("assistant"), role: "assistant", content: WELCOME_MESSAGE }];
+}
 
 export function AgentPanel({
   hasModelProfile = true,
@@ -41,41 +63,112 @@ export function AgentPanel({
   workspaceDiff,
 }: AgentPanelProps) {
   const [message, setMessage] = useState("请帮我改写选中的段落，让张力更强。");
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: "assistant", content: "告诉我你想创建、改写、记录或检索什么。" },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>(welcomeMessages);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [pendingConfirmation, setPendingConfirmation] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [streaming, setStreaming] = useState(false);
+  const [contextDetail, setContextDetail] = useState<ContextDetail | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const activeAssistantIdRef = useRef<string | null>(null);
+
+  const refreshConversations = useCallback(async () => {
+    const items = await listConversations(token, novelId);
+    setConversations(items);
+    return items;
+  }, [novelId, token]);
+
+  const loadConversationMessages = useCallback(
+    async (conversationId: string) => {
+      const stored = await listConversationMessages(token, novelId, conversationId);
+      if (stored.length === 0) {
+        setMessages(welcomeMessages());
+        return;
+      }
+      setMessages(
+        stored.map((item) => ({
+          id: item.id,
+          role: item.role === "user" ? "user" : "assistant",
+          content: item.content,
+        })),
+      );
+    },
+    [novelId, token],
+  );
+
+  useEffect(() => {
+    void refreshConversations().catch((caught: Error) => setError(caught.message));
+  }, [refreshConversations]);
+
+  function appendAssistantContent(assistantId: string, delta: string) {
+    setMessages((current) =>
+      current.map((item) =>
+        item.id === assistantId ? { ...item, content: `${item.content}${delta}` } : item,
+      ),
+    );
+  }
+
+  function finalizeAssistantMessage(assistantId: string, content: string) {
+    setMessages((current) =>
+      current.map((item) => (item.id === assistantId ? { ...item, content } : item)),
+    );
+  }
 
   async function sendMessage(value: string, overrideSelectedText?: string | null) {
-    if (!value.trim()) {
+    if (!value.trim() || streaming) {
       return;
     }
     setError(null);
-    setMessages((current) => [...current, { role: "user", content: value }]);
+    setStreaming(true);
+
+    const assistantId = createMessageId("assistant");
+    activeAssistantIdRef.current = assistantId;
+    setMessages((current) => [
+      ...current.filter((item) => item.content !== WELCOME_MESSAGE || item.role !== "assistant"),
+      { id: createMessageId("user"), role: "user", content: value },
+      { id: assistantId, role: "assistant", content: "" },
+    ]);
     setMessage("");
-    try {
-      const response = await sendAgentMessage(token, novelId, {
+
+    await streamAgentMessage(
+      token,
+      novelId,
+      {
         message: value,
         document_id: documentId,
         selected_text: overrideSelectedText ?? selectedText,
-      });
-      if (response.workspace_diff && response.workspace_nodes) {
-        onWorkspaceOrganized?.(response.workspace_nodes, response.workspace_diff);
-      }
-      setPendingConfirmation(response.confirmation?.id ?? null);
-      setMessages((current) => [
-        ...current,
-        {
-          role: "assistant",
-          content: response.confirmation
-            ? `${response.message} 确认项 ${response.confirmation.id} 正在等待处理。`
-            : response.message,
+        conversation_id: activeConversationId,
+      },
+      {
+        onDelta: (content) => {
+          appendAssistantContent(assistantId, content);
         },
-      ]);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Agent 请求失败");
-    }
+        onDone: (payload) => {
+          if (payload.workspace_diff && payload.workspace_nodes) {
+            onWorkspaceOrganized?.(payload.workspace_nodes, payload.workspace_diff);
+          }
+          if (payload.conversation_id) {
+            setActiveConversationId(payload.conversation_id);
+          }
+          setContextDetail(payload.context_detail ?? null);
+          setPendingConfirmation(payload.confirmation?.id ?? null);
+          const finalMessage = payload.confirmation
+            ? `${payload.message} 确认项 ${payload.confirmation.id} 正在等待处理。`
+            : payload.message;
+          finalizeAssistantMessage(assistantId, finalMessage);
+          setStreaming(false);
+          activeAssistantIdRef.current = null;
+          void refreshConversations().catch(() => undefined);
+        },
+        onError: (caught) => {
+          setError(caught.message);
+          finalizeAssistantMessage(assistantId, caught.message);
+          setStreaming(false);
+          activeAssistantIdRef.current = null;
+        },
+      },
+    );
   }
 
   async function handleSend(value: string) {
@@ -89,6 +182,32 @@ export function AgentPanel({
       polish: "请润色这段引用，让语言更有画面感和文学性。",
     };
     await sendMessage(promptByAction[action], selectedText);
+  }
+
+  async function handleCreateConversation() {
+    const created = await createConversation(token, novelId);
+    setActiveConversationId(created.id);
+    setMessages(welcomeMessages());
+    await refreshConversations();
+  }
+
+  async function handleSelectConversation(conversationId: string) {
+    setActiveConversationId(conversationId);
+    await loadConversationMessages(conversationId);
+  }
+
+  async function handleDeleteConversation(conversationId: string) {
+    await deleteConversation(token, novelId, conversationId);
+    const remaining = await refreshConversations();
+    if (activeConversationId === conversationId) {
+      if (remaining[0]) {
+        setActiveConversationId(remaining[0].id);
+        await loadConversationMessages(remaining[0].id);
+      } else {
+        setActiveConversationId(null);
+        setMessages(welcomeMessages());
+      }
+    }
   }
 
   useEffect(() => {
@@ -106,7 +225,15 @@ export function AgentPanel({
           共创 Agent
         </Typography.Title>
       }
-      extra={pendingConfirmation ? <Tag color="gold">等待确认</Tag> : <Tag color="green">就绪</Tag>}
+      extra={
+        streaming ? (
+          <Tag color="processing">生成中</Tag>
+        ) : pendingConfirmation ? (
+          <Tag color="gold">等待确认</Tag>
+        ) : (
+          <Tag color="green">就绪</Tag>
+        )
+      }
       style={{
         background: "rgba(255,255,255,0.82)",
         border: "1px solid rgba(15,23,42,0.06)",
@@ -117,7 +244,7 @@ export function AgentPanel({
         minHeight: 0,
         minWidth: 0,
       }}
-      styles={{ body: { display: "flex", flex: 1, flexDirection: "column", gap: 16, minHeight: 0, overflow: "hidden" } }}
+      styles={{ body: { display: "flex", flex: 1, flexDirection: "column", gap: 16, minHeight: 0, overflow: "hidden", padding: 12 } }}
     >
       {!hasModelProfile ? (
         <Alert
@@ -135,109 +262,141 @@ export function AgentPanel({
           type="warning"
         />
       ) : null}
-      <div data-testid="agent-message-scroll" style={{ flex: "1 1 0", minHeight: 0, overflow: "auto" }}>
-        <Bubble.List
-          autoScroll
-          items={messages.map((item, index) => ({
-            key: `${item.role}-${index}`,
-            role: item.role === "assistant" ? "ai" : "user",
-            content: item.content,
-          }))}
-          role={{
-            ai: { placement: "start", variant: "shadow" },
-            user: { placement: "end", variant: "filled" },
-          }}
-          style={{ minHeight: 0 }}
+      <Flex style={{ flex: "1 1 0", minHeight: 0 }}>
+        <ConversationSidebar
+          activeConversationId={activeConversationId}
+          conversations={conversations}
+          disabled={streaming}
+          onCreateConversation={() => void handleCreateConversation().catch((caught: Error) => setError(caught.message))}
+          onDeleteConversation={(conversationId) =>
+            void handleDeleteConversation(conversationId).catch((caught: Error) => setError(caught.message))
+          }
+          onOpenContextSettings={() => setSettingsOpen(true)}
+          onSelectConversation={(conversationId) =>
+            void handleSelectConversation(conversationId).catch((caught: Error) => setError(caught.message))
+          }
         />
-      </div>
-      {error ? <Alert message={error} showIcon style={{ flexShrink: 0 }} type="error" /> : null}
-      {workspaceDiff ? (
-        <div
-          aria-label="Agent 目录变更"
-          style={{
-            background: "#fff7ed",
-            border: "1px solid rgba(249,115,22,0.24)",
-            borderRadius: 16,
-            flexShrink: 0,
-            padding: 12,
-          }}
-        >
-          <Flex align="center" justify="space-between" gap={8}>
-            <Typography.Text strong>{workspaceDiff.summary}</Typography.Text>
-            <Button size="small" onClick={onUndoWorkspaceDiff}>
-              撤销本次整理
-            </Button>
-          </Flex>
-          <Space direction="vertical" size={4} style={{ marginTop: 8, width: "100%" }}>
-            {workspaceDiff.changes.map((change) => (
-              <Typography.Text key={`${change.action}-${change.node_id}`} type="secondary">
-                {change.action === "move" ? "移动" : change.action}：{change.title}
-              </Typography.Text>
-            ))}
-          </Space>
-        </div>
-      ) : null}
-      {selectedText ? (
-        <div
-          aria-label="Agent 引用卡"
-          style={{
-            background: "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
-            border: "1px solid rgba(99,91,255,0.18)",
-            borderRadius: 16,
-            boxShadow: "0 14px 36px rgba(15,23,42,0.10)",
-            flexShrink: 0,
-            padding: 12,
-          }}
-        >
-          <Flex align="center" justify="space-between">
-            <Space size={8}>
-              <PushpinOutlined style={{ color: "#635bff" }} />
-              <Typography.Text strong>已引用选中段落</Typography.Text>
-              <Tag color="purple">来自正文</Tag>
-            </Space>
-            <Button
-              aria-label="移除引用"
-              icon={<CloseOutlined />}
-              onClick={onClearSelectedText}
-              shape="circle"
-              size="small"
-              type="text"
+        <Flex vertical style={{ flex: 1, gap: 16, minHeight: 0, minWidth: 0 }}>
+          <ContextStatusBar detail={contextDetail} />
+          <div data-testid="agent-message-scroll" style={{ flex: "1 1 0", minHeight: 0, overflow: "auto" }}>
+            <Bubble.List
+              autoScroll
+              items={messages.map((item) => ({
+                key: item.id,
+                role: item.role === "assistant" ? "ai" : "user",
+                content:
+                  item.role === "assistant" ? (
+                    <AgentMarkdown
+                      content={item.content || (streaming && item.id === activeAssistantIdRef.current ? "..." : "")}
+                    />
+                  ) : (
+                    item.content
+                  ),
+              }))}
+              role={{
+                ai: { placement: "start", variant: "shadow" },
+                user: { placement: "end", variant: "filled" },
+              }}
+              style={{ minHeight: 0 }}
             />
-          </Flex>
-          <Typography.Paragraph
-            ellipsis={{ rows: 2 }}
-            style={{
-              background: "#f5f7fb",
-              borderLeft: "3px solid #635bff",
-              borderRadius: 10,
-              color: "#374151",
-              margin: "10px 0",
-              padding: "8px 10px",
-            }}
-          >
-            {selectedText}
-          </Typography.Paragraph>
-          <Space wrap>
-            <Button size="small" onClick={() => void handleQuoteAction("analyze")}>
-              解析引用
-            </Button>
-            <Button size="small" type="primary" onClick={() => void handleQuoteAction("rewrite")}>
-              改写引用
-            </Button>
-            <Button size="small" onClick={() => void handleQuoteAction("polish")}>
-              润色引用
-            </Button>
-          </Space>
-        </div>
-      ) : null}
-      <div data-testid="agent-input-shell" style={{ flexShrink: 0 }}>
-        <Sender
-          placeholder="让 Agent 规划、改写、记录记忆或检索上下文"
-          value={message}
-          onChange={setMessage}
-          onSubmit={handleSend}
-        />
-      </div>
+          </div>
+          {error ? <Alert message={error} showIcon style={{ flexShrink: 0 }} type="error" /> : null}
+          {workspaceDiff ? (
+            <div
+              aria-label="Agent 目录变更"
+              style={{
+                background: "#fff7ed",
+                border: "1px solid rgba(249,115,22,0.24)",
+                borderRadius: 16,
+                flexShrink: 0,
+                padding: 12,
+              }}
+            >
+              <Flex align="center" justify="space-between" gap={8}>
+                <Typography.Text strong>{workspaceDiff.summary}</Typography.Text>
+                <Button size="small" onClick={onUndoWorkspaceDiff}>
+                  撤销本次整理
+                </Button>
+              </Flex>
+              <Space direction="vertical" size={4} style={{ marginTop: 8, width: "100%" }}>
+                {workspaceDiff.changes.map((change) => (
+                  <Typography.Text key={`${change.action}-${change.node_id}`} type="secondary">
+                    {change.action === "move" ? "移动" : change.action}：{change.title}
+                  </Typography.Text>
+                ))}
+              </Space>
+            </div>
+          ) : null}
+          {selectedText ? (
+            <div
+              aria-label="Agent 引用卡"
+              style={{
+                background: "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
+                border: "1px solid rgba(99,91,255,0.18)",
+                borderRadius: 16,
+                boxShadow: "0 14px 36px rgba(15,23,42,0.10)",
+                flexShrink: 0,
+                padding: 12,
+              }}
+            >
+              <Flex align="center" justify="space-between">
+                <Space size={8}>
+                  <PushpinOutlined style={{ color: "#635bff" }} />
+                  <Typography.Text strong>已引用选中段落</Typography.Text>
+                  <Tag color="purple">来自正文</Tag>
+                </Space>
+                <Button
+                  aria-label="移除引用"
+                  icon={<CloseOutlined />}
+                  onClick={onClearSelectedText}
+                  shape="circle"
+                  size="small"
+                  type="text"
+                />
+              </Flex>
+              <Typography.Paragraph
+                ellipsis={{ rows: 2 }}
+                style={{
+                  background: "#f5f7fb",
+                  borderLeft: "3px solid #635bff",
+                  borderRadius: 10,
+                  color: "#374151",
+                  margin: "10px 0",
+                  padding: "8px 10px",
+                }}
+              >
+                {selectedText}
+              </Typography.Paragraph>
+              <Space wrap>
+                <Button disabled={streaming} size="small" onClick={() => void handleQuoteAction("analyze")}>
+                  解析引用
+                </Button>
+                <Button disabled={streaming} size="small" type="primary" onClick={() => void handleQuoteAction("rewrite")}>
+                  改写引用
+                </Button>
+                <Button disabled={streaming} size="small" onClick={() => void handleQuoteAction("polish")}>
+                  润色引用
+                </Button>
+              </Space>
+            </div>
+          ) : null}
+          <div data-testid="agent-input-shell" style={{ flexShrink: 0 }}>
+            <Sender
+              loading={streaming}
+              placeholder="让 Agent 规划、改写、记录记忆或检索上下文"
+              value={message}
+              onChange={setMessage}
+              onSubmit={handleSend}
+            />
+          </div>
+        </Flex>
+      </Flex>
+      <ContextSettingsDrawer
+        novelId={novelId}
+        open={settingsOpen}
+        token={token}
+        onClose={() => setSettingsOpen(false)}
+      />
     </Card>
   );
 }

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WorkspacePage } from "../features/workspace/WorkspacePage";
 
@@ -11,7 +11,48 @@ function jsonResponse(body: unknown) {
   });
 }
 
+function conversationMockResponse(url: string) {
+  if (url.endsWith("/novels/novel-1/conversations")) {
+    return jsonResponse([]);
+  }
+  if (/\/novels\/novel-1\/conversations\/[^/]+\/messages$/.test(url)) {
+    return jsonResponse([]);
+  }
+  return null;
+}
+
+function sseResponse(events: unknown[]) {
+  const encoder = new TextEncoder();
+  const payload = events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(payload));
+        controller.close();
+      },
+    }),
+    {
+      headers: { "Content-Type": "text/event-stream" },
+      status: 200,
+    },
+  );
+}
+
 describe("WorkspacePage", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        const conversationResponse = conversationMockResponse(url);
+        if (conversationResponse) {
+          return Promise.resolve(conversationResponse);
+        }
+        return Promise.resolve(jsonResponse([]));
+      }),
+    );
+  });
+
   afterEach(() => {
     window.localStorage.clear();
     vi.restoreAllMocks();
@@ -595,8 +636,23 @@ describe("WorkspacePage", () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.endsWith("/novels/novel-1/agent/messages")) {
-        return Promise.resolve(jsonResponse({ message: "已创建改写确认。", context_status: [], confirmation: null }));
+      const conversationResponse = conversationMockResponse(url);
+      if (conversationResponse) {
+        return Promise.resolve(conversationResponse);
+      }
+      if (url.endsWith("/novels/novel-1/agent/messages/stream")) {
+        return Promise.resolve(
+          sseResponse([
+            { type: "delta", content: "已创建改写确认。" },
+            {
+              type: "done",
+              message: "已创建改写确认。",
+              context_status: [],
+              conversation_id: "conv-1",
+              confirmation: null,
+            },
+          ]),
+        );
       }
       return Promise.resolve(jsonResponse([]));
     });
@@ -623,7 +679,7 @@ describe("WorkspacePage", () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "http://localhost:8000/novels/novel-1/agent/messages",
+        "http://localhost:8000/novels/novel-1/agent/messages/stream",
         expect.objectContaining({
           body: expect.stringContaining("被选中的段落"),
         }),
@@ -635,6 +691,10 @@ describe("WorkspacePage", () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      const conversationResponse = conversationMockResponse(url);
+      if (conversationResponse) {
+        return Promise.resolve(conversationResponse);
+      }
       if (url.endsWith("/novels/novel-1/nodes")) {
         return Promise.resolve(
           jsonResponse([
@@ -646,39 +706,44 @@ describe("WorkspacePage", () => {
       if (url.endsWith("/documents/doc-1")) {
         return Promise.resolve(jsonResponse({ id: "doc-1", content: { type: "doc", content: [] } }));
       }
-      if (url.endsWith("/novels/novel-1/agent/messages")) {
+      if (url.endsWith("/novels/novel-1/agent/messages/stream")) {
         return Promise.resolve(
-          jsonResponse({
-            message: "已整理章节、文件夹和草稿，并保存目录草稿。",
-            context_status: [],
-            confirmation: null,
-            workspace_diff: {
-              summary: "Agent 已整理章节目录",
-              before: [
-                { id: "folder-1", title: "草稿", parent_id: null, position: 0, status: "draft" },
-                { id: "node-1", title: "草稿片段", parent_id: null, position: 1, status: "draft" },
-              ],
-              after: [
-                { id: "folder-1", title: "草稿", parent_id: null, position: 0, status: "draft" },
-                { id: "node-1", title: "草稿片段", parent_id: "folder-1", position: 0, status: "draft" },
-              ],
-              changes: [
-                {
-                  action: "move",
-                  node_id: "node-1",
-                  title: "草稿片段",
-                  before_parent_id: null,
-                  after_parent_id: "folder-1",
-                  before_position: 1,
-                  after_position: 0,
-                },
+          sseResponse([
+            { type: "delta", content: "已整理章节、文件夹和草稿，并保存目录草稿。" },
+            {
+              type: "done",
+              message: "已整理章节、文件夹和草稿，并保存目录草稿。",
+              context_status: [],
+              conversation_id: "conv-organize",
+              confirmation: null,
+              workspace_diff: {
+                summary: "Agent 已整理章节目录",
+                before: [
+                  { id: "folder-1", title: "草稿", parent_id: null, position: 0, status: "draft" },
+                  { id: "node-1", title: "草稿片段", parent_id: null, position: 1, status: "draft" },
+                ],
+                after: [
+                  { id: "folder-1", title: "草稿", parent_id: null, position: 0, status: "draft" },
+                  { id: "node-1", title: "草稿片段", parent_id: "folder-1", position: 0, status: "draft" },
+                ],
+                changes: [
+                  {
+                    action: "move",
+                    node_id: "node-1",
+                    title: "草稿片段",
+                    before_parent_id: null,
+                    after_parent_id: "folder-1",
+                    before_position: 1,
+                    after_position: 0,
+                  },
+                ],
+              },
+              workspace_nodes: [
+                { id: "folder-1", title: "草稿", node_type: "folder", parent_id: null, document_id: null, position: 0, status: "draft" },
+                { id: "node-1", title: "草稿片段", node_type: "chapter", parent_id: "folder-1", document_id: "doc-1", position: 0, status: "draft" },
               ],
             },
-            workspace_nodes: [
-              { id: "folder-1", title: "草稿", node_type: "folder", parent_id: null, document_id: null, position: 0, status: "draft" },
-              { id: "node-1", title: "草稿片段", node_type: "chapter", parent_id: "folder-1", document_id: "doc-1", position: 0, status: "draft" },
-            ],
-          }),
+          ]),
         );
       }
       return Promise.resolve(jsonResponse([]));

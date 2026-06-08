@@ -10,8 +10,13 @@ import type { Confirmation } from "../../api/confirmations";
 import { approveConfirmation, listConfirmations, rejectConfirmation } from "../../api/confirmations";
 import type { DocumentBody, DocumentRecord, DocumentVersion } from "../../api/documents";
 import { getDocument, listDocumentVersions, updateDocument } from "../../api/documents";
-import type { MemoryReviewItem } from "../../api/memory";
-import { approveMemoryReviewItem, listMemoryReviewItems, rejectMemoryReviewItem } from "../../api/memory";
+import type { MemoryItem, MemoryReviewItem } from "../../api/memory";
+import {
+  approveMemoryReviewItem,
+  listMemoryItems,
+  listMemoryReviewItems,
+  rejectMemoryReviewItem,
+} from "../../api/memory";
 import type { CharacterState, CreativeAsset, RelationshipEdge, TimelineEvent } from "../../api/materials";
 import {
   listCharacterStates,
@@ -241,6 +246,7 @@ export function WorkspacePage({
   const [modelProfileCount, setModelProfileCount] = useState(0);
   const [confirmations, setConfirmations] = useState<Confirmation[]>([]);
   const [memoryReviews, setMemoryReviews] = useState<MemoryReviewItem[]>([]);
+  const [memoryItems, setMemoryItems] = useState<MemoryItem[]>([]);
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [creativeAssets, setCreativeAssets] = useState<CreativeAsset[]>([]);
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
@@ -311,6 +317,7 @@ export function WorkspacePage({
           loadedNodes,
           confirmations,
           memoryReviews,
+          approvedMemories,
           modelProfiles,
           assets,
           events,
@@ -320,6 +327,7 @@ export function WorkspacePage({
           listWorkspaceNodes(token, novelId),
           listConfirmations(token, novelId),
           listMemoryReviewItems(token, novelId),
+          listMemoryItems(token, novelId),
           listModelProfiles(token),
           listCreativeAssets(token, novelId),
           listTimelineEvents(token, novelId),
@@ -336,6 +344,7 @@ export function WorkspacePage({
           });
           setConfirmations(confirmations);
           setMemoryReviews(memoryReviews);
+          setMemoryItems(approvedMemories);
           setModelProfiles(modelProfiles);
           setCreativeAssets(assets);
           setTimelineEvents(events);
@@ -431,12 +440,14 @@ export function WorkspacePage({
   }
 
   async function refreshReviewQueues() {
-    const [loadedConfirmations, loadedMemoryReviews] = await Promise.all([
+    const [loadedConfirmations, loadedMemoryReviews, loadedMemoryItems] = await Promise.all([
       listConfirmations(token, novelId),
       listMemoryReviewItems(token, novelId),
+      listMemoryItems(token, novelId),
     ]);
     setConfirmations(loadedConfirmations);
     setMemoryReviews(loadedMemoryReviews);
+    setMemoryItems(loadedMemoryItems);
     setConfirmationCount(loadedConfirmations.filter((item) => item.status === "pending").length);
     setMemoryReviewCount(loadedMemoryReviews.filter((item) => item.status === "pending").length);
   }
@@ -1180,33 +1191,61 @@ export function WorkspacePage({
       <Typography.Paragraph>在这里审核关键记忆、角色状态、时间线事件和 RAG 上下文。</Typography.Paragraph>
       <Tag color="blue">{memoryReviewCount} 条待审核</Tag>
       <Tag>{modelProfileCount} 个模型配置</Tag>
-      <List
-        dataSource={memoryReviews}
-        locale={{ emptyText: "没有待审核记忆" }}
-        renderItem={(item) => (
-          <List.Item
-            actions={[
-              <Button size="small" onClick={() => void resolveMemoryReview(item.id, "approve")}>
-                通过
-              </Button>,
-              <Button danger size="small" onClick={() => void resolveMemoryReview(item.id, "reject")}>
-                拒绝
-              </Button>,
-            ]}
-          >
-            <List.Item.Meta description={`${item.memory_type} · importance ${item.importance}`} title={item.title} />
-          </List.Item>
-        )}
-        style={{ marginTop: 16 }}
-      />
-      <List
-        dataSource={modelProfiles}
-        locale={{ emptyText: "还没有模型配置" }}
-        renderItem={(profile) => (
-          <List.Item>
-            <List.Item.Meta description={`${profile.provider_kind} · ${profile.chat_model}`} title={profile.name} />
-          </List.Item>
-        )}
+      <Tabs
+        items={[
+          {
+            key: "pending",
+            label: "待审核",
+            children: (
+              <List
+                dataSource={memoryReviews.filter((item) => item.status === "pending")}
+                locale={{ emptyText: "没有待审核记忆" }}
+                renderItem={(item) => (
+                  <List.Item
+                    actions={[
+                      <Button size="small" onClick={() => void resolveMemoryReview(item.id, "approve")}>
+                        通过
+                      </Button>,
+                      <Button danger size="small" onClick={() => void resolveMemoryReview(item.id, "reject")}>
+                        拒绝
+                      </Button>,
+                    ]}
+                  >
+                    <List.Item.Meta
+                      description={`${item.memory_type} · importance ${item.importance}`}
+                      title={item.title}
+                    />
+                  </List.Item>
+                )}
+              />
+            ),
+          },
+          {
+            key: "approved",
+            label: "已确认",
+            children: (
+              <List
+                dataSource={memoryItems}
+                locale={{ emptyText: "还没有已确认记忆" }}
+                renderItem={(item) => (
+                  <List.Item>
+                    <List.Item.Meta
+                      description={
+                        <Space>
+                          <Tag color={item.memory_type === "context_snapshot" ? "purple" : "blue"}>
+                            {item.memory_type}
+                          </Tag>
+                          <span>importance {item.importance}</span>
+                        </Space>
+                      }
+                      title={item.title}
+                    />
+                  </List.Item>
+                )}
+              />
+            ),
+          },
+        ]}
         style={{ marginTop: 16 }}
       />
     </Card>

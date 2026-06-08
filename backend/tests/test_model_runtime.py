@@ -323,10 +323,35 @@ def test_model_profile_route_encrypts_api_key_before_storage() -> None:
     assert "sk-live-secret" not in created.text
 
 
-def test_agent_streaming_endpoint_returns_incremental_response() -> None:
+def test_agent_streaming_endpoint_returns_incremental_response(monkeypatch) -> None:
+    class FakeChatModel:
+        async def astream(self, messages):
+            from langchain_core.messages import AIMessage
+
+            yield AIMessage(content="我可以帮你继续写下去。")
+
+    monkeypatch.setattr("app.agent.chat_stream.build_chat_model", lambda profile, purpose="chat": FakeChatModel())
+
     client = TestClient(app)
     headers = auth_headers(client)
     novel = client.post("/novels", headers=headers, json={"title": "Streaming Novel"}).json()
+    profile = client.post(
+        "/model-profiles",
+        headers=headers,
+        json={
+            "name": "Chat profile",
+            "provider_kind": "openai",
+            "api_key": "sk-test",
+            "chat_model": "gpt-4o",
+            "writing_model": "gpt-4o",
+            "summary_model": "gpt-4o-mini",
+        },
+    ).json()
+    client.patch(
+        f"/novels/{novel['id']}",
+        headers=headers,
+        json={"default_model_profile_id": profile["id"]},
+    )
 
     with client.stream(
         "POST",
@@ -338,4 +363,4 @@ def test_agent_streaming_endpoint_returns_incremental_response() -> None:
 
     assert response.status_code == 200
     assert "data:" in body
-    assert "I can help shape the novel" in body
+    assert "我可以帮你继续写下去" in body
