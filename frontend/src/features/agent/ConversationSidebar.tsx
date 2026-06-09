@@ -1,5 +1,6 @@
-import { DeleteOutlined, PlusOutlined, SettingOutlined } from "@ant-design/icons";
-import { Button, Popconfirm, Typography } from "antd";
+import { DeleteOutlined, EditOutlined, PlusOutlined, SettingOutlined } from "@ant-design/icons";
+import { Button, Input, Modal, Popconfirm, Typography } from "antd";
+import { useState } from "react";
 
 import type { Conversation } from "../../api/conversations";
 
@@ -10,6 +11,7 @@ type ConversationSidebarProps = {
   onCreateConversation: () => void;
   onDeleteConversation: (conversationId: string) => void;
   onOpenContextSettings: () => void;
+  onRenameConversation: (conversationId: string, title: string) => void;
   onSelectConversation: (conversationId: string) => void;
 };
 
@@ -20,8 +22,26 @@ export function ConversationSidebar({
   onCreateConversation,
   onDeleteConversation,
   onOpenContextSettings,
+  onRenameConversation,
   onSelectConversation,
 }: ConversationSidebarProps) {
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameTitle, setRenameTitle] = useState("");
+
+  function openRename(conversationId: string, title: string) {
+    setRenamingId(conversationId);
+    setRenameTitle(title);
+  }
+
+  function submitRename() {
+    if (!renamingId || !renameTitle.trim()) {
+      setRenamingId(null);
+      return;
+    }
+    onRenameConversation(renamingId, renameTitle.trim());
+    setRenamingId(null);
+  }
+
   return (
     <div
       data-testid="agent-conversation-sidebar"
@@ -81,6 +101,14 @@ export function ConversationSidebar({
                   {conversation.title}
                 </Typography.Text>
               </button>
+              <Button
+                aria-label={`重命名对话 ${conversation.title}`}
+                disabled={disabled}
+                icon={<EditOutlined />}
+                onClick={() => openRename(conversation.id, conversation.title)}
+                size="small"
+                type="text"
+              />
               <Popconfirm
                 cancelText="取消"
                 disabled={disabled}
@@ -100,6 +128,16 @@ export function ConversationSidebar({
           );
         })}
       </div>
+      <Modal
+        cancelText="取消"
+        okText="保存"
+        onCancel={() => setRenamingId(null)}
+        onOk={submitRename}
+        open={renamingId !== null}
+        title="重命名对话"
+      >
+        <Input value={renameTitle} onChange={(event) => setRenameTitle(event.target.value)} />
+      </Modal>
       <Button
         block
         disabled={disabled}

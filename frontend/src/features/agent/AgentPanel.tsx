@@ -12,6 +12,7 @@ import {
   deleteConversation,
   listConversationMessages,
   listConversations,
+  updateConversation,
 } from "../../api/conversations";
 import type { WorkspaceNode } from "../../api/workspace";
 import { AgentMarkdown } from "./AgentMarkdown";
@@ -196,6 +197,11 @@ export function AgentPanel({
     await loadConversationMessages(conversationId);
   }
 
+  async function handleRenameConversation(conversationId: string, title: string) {
+    await updateConversation(token, novelId, conversationId, title);
+    await refreshConversations();
+  }
+
   async function handleDeleteConversation(conversationId: string) {
     await deleteConversation(token, novelId, conversationId);
     const remaining = await refreshConversations();
@@ -272,6 +278,9 @@ export function AgentPanel({
             void handleDeleteConversation(conversationId).catch((caught: Error) => setError(caught.message))
           }
           onOpenContextSettings={() => setSettingsOpen(true)}
+          onRenameConversation={(conversationId, title) =>
+            void handleRenameConversation(conversationId, title).catch((caught: Error) => setError(caught.message))
+          }
           onSelectConversation={(conversationId) =>
             void handleSelectConversation(conversationId).catch((caught: Error) => setError(caught.message))
           }
