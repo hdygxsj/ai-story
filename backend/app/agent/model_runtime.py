@@ -57,8 +57,6 @@ def _resolve_embedding_provider_kind(profile: ModelProfile) -> str:
         return "ollama"
     if profile.embedding_provider_kind:
         return profile.embedding_provider_kind.lower()
-    if model:
-        raise ValueError("请先在向量 Tab 选择向量场景供应商")
     return profile.provider_kind.lower()
 
 

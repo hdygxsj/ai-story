@@ -114,7 +114,7 @@ def test_model_profiles_are_scoped_to_current_user() -> None:
 def test_test_connectivity_returns_results(monkeypatch) -> None:
     from app.services import model_profile_connectivity
 
-    async def fake_run_tests(profile) -> list[model_profile_connectivity.ConnectivityResult]:
+    async def fake_run_tests(profile, *, purposes=None) -> list[model_profile_connectivity.ConnectivityResult]:
         return [
             model_profile_connectivity.ConnectivityResult(
                 purpose="chat",
@@ -143,8 +143,7 @@ def test_test_connectivity_returns_results(monkeypatch) -> None:
         ]
 
     monkeypatch.setattr(
-        model_profile_connectivity,
-        "run_model_profile_connectivity_tests",
+        "app.api.routes.model_profiles.run_model_profile_connectivity_tests",
         fake_run_tests,
     )
 
@@ -183,7 +182,7 @@ def test_test_connectivity_uses_stored_api_key_when_editing(monkeypatch) -> None
 
     captured: dict[str, object] = {}
 
-    async def fake_run_tests(profile) -> list[model_profile_connectivity.ConnectivityResult]:
+    async def fake_run_tests(profile, *, purposes=None) -> list[model_profile_connectivity.ConnectivityResult]:
         captured["profile"] = profile
         return [
             model_profile_connectivity.ConnectivityResult(
@@ -213,8 +212,7 @@ def test_test_connectivity_uses_stored_api_key_when_editing(monkeypatch) -> None
         ]
 
     monkeypatch.setattr(
-        model_profile_connectivity,
-        "run_model_profile_connectivity_tests",
+        "app.api.routes.model_profiles.run_model_profile_connectivity_tests",
         fake_run_tests,
     )
 

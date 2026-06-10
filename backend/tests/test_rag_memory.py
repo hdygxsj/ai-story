@@ -86,4 +86,4 @@ def test_context_loader_prioritizes_key_memory_and_rag_results() -> None:
     sources = [item.source for item in pack.items]
     assert "key_memory" in sources
     assert "rag_result" in sources
-    assert any("Context usage" in status for status in pack.status_messages)
+    assert any("上下文占用" in status for status in pack.status_messages)

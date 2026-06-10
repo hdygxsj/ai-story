@@ -10,12 +10,12 @@ _postgres_setup_done = False
 
 
 def _use_memory_checkpointer() -> bool:
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return True
     backend = os.getenv("AGENT_CHECKPOINT_BACKEND", "").lower()
     if backend == "memory":
         return True
-    if backend == "postgres":
-        return False
-    return bool(os.getenv("PYTEST_CURRENT_TEST"))
+    return backend != "postgres"
 
 
 async def get_checkpointer():
@@ -43,3 +43,15 @@ async def get_checkpointer():
         return checkpointer
     except Exception:
         return MemorySaver()
+
+
+async def close_checkpointer() -> None:
+    global _postgres_checkpointer, _postgres_context, _postgres_setup_done
+
+    if _postgres_context is None:
+        return
+
+    await _postgres_context.__aexit__(None, None, None)
+    _postgres_context = None
+    _postgres_checkpointer = None
+    _postgres_setup_done = False

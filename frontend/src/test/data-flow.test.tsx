@@ -237,7 +237,7 @@ describe("frontend data flow", () => {
     expect(await screen.findByText("Loaded chapter content")).toBeInTheDocument();
     rerender(<WorkspacePage activeSection="memory" token="token" novelId="novel-1" />);
     expect(await screen.findByText("Core vow")).toBeInTheDocument();
-    expect(screen.getByText("OpenAI Default")).toBeInTheDocument();
+    expect(screen.getByText("1 个模型配置")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "章节" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "共创 Agent" })).toBeInTheDocument();
     rerender(<WorkspacePage activeSection="confirmations" token="token" novelId="novel-1" />);

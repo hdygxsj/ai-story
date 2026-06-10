@@ -1,6 +1,9 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.agent.checkpoint import close_checkpointer
 from app.api.routes import (
     agent_router,
     auth_router,
@@ -15,7 +18,13 @@ from app.api.routes import (
 from app.core.config import settings
 
 
-app = FastAPI(title=settings.app_name)
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    yield
+    await close_checkpointer()
+
+
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
