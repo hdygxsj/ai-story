@@ -163,14 +163,17 @@ def finalize_node(state: AgentState) -> dict[str, Any]:
     }
 
 
-def build_agent_graph():
-    tools = get_agent_tools()
+def build_agent_graph(
+    tools: list | None = None,
+    checkpointer=None,
+):
+    tool_list = tools or get_agent_tools()
     graph = StateGraph(AgentState)
     graph.add_node("agent", agent_node)
-    graph.add_node("tools", ToolNode(tools))
+    graph.add_node("tools", ToolNode(tool_list))
     graph.add_node("finalize", finalize_node)
     graph.set_entry_point("agent")
     graph.add_conditional_edges("agent", tools_condition, {"tools": "tools", END: "finalize"})
     graph.add_edge("tools", "finalize")
     graph.add_edge("finalize", END)
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)

@@ -6,7 +6,8 @@ from uuid import UUID
 from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.graph import _build_agent_system_prompt, _message_text, build_agent_graph
+from app.agent.graph import _build_agent_system_prompt, _message_text
+from app.agent.runtime import invoke_agent_graph
 from app.agent.model_runtime import build_chat_model
 from app.agent.tools import classify_agent_intent
 from app.models import ModelProfile, Novel
@@ -42,15 +43,17 @@ async def stream_agent_events(
     intent = classify_agent_intent(message, selected_text)
 
     if intent == "rewrite_selection" and selected_text and document_id:
-        graph = build_agent_graph()
-        result = graph.invoke(
-            {
+        result = await invoke_agent_graph(
+            session,
+            state={
                 "novel_id": novel.id,
                 "document_id": document_id,
                 "message": message,
                 "model_profile": model_profile,
                 "selected_text": selected_text,
-            }
+            },
+            model_profile=model_profile,
+            conversation_id=conversation_id,
         )
         response = result.get("response", "")
         if response:

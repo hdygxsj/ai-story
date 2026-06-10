@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.chat_stream import _sse, stream_agent_events
-from app.agent.graph import build_agent_graph
+from app.agent.runtime import invoke_agent_graph
 from app.agent.tools import classify_agent_intent
 from app.api.deps import get_current_user
 from app.db.session import get_session
@@ -171,15 +171,17 @@ async def send_agent_message(
             workspace_nodes=workspace_nodes,
         )
 
-    graph = build_agent_graph()
-    result = graph.invoke(
-        {
+    result = await invoke_agent_graph(
+        session,
+        state={
             "novel_id": novel_id,
             "document_id": payload.document_id,
             "message": payload.message,
             "model_profile": model_profile,
             "selected_text": payload.selected_text,
-        }
+        },
+        model_profile=model_profile,
+        conversation_id=conversation.id,
     )
 
     confirmation = None
