@@ -49,6 +49,70 @@ def test_key_memory_is_created_as_review_item_then_approved() -> None:
     assert approved.json()["importance"] == 100
 
 
+def test_direct_memory_create_appears_in_formal_list_without_review_item() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client)
+    novel = client.post("/novels", headers=headers, json={"title": "Direct Memory Book"}).json()
+
+    created = client.post(
+        f"/novels/{novel['id']}/memory-items",
+        headers=headers,
+        json={
+            "memory_type": "character_fact",
+            "title": "A hidden lineage",
+            "body": "Mara is the last heir of the northern house.",
+            "importance": 80,
+            "metadata": {"origin": "direct-api"},
+        },
+    )
+
+    assert created.status_code == 201
+    memory_id = created.json()["id"]
+    formal_items = client.get(f"/novels/{novel['id']}/memory-items", headers=headers)
+    review_items = client.get(f"/novels/{novel['id']}/memory-review-items", headers=headers)
+
+    assert formal_items.status_code == 200
+    assert any(item["id"] == memory_id for item in formal_items.json())
+    assert review_items.status_code == 200
+    assert all(item["title"] != "A hidden lineage" for item in review_items.json())
+
+
+def test_memory_delete_hides_missing_items_and_other_owners() -> None:
+    client = TestClient(app)
+    owner_headers = auth_headers(client)
+    novel = client.post("/novels", headers=owner_headers, json={"title": "Owner Memory Book"}).json()
+    memory = client.post(
+        f"/novels/{novel['id']}/memory-items",
+        headers=owner_headers,
+        json={
+            "memory_type": "key_memory",
+            "title": "Owner-only memory",
+            "body": "Only the novel owner may remove this memory.",
+        },
+    ).json()
+
+    client.post(
+        "/auth/register",
+        json={"email": "memory-other@example.com", "username": "memory-other", "password": "secret123"},
+    )
+    other_token = client.post(
+        "/auth/login",
+        json={"login": "memory-other@example.com", "password": "secret123"},
+    ).json()["access_token"]
+    other_headers = {"Authorization": f"Bearer {other_token}"}
+
+    forbidden_delete = client.delete(f"/memory-items/{memory['id']}", headers=other_headers)
+    owner_delete = client.delete(f"/memory-items/{memory['id']}", headers=owner_headers)
+    repeated_delete = client.delete(f"/memory-items/{memory['id']}", headers=owner_headers)
+
+    assert forbidden_delete.status_code == 404
+    assert forbidden_delete.json() == {"detail": "Memory item not found"}
+    assert owner_delete.status_code == 204
+    assert owner_delete.content == b""
+    assert repeated_delete.status_code == 404
+    assert repeated_delete.json() == {"detail": "Memory item not found"}
+
+
 @pytest.mark.asyncio
 async def test_create_memory_item_persists_memory_and_rag_chunk(
     session: AsyncSession,

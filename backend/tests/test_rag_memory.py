@@ -71,6 +71,45 @@ def test_approved_memory_indexes_rag_chunk_for_search() -> None:
     assert results.json()[0]["source_type"] == "memory"
 
 
+def test_direct_memory_create_and_delete_updates_rag_search() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client)
+    novel = client.post("/novels", headers=headers, json={"title": "Direct Memory RAG Novel"}).json()
+    created = client.post(
+        f"/novels/{novel['id']}/memory-items",
+        headers=headers,
+        json={
+            "memory_type": "key_memory",
+            "title": "Obsidian compass oath",
+            "body": "The obsidian compass must be returned before sunrise.",
+            "importance": 90,
+        },
+    )
+
+    assert created.status_code == 201
+    memory_id = created.json()["id"]
+    indexed_results = client.get(
+        f"/novels/{novel['id']}/rag/search?query=obsidian compass oath",
+        headers=headers,
+    )
+
+    assert indexed_results.status_code == 200
+    assert any(
+        item["source_type"] == "memory" and item["source_id"] == memory_id
+        for item in indexed_results.json()
+    )
+
+    deleted = client.delete(f"/memory-items/{memory_id}", headers=headers)
+    remaining_results = client.get(
+        f"/novels/{novel['id']}/rag/search?query=obsidian compass oath",
+        headers=headers,
+    )
+
+    assert deleted.status_code == 204
+    assert remaining_results.status_code == 200
+    assert all(item["source_id"] != memory_id for item in remaining_results.json())
+
+
 def test_context_loader_prioritizes_key_memory_and_rag_results() -> None:
     pack = build_agent_context(
         user_instruction="Continue the scene.",
