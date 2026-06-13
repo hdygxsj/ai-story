@@ -1158,4 +1158,79 @@ describe("WorkspacePage", () => {
     await user.click(screen.getByRole("button", { name: "写入正文" }));
     expect(await screen.findByText("Agent 已写入正文")).toBeInTheDocument();
   });
+
+  it("shows tool call records in the Agent dialog", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      const conversationResponse = conversationMockResponse(url);
+      if (conversationResponse) {
+        return Promise.resolve(conversationResponse);
+      }
+      if (url.endsWith("/novels/novel-1/nodes")) {
+        return Promise.resolve(
+          jsonResponse([
+            { id: "node-1", title: "第一章", node_type: "chapter", parent_id: null, document_id: "doc-1", position: 0 },
+          ]),
+        );
+      }
+      if (url.endsWith("/documents/doc-1/versions")) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith("/documents/doc-1")) {
+        return Promise.resolve(jsonResponse({ id: "doc-1", content: { type: "doc", content: [] } }));
+      }
+      if (url.endsWith("/novels/novel-1/agent/messages/stream")) {
+        return Promise.resolve(
+          sseResponse([
+            {
+              type: "tool_call",
+              id: "run-1",
+              tool: "create_chapter_with_content",
+              status: "running",
+              args: { title: "第一章", content: "正文内容" },
+              summary: null,
+            },
+            {
+              type: "tool_call",
+              id: "run-1",
+              tool: "create_chapter_with_content",
+              status: "ok",
+              args: { title: "第一章", content: "正文内容" },
+              summary: "已将《第一章》写入工作台。",
+            },
+            { type: "delta", content: "第一章已写入。" },
+            {
+              type: "done",
+              message: "第一章已写入。",
+              context_status: [],
+              conversation_id: "conv-tools",
+              confirmation: null,
+              tool_calls: [
+                {
+                  id: "run-1",
+                  tool: "create_chapter_with_content",
+                  status: "ok",
+                  args: { title: "第一章", content: "正文内容" },
+                  summary: "已将《第一章》写入工作台。",
+                },
+              ],
+            },
+          ]),
+        );
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
+    await user.type(
+      screen.getByPlaceholderText("让 Agent 规划、改写、记录记忆或检索上下文"),
+      "写完第一章{Enter}",
+    );
+
+    expect(await screen.findByTestId("agent-tool-trace")).toBeInTheDocument();
+    expect(screen.getByText("写入章节")).toBeInTheDocument();
+    expect(screen.getByText("已将《第一章》写入工作台。")).toBeInTheDocument();
+  });
 });
