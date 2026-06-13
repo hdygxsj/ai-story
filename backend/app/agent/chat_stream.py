@@ -53,6 +53,8 @@ async def stream_agent_events(
                 "selected_text": selected_text,
             },
             model_profile=model_profile,
+            owner_id=novel.owner_id,
+            novel_id=novel.id,
             conversation_id=conversation_id,
         )
         response = result.get("response", "")

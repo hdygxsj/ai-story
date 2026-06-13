@@ -156,6 +156,11 @@ def finalize_node(state: AgentState) -> dict[str, Any]:
             "response": str(tool_result["message"]),
             "proposed_payload": tool_result["payload"],
         }
+    if tool_result.get("action_type") == "memory_saved":
+        return {
+            "response": str(tool_result["message"]),
+            "proposed_payload": None,
+        }
 
     return {
         "response": "I prepared an Agent proposal for review.",

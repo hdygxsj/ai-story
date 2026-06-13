@@ -182,6 +182,8 @@ async def send_agent_message(
             "selected_text": payload.selected_text,
         },
         model_profile=model_profile,
+        owner_id=current_user.id,
+        novel_id=novel_id,
         conversation_id=conversation.id,
     )
 

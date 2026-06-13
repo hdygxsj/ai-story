@@ -20,9 +20,16 @@ async def invoke_agent_graph(
     *,
     state: dict[str, Any],
     model_profile: ModelProfile | None,
+    owner_id: UUID,
+    novel_id: UUID,
     conversation_id: UUID | None = None,
 ) -> dict[str, Any]:
     checkpointer = await get_checkpointer()
-    tools = build_runtime_tools(session, model_profile=model_profile)
+    tools = build_runtime_tools(
+        session,
+        model_profile=model_profile,
+        owner_id=owner_id,
+        novel_id=novel_id,
+    )
     graph = build_agent_graph(tools=tools, checkpointer=checkpointer)
     return await graph.ainvoke(state, graph_invoke_config(conversation_id))
