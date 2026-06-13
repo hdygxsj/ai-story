@@ -19,6 +19,7 @@ import { AgentMarkdown } from "./AgentMarkdown";
 import { ContextSettingsDrawer } from "./ContextSettingsDrawer";
 import { ContextStatusBar } from "./ContextStatusBar";
 import { ConversationSidebar } from "./ConversationSidebar";
+import "./agent-panel.css";
 
 type AgentPanelProps = {
   hasModelProfile?: boolean;
@@ -27,8 +28,10 @@ type AgentPanelProps = {
   novelId: string;
   documentId?: string | null;
   onClearSelectedText?: () => void;
+  onDismissWorkspaceDiff?: () => void;
+  onRunCompleted?: () => void | Promise<void>;
   onUndoWorkspaceDiff?: () => void;
-  onWorkspaceOrganized?: (nodes: WorkspaceNode[], diff: WorkspaceDiff) => void;
+  onWorkspaceOrganized?: (nodes: WorkspaceNode[], diff?: WorkspaceDiff | null) => void;
   rewriteRequest?: { id: number; text: string } | null;
   selectedText?: string | null;
   workspaceDiff?: WorkspaceDiff | null;
@@ -57,13 +60,15 @@ export function AgentPanel({
   novelId,
   documentId,
   onClearSelectedText,
+  onDismissWorkspaceDiff,
+  onRunCompleted,
   onUndoWorkspaceDiff,
   onWorkspaceOrganized,
   rewriteRequest,
   selectedText,
   workspaceDiff,
 }: AgentPanelProps) {
-  const [message, setMessage] = useState("请帮我改写选中的段落，让张力更强。");
+  const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>(welcomeMessages);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -146,7 +151,7 @@ export function AgentPanel({
           appendAssistantContent(assistantId, content);
         },
         onDone: (payload) => {
-          if (payload.workspace_diff && payload.workspace_nodes) {
+          if (payload.workspace_nodes) {
             onWorkspaceOrganized?.(payload.workspace_nodes, payload.workspace_diff);
           }
           if (payload.conversation_id) {
@@ -160,6 +165,11 @@ export function AgentPanel({
           finalizeAssistantMessage(assistantId, finalMessage);
           setStreaming(false);
           activeAssistantIdRef.current = null;
+          try {
+            void Promise.resolve(onRunCompleted?.()).catch(() => undefined);
+          } catch {
+            // The completed Agent response remains usable if a background refresh fails.
+          }
           void refreshConversations().catch(() => undefined);
         },
         onError: (caught) => {
@@ -226,10 +236,29 @@ export function AgentPanel({
 
   return (
     <Card
+      className="agent-panel-card"
       title={
-        <Typography.Title level={3} style={{ margin: 0 }}>
-          共创 Agent
-        </Typography.Title>
+        <div className="agent-panel-header" data-testid="agent-panel-header">
+          <Typography.Title level={4} style={{ margin: 0, whiteSpace: "nowrap" }}>
+            共创 Agent
+          </Typography.Title>
+          <ConversationSidebar
+            activeConversationId={activeConversationId}
+            conversations={conversations}
+            disabled={streaming}
+            onCreateConversation={() => void handleCreateConversation().catch((caught: Error) => setError(caught.message))}
+            onDeleteConversation={(conversationId) =>
+              void handleDeleteConversation(conversationId).catch((caught: Error) => setError(caught.message))
+            }
+            onOpenContextSettings={() => setSettingsOpen(true)}
+            onRenameConversation={(conversationId, title) =>
+              void handleRenameConversation(conversationId, title).catch((caught: Error) => setError(caught.message))
+            }
+            onSelectConversation={(conversationId) =>
+              void handleSelectConversation(conversationId).catch((caught: Error) => setError(caught.message))
+            }
+          />
+        </div>
       }
       extra={
         streaming ? (
@@ -250,7 +279,7 @@ export function AgentPanel({
         minHeight: 0,
         minWidth: 0,
       }}
-      styles={{ body: { display: "flex", flex: 1, flexDirection: "column", gap: 16, minHeight: 0, overflow: "hidden", padding: 12 } }}
+      styles={{ body: { display: "flex", flex: 1, flexDirection: "column", gap: 0, minHeight: 0, overflow: "hidden", padding: 12 } }}
     >
       {!hasModelProfile ? (
         <Alert
@@ -263,143 +292,138 @@ export function AgentPanel({
           }
           description="配置模型后可测试连通性，并让 Agent 正常对话、写作和检索。"
           showIcon
-          style={{ flexShrink: 0 }}
+          style={{ flexShrink: 0, marginBottom: 10 }}
           title="尚未配置模型"
           type="warning"
         />
       ) : null}
-      <Flex style={{ flex: "1 1 0", minHeight: 0 }}>
-        <ConversationSidebar
-          activeConversationId={activeConversationId}
-          conversations={conversations}
-          disabled={streaming}
-          onCreateConversation={() => void handleCreateConversation().catch((caught: Error) => setError(caught.message))}
-          onDeleteConversation={(conversationId) =>
-            void handleDeleteConversation(conversationId).catch((caught: Error) => setError(caught.message))
-          }
-          onOpenContextSettings={() => setSettingsOpen(true)}
-          onRenameConversation={(conversationId, title) =>
-            void handleRenameConversation(conversationId, title).catch((caught: Error) => setError(caught.message))
-          }
-          onSelectConversation={(conversationId) =>
-            void handleSelectConversation(conversationId).catch((caught: Error) => setError(caught.message))
-          }
-        />
-        <Flex vertical style={{ flex: 1, gap: 16, minHeight: 0, minWidth: 0 }}>
-          <ContextStatusBar detail={contextDetail} />
-          <div data-testid="agent-message-scroll" style={{ flex: "1 1 0", minHeight: 0, overflow: "auto" }}>
-            <Bubble.List
-              autoScroll
-              items={messages.map((item) => ({
-                key: item.id,
-                role: item.role === "assistant" ? "ai" : "user",
-                content:
-                  item.role === "assistant" ? (
-                    <AgentMarkdown
-                      content={item.content || (streaming && item.id === activeAssistantIdRef.current ? "..." : "")}
-                    />
-                  ) : (
-                    item.content
-                  ),
-              }))}
-              role={{
-                ai: { placement: "start", variant: "shadow" },
-                user: { placement: "end", variant: "filled" },
-              }}
-              style={{ minHeight: 0 }}
-            />
-          </div>
-          {error ? <Alert message={error} showIcon style={{ flexShrink: 0 }} type="error" /> : null}
-          {workspaceDiff ? (
-            <div
-              aria-label="Agent 目录变更"
-              style={{
-                background: "#fff7ed",
-                border: "1px solid rgba(249,115,22,0.24)",
-                borderRadius: 16,
-                flexShrink: 0,
-                padding: 12,
-              }}
-            >
-              <Flex align="center" justify="space-between" gap={8}>
-                <Typography.Text strong>{workspaceDiff.summary}</Typography.Text>
+      <div className="agent-panel-chat">
+        <ContextStatusBar detail={contextDetail} />
+        <div
+          className="agent-panel-messages"
+          data-testid="agent-message-scroll"
+          style={{ flex: "1 1 0", minHeight: 0, overflow: "auto" }}
+        >
+          <Bubble.List
+            autoScroll
+            items={messages.map((item) => ({
+              key: item.id,
+              role: item.role === "assistant" ? "ai" : "user",
+              content:
+                item.role === "assistant" ? (
+                  <AgentMarkdown
+                    content={item.content || (streaming && item.id === activeAssistantIdRef.current ? "..." : "")}
+                  />
+                ) : (
+                  item.content
+                ),
+            }))}
+            role={{
+              ai: { placement: "start", variant: "shadow" },
+              user: { placement: "end", variant: "filled" },
+            }}
+          />
+        </div>
+        {error ? <Alert message={error} showIcon style={{ flexShrink: 0 }} type="error" /> : null}
+        {workspaceDiff ? (
+          <div
+            aria-label="Agent 目录变更"
+            style={{
+              background: "#fff7ed",
+              border: "1px solid rgba(249,115,22,0.24)",
+              borderRadius: 16,
+              flexShrink: 0,
+              padding: 12,
+            }}
+          >
+            <Flex align="center" justify="space-between" gap={8}>
+              <Typography.Text strong>{workspaceDiff.summary}</Typography.Text>
+              <Space size={4}>
                 <Button size="small" onClick={onUndoWorkspaceDiff}>
                   撤销本次整理
                 </Button>
-              </Flex>
-              <Space direction="vertical" size={4} style={{ marginTop: 8, width: "100%" }}>
-                {workspaceDiff.changes.map((change) => (
-                  <Typography.Text key={`${change.action}-${change.node_id}`} type="secondary">
-                    {change.action === "move" ? "移动" : change.action}：{change.title}
-                  </Typography.Text>
-                ))}
-              </Space>
-            </div>
-          ) : null}
-          {selectedText ? (
-            <div
-              aria-label="Agent 引用卡"
-              style={{
-                background: "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
-                border: "1px solid rgba(99,91,255,0.18)",
-                borderRadius: 16,
-                boxShadow: "0 14px 36px rgba(15,23,42,0.10)",
-                flexShrink: 0,
-                padding: 12,
-              }}
-            >
-              <Flex align="center" justify="space-between">
-                <Space size={8}>
-                  <PushpinOutlined style={{ color: "#635bff" }} />
-                  <Typography.Text strong>已引用选中段落</Typography.Text>
-                  <Tag color="purple">来自正文</Tag>
-                </Space>
                 <Button
-                  aria-label="移除引用"
+                  aria-label="关闭目录变更提示"
                   icon={<CloseOutlined />}
-                  onClick={onClearSelectedText}
-                  shape="circle"
+                  onClick={onDismissWorkspaceDiff}
                   size="small"
                   type="text"
                 />
-              </Flex>
-              <Typography.Paragraph
-                ellipsis={{ rows: 2 }}
-                style={{
-                  background: "#f5f7fb",
-                  borderLeft: "3px solid #635bff",
-                  borderRadius: 10,
-                  color: "#374151",
-                  margin: "10px 0",
-                  padding: "8px 10px",
-                }}
-              >
-                {selectedText}
-              </Typography.Paragraph>
-              <Space wrap>
-                <Button disabled={streaming} size="small" onClick={() => void handleQuoteAction("analyze")}>
-                  解析引用
-                </Button>
-                <Button disabled={streaming} size="small" type="primary" onClick={() => void handleQuoteAction("rewrite")}>
-                  改写引用
-                </Button>
-                <Button disabled={streaming} size="small" onClick={() => void handleQuoteAction("polish")}>
-                  润色引用
-                </Button>
               </Space>
-            </div>
-          ) : null}
-          <div data-testid="agent-input-shell" style={{ flexShrink: 0 }}>
-            <Sender
-              loading={streaming}
-              placeholder="让 Agent 规划、改写、记录记忆或检索上下文"
-              value={message}
-              onChange={setMessage}
-              onSubmit={handleSend}
-            />
+            </Flex>
+            <Space direction="vertical" size={4} style={{ marginTop: 8, width: "100%" }}>
+              {workspaceDiff.changes.map((change) => (
+                <Typography.Text key={`${change.action}-${change.node_id}`} type="secondary">
+                  {change.action === "move" ? "移动" : change.action === "trash" ? "删除" : change.action}：
+                  {change.title}
+                </Typography.Text>
+              ))}
+            </Space>
           </div>
-        </Flex>
-      </Flex>
+        ) : null}
+        {selectedText ? (
+          <div
+            aria-label="Agent 引用卡"
+            style={{
+              background: "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
+              border: "1px solid rgba(99,91,255,0.18)",
+              borderRadius: 16,
+              boxShadow: "0 14px 36px rgba(15,23,42,0.10)",
+              flexShrink: 0,
+              padding: 12,
+            }}
+          >
+            <Flex align="center" justify="space-between">
+              <Space size={8}>
+                <PushpinOutlined style={{ color: "#635bff" }} />
+                <Typography.Text strong>已引用选中段落</Typography.Text>
+                <Tag color="purple">来自正文</Tag>
+              </Space>
+              <Button
+                aria-label="移除引用"
+                icon={<CloseOutlined />}
+                onClick={onClearSelectedText}
+                shape="circle"
+                size="small"
+                type="text"
+              />
+            </Flex>
+            <Typography.Paragraph
+              ellipsis={{ rows: 2 }}
+              style={{
+                background: "#f5f7fb",
+                borderLeft: "3px solid #635bff",
+                borderRadius: 10,
+                color: "#374151",
+                margin: "10px 0",
+                padding: "8px 10px",
+              }}
+            >
+              {selectedText}
+            </Typography.Paragraph>
+            <Space wrap>
+              <Button disabled={streaming} size="small" onClick={() => void handleQuoteAction("analyze")}>
+                解析引用
+              </Button>
+              <Button disabled={streaming} size="small" type="primary" onClick={() => void handleQuoteAction("rewrite")}>
+                改写引用
+              </Button>
+              <Button disabled={streaming} size="small" onClick={() => void handleQuoteAction("polish")}>
+                润色引用
+              </Button>
+            </Space>
+          </div>
+        ) : null}
+        <div className="agent-panel-input" data-testid="agent-input-shell" style={{ flexShrink: 0 }}>
+          <Sender
+            loading={streaming}
+            placeholder="让 Agent 规划、改写、记录记忆或检索上下文"
+            value={message}
+            onChange={setMessage}
+            onSubmit={handleSend}
+          />
+        </div>
+      </div>
       <ContextSettingsDrawer
         novelId={novelId}
         open={settingsOpen}

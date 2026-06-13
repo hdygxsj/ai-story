@@ -7,7 +7,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.model_runtime import embed_with_model_profile
-from app.models import ModelProfile, Novel, RagChunk
+from app.models import ModelProfile, Novel, RagChunk, WorkspaceNode
 
 EMBEDDING_DIMENSIONS = 64
 
@@ -98,10 +98,29 @@ async def search_rag_chunks(
     query: str,
     limit: int = 8,
     model_profile: ModelProfile | None = None,
+    excluded_source_types: set[str] | None = None,
 ) -> list[RagChunk]:
     chunks = list(
         await session.scalars(select(RagChunk).where(RagChunk.novel_id == novel_id))
     )
+    excluded = excluded_source_types or set()
+    active_document_ids = {
+        str(document_id)
+        for document_id in await session.scalars(
+            select(WorkspaceNode.document_id).where(
+                WorkspaceNode.novel_id == novel_id,
+                WorkspaceNode.status != "trashed",
+                WorkspaceNode.document_id.is_not(None),
+            )
+        )
+        if document_id is not None
+    }
+    chunks = [
+        chunk
+        for chunk in chunks
+        if chunk.source_type not in excluded
+        and (chunk.source_type != "document" or chunk.source_id in active_document_ids)
+    ]
     query_embedding = await embed_text(query, model_profile)
     return sorted(
         chunks,

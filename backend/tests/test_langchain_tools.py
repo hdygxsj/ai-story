@@ -1,12 +1,14 @@
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from langchain_core.messages import AIMessage
-from langchain_core.tools import BaseTool
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.tools import BaseTool, tool
 
-from app.agent.graph import build_agent_graph
-from app.agent.tools import get_agent_tools
+from app.agent.graph import _remove_incomplete_tool_call_history, build_agent_graph
+from app.agent.tool_runtime import build_runtime_tools
+from app.agent.tools import classify_agent_intent, get_agent_tools
 from app.core.crypto import encrypt_api_key
-from app.models import ModelProfile
+from app.models import Document, DocumentVersion, ModelProfile, Novel, PendingConfirmation, User, WorkspaceNode
+from app.services.rag import extract_text_from_prosemirror
 
 
 def test_agent_tool_registry_exposes_structured_langchain_tools() -> None:
@@ -25,8 +27,175 @@ def test_agent_tool_registry_exposes_structured_langchain_tools() -> None:
         "create_world_rule",
         "create_timeline_event",
         "update_character_state",
-        "propose_workspace_change",
+        "list_workspace_nodes",
+        "create_workspace_node",
+        "create_chapter_with_content",
+        "propose_document_update",
+        "propose_selection_replace",
+        "list_document_versions",
+        "propose_version_restore",
+        "restore_workspace_node",
+        "update_workspace_node",
+        "trash_workspace_node",
+        "organize_workspace_tree",
+        "cleanup_workspace_folders",
+        "list_memory_items",
+        "list_creative_assets",
+        "list_timeline_events",
     }.issubset(tool_names)
+
+
+async def test_create_chapter_with_content_persists_workspace_document(session, monkeypatch) -> None:
+    async def fake_index_text(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.services.workspace_actions.index_text", fake_index_text)
+    user = User(email="writer@example.com", username="writer", password_hash="hash")
+    session.add(user)
+    await session.flush()
+    novel = Novel(owner_id=user.id, title="Written Novel")
+    session.add(novel)
+    await session.commit()
+
+    tools = {tool.name: tool for tool in build_runtime_tools(session, model_profile=None)}
+    result = await tools["create_chapter_with_content"].ainvoke(
+        {
+            "novel_id": str(novel.id),
+            "title": "第一章 雾港",
+            "content": "雾从海面漫上来，灯塔第一次熄灭。",
+            "parent_id": None,
+        }
+    )
+
+    node = await session.get(WorkspaceNode, UUID(result["node"]["id"]))
+    document = await session.get(Document, node.document_id)
+    versions = list(
+        await session.scalars(
+            __import__("sqlalchemy").select(DocumentVersion).where(DocumentVersion.document_id == document.id)
+        )
+    )
+    assert result["status"] == "ok"
+    assert result["action_type"] == "chapter_write"
+    assert extract_text_from_prosemirror(document.content) == "雾从海面漫上来，灯塔第一次熄灭。"
+    assert versions[0].source == "agent"
+
+
+async def test_create_chapter_with_content_rejects_empty_content(session) -> None:
+    user = User(email="empty@example.com", username="empty", password_hash="hash")
+    session.add(user)
+    await session.flush()
+    novel = Novel(owner_id=user.id, title="Empty Novel")
+    session.add(novel)
+    await session.commit()
+
+    tools = {tool.name: tool for tool in build_runtime_tools(session, model_profile=None)}
+    result = await tools["create_chapter_with_content"].ainvoke(
+        {"novel_id": str(novel.id), "title": "第一章", "content": "   ", "parent_id": None}
+    )
+
+    nodes = list(await session.scalars(__import__("sqlalchemy").select(WorkspaceNode)))
+    assert result["status"] == "error"
+    assert nodes == []
+
+
+async def test_scoped_document_tools_create_confirmation_and_hide_other_novels(session) -> None:
+    user = User(email="scope@example.com", username="scope", password_hash="hash")
+    session.add(user)
+    await session.flush()
+    current_novel = Novel(owner_id=user.id, title="Current")
+    other_novel = Novel(owner_id=user.id, title="Other")
+    session.add_all([current_novel, other_novel])
+    await session.flush()
+    current_document = Document(
+        novel_id=current_novel.id,
+        content={"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "当前"}]}]},
+    )
+    other_document = Document(novel_id=other_novel.id)
+    session.add_all([current_document, other_document])
+    await session.commit()
+
+    tools = {
+        tool.name: tool
+        for tool in build_runtime_tools(
+            session,
+            model_profile=None,
+            owner_id=user.id,
+            novel_id=current_novel.id,
+        )
+    }
+    proposal = await tools["propose_document_update"].ainvoke(
+        {"document_id": str(current_document.id), "content": "更新正文"}
+    )
+    hidden = await tools["read_document"].ainvoke({"document_id": str(other_document.id)})
+    created = await tools["create_workspace_node"].ainvoke(
+        {
+            "novel_id": str(other_novel.id),
+            "title": "必须写入当前小说",
+            "node_type": "folder",
+            "parent_id": None,
+        }
+    )
+
+    confirmation = await session.get(PendingConfirmation, UUID(proposal["confirmation_id"]))
+    assert proposal["status"] == "ok"
+    assert confirmation.action_type == "document_update"
+    assert hidden["status"] == "error"
+    created_node = await session.get(WorkspaceNode, UUID(created["node"]["id"]))
+    assert created_node.novel_id == current_novel.id
+
+
+async def test_restore_workspace_node_tool_restores_trashed_node(session) -> None:
+    user = User(email="restore@example.com", username="restore", password_hash="hash")
+    session.add(user)
+    await session.flush()
+    novel = Novel(owner_id=user.id, title="Restore")
+    session.add(novel)
+    await session.flush()
+    node = WorkspaceNode(novel_id=novel.id, title="旧章节", node_type="chapter", status="trashed")
+    session.add(node)
+    await session.commit()
+
+    tools = {
+        tool.name: tool
+        for tool in build_runtime_tools(
+            session,
+            model_profile=None,
+            owner_id=user.id,
+            novel_id=novel.id,
+        )
+    }
+    result = await tools["restore_workspace_node"].ainvoke({"node_id": str(node.id)})
+
+    await session.refresh(node)
+    assert result["status"] == "ok"
+    assert result["workspace_diff"]["changes"][0]["action"] == "restore"
+    assert node.status == "draft"
+
+
+def test_agent_classifies_cleanup_chapters_as_workspace_cleanup() -> None:
+    assert classify_agent_intent("清理一下章节", None) == "cleanup_workspace"
+
+
+def test_agent_classifies_delete_written_followup_as_workspace_cleanup() -> None:
+    assert classify_agent_intent("有正文的也删除", None) == "cleanup_workspace"
+
+
+def test_agent_removes_incomplete_tool_call_history() -> None:
+    messages = [
+        HumanMessage(content="先读取文档和目录"),
+        AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "read_document", "args": {}, "id": "call-document"},
+                {"name": "list_workspace_nodes", "args": {}, "id": "call-workspace"},
+            ],
+        ),
+        ToolMessage(content="{}", tool_call_id="call-document"),
+    ]
+
+    cleaned = _remove_incomplete_tool_call_history(messages)
+
+    assert cleaned == [messages[0]]
 
 
 def test_agent_graph_uses_tool_result_for_rewrite_confirmation_payload() -> None:
@@ -50,6 +219,9 @@ def test_agent_graph_uses_tool_result_for_rewrite_confirmation_payload() -> None
 
 def test_agent_chat_uses_configured_model_response(monkeypatch) -> None:
     class FakeChatModel:
+        def bind_tools(self, tools):
+            return self
+
         def invoke(self, messages):
             return AIMessage(content="我可以帮你规划第一卷的冲突和人物弧光。")
 
@@ -66,12 +238,11 @@ def test_agent_chat_uses_configured_model_response(monkeypatch) -> None:
         summary_model="deepseek-v4-pro",
         embedding_model="",
     )
-    graph = build_agent_graph()
+    graph = build_agent_graph(model_profile=profile)
     result = graph.invoke(
         {
             "novel_id": uuid4(),
             "message": "我想写小说",
-            "model_profile": profile,
         }
     )
 
@@ -88,3 +259,89 @@ def test_agent_chat_without_model_profile_prompts_configuration() -> None:
     )
 
     assert "Agent 配置" in result["response"]
+
+
+async def test_agent_graph_executes_multiple_tools_sequentially(monkeypatch) -> None:
+    running = False
+    calls: list[str] = []
+
+    @tool("first_tool")
+    async def first_tool() -> dict[str, str]:
+        """Run the first test tool."""
+        nonlocal running
+        assert not running
+        running = True
+        calls.append("first:start")
+        await __import__("asyncio").sleep(0)
+        calls.append("first:end")
+        running = False
+        return {"status": "ok", "message": "first"}
+
+    @tool("second_tool")
+    async def second_tool() -> dict[str, str]:
+        """Run the second test tool."""
+        nonlocal running
+        assert not running
+        running = True
+        calls.append("second:start")
+        await __import__("asyncio").sleep(0)
+        calls.append("second:end")
+        running = False
+        return {"status": "ok", "message": "second"}
+
+    class FakeChatModel:
+        def bind_tools(self, tools):
+            return self
+
+        def invoke(self, messages):
+            if any(getattr(message, "type", "") == "tool" for message in messages):
+                return AIMessage(content="done")
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "first_tool", "args": {}, "id": "call-first"},
+                    {"name": "second_tool", "args": {}, "id": "call-second"},
+                ],
+            )
+
+    monkeypatch.setattr("app.agent.graph.build_chat_model", lambda profile, purpose="chat": FakeChatModel())
+    profile = ModelProfile(owner_id=uuid4(), name="test", provider_kind="openai-compatible", chat_model="test")
+    graph = build_agent_graph(tools=[first_tool, second_tool], model_profile=profile)
+
+    result = await graph.ainvoke({"novel_id": uuid4(), "message": "run tools"})
+
+    assert result["response"] == "done"
+    assert calls == ["first:start", "first:end", "second:start", "second:end"]
+
+
+async def test_agent_graph_preserves_workspace_effects_after_final_model_reply(monkeypatch) -> None:
+    @tool("write_chapter")
+    async def write_chapter() -> dict[str, object]:
+        """Write a chapter."""
+        return {
+            "status": "ok",
+            "action_type": "chapter_write",
+            "message": "已写入。",
+            "workspace_nodes": [{"id": "node-1", "document_id": "doc-1"}],
+        }
+
+    class FakeChatModel:
+        def bind_tools(self, tools):
+            return self
+
+        def invoke(self, messages):
+            if any(isinstance(message, ToolMessage) for message in messages):
+                return AIMessage(content="第一章已写入工作台。")
+            return AIMessage(
+                content="",
+                tool_calls=[{"name": "write_chapter", "args": {}, "id": "call-write"}],
+            )
+
+    monkeypatch.setattr("app.agent.graph.build_chat_model", lambda profile, purpose="chat": FakeChatModel())
+    profile = ModelProfile(owner_id=uuid4(), name="test", provider_kind="openai-compatible", chat_model="test")
+    graph = build_agent_graph(tools=[write_chapter], model_profile=profile)
+
+    result = await graph.ainvoke({"novel_id": uuid4(), "message": "写第一章并放到工作台"})
+
+    assert result["response"] == "第一章已写入工作台。"
+    assert result["workspace_nodes"] == [{"id": "node-1", "document_id": "doc-1"}]

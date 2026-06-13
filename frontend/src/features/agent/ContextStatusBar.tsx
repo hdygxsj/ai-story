@@ -24,6 +24,22 @@ export function ContextStatusBar({ detail }: ContextStatusBarProps) {
 
   const percent = Math.min(100, Math.round(detail.usage_ratio * 100));
   const status = percent >= 85 ? "exception" : percent >= 70 ? "active" : "normal";
+  const groupedItems = Array.from(
+    detail.items.reduce(
+      (groups, item) => {
+        const existing = groups.get(item.source);
+        if (existing) {
+          existing.count += 1;
+          existing.tokens += item.tokens;
+          existing.compressed ||= item.compressed;
+        } else {
+          groups.set(item.source, { ...item, count: 1 });
+        }
+        return groups;
+      },
+      new Map<string, (typeof detail.items)[number] & { count: number }>(),
+    ).values(),
+  );
 
   return (
     <div
@@ -47,9 +63,10 @@ export function ContextStatusBar({ detail }: ContextStatusBarProps) {
         </Space>
         <Progress percent={percent} showInfo={false} size="small" status={status} />
         <Space size={[4, 4]} wrap>
-          {detail.items.map((item) => (
-            <Tag color={item.compressed ? "default" : "blue"} key={`${item.source}-${item.tokens}`}>
+          {groupedItems.map((item) => (
+            <Tag color={item.compressed ? "default" : "blue"} key={item.source} title={`${item.tokens} tokens`}>
               {SOURCE_LABELS[item.source] ?? item.source}
+              {item.count > 1 ? ` ${item.count}` : ""}
               {item.compressed ? "（已压缩）" : ""}
             </Tag>
           ))}

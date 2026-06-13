@@ -3,12 +3,10 @@ from collections.abc import AsyncIterator
 from typing import Any
 from uuid import UUID
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.graph import _build_agent_system_prompt, _message_text
-from app.agent.runtime import invoke_agent_graph
-from app.agent.model_runtime import build_chat_model
+from app.agent.graph import _build_agent_system_prompt
+from app.agent.runtime import stream_agent_graph
 from app.agent.tools import classify_agent_intent
 from app.models import ModelProfile, Novel
 from app.services.context_assembly import assemble_context
@@ -42,37 +40,7 @@ async def stream_agent_events(
     pack = assembled.pack
     intent = classify_agent_intent(message, selected_text)
 
-    if intent == "rewrite_selection" and selected_text and document_id:
-        result = await invoke_agent_graph(
-            session,
-            state={
-                "novel_id": novel.id,
-                "document_id": document_id,
-                "message": message,
-                "model_profile": model_profile,
-                "selected_text": selected_text,
-            },
-            model_profile=model_profile,
-            conversation_id=conversation_id,
-        )
-        response = result.get("response", "")
-        if response:
-            yield _sse({"type": "delta", "content": response})
-        yield _sse(
-            {
-                "type": "done",
-                "message": response,
-                "context_status": assembled.status_messages,
-                "context_detail": assembled.context_detail.model_dump(mode="json"),
-                "confirmation": None,
-                "proposed_payload": result.get("proposed_payload"),
-                "workspace_diff": None,
-                "workspace_nodes": None,
-            }
-        )
-        return
-
-    if model_profile is None:
+    if model_profile is None and intent != "rewrite_selection":
         response = "请先在 Agent 配置中为当前小说绑定并保存可用的对话模型。"
         yield _sse({"type": "delta", "content": response})
         yield _sse(
@@ -89,45 +57,47 @@ async def stream_agent_events(
         )
         return
 
-    try:
-        model = build_chat_model(model_profile, purpose="chat")
-        llm_messages = [
-            SystemMessage(content=_build_agent_system_prompt(pack)),
-            *assembled.history_messages,
-            HumanMessage(content=message),
-        ]
-        chunks: list[str] = []
-        async for chunk in model.astream(llm_messages):
-            text = _message_text(getattr(chunk, "content", chunk))
-            if not text:
-                continue
-            chunks.append(text)
-            yield _sse({"type": "delta", "content": text})
-        response = "".join(chunks).strip() or "模型未返回内容，请稍后重试。"
-        yield _sse(
-            {
-                "type": "done",
-                "message": response,
-                "context_status": assembled.status_messages,
-                "context_detail": assembled.context_detail.model_dump(mode="json"),
-                "confirmation": None,
-                "proposed_payload": None,
-                "workspace_diff": None,
-                "workspace_nodes": None,
-            }
-        )
-    except Exception as exc:
-        response = f"对话模型调用失败：{exc}"
+    system_prompt = (
+        _build_agent_system_prompt(pack)
+        + f"\n\n当前小说 ID: {novel.id}"
+        + "\n可用工具包括：章节树增删改查、完整章节写入、记忆读写、素材与时间线整理。需要实际操作时请调用工具。"
+    )
+
+    result: dict[str, Any] = {}
+    streamed_content = ""
+    async for event_type, payload in stream_agent_graph(
+        session,
+        state={
+            "novel_id": novel.id,
+            "document_id": document_id,
+            "message": message,
+            "selected_text": selected_text,
+            "system_prompt": system_prompt,
+        },
+        model_profile=model_profile,
+        owner_id=novel.owner_id,
+        novel_id=novel.id,
+        conversation_id=conversation_id,
+    ):
+        if event_type == "delta":
+            streamed_content += str(payload)
+            yield _sse({"type": "delta", "content": str(payload)})
+        else:
+            result = payload if isinstance(payload, dict) else {}
+
+    response = str(result.get("response", ""))
+    if response and not streamed_content:
         yield _sse({"type": "delta", "content": response})
-        yield _sse(
-            {
-                "type": "done",
-                "message": response,
-                "context_status": assembled.status_messages,
-                "context_detail": assembled.context_detail.model_dump(mode="json"),
-                "confirmation": None,
-                "proposed_payload": None,
-                "workspace_diff": None,
-                "workspace_nodes": None,
-            }
-        )
+    yield _sse(
+        {
+            "type": "done",
+            "message": response,
+            "context_status": assembled.status_messages,
+            "context_detail": assembled.context_detail.model_dump(mode="json"),
+            "confirmation": None,
+            "confirmation_id": result.get("confirmation_id"),
+            "proposed_payload": result.get("proposed_payload"),
+            "workspace_diff": result.get("workspace_diff"),
+            "workspace_nodes": result.get("workspace_nodes"),
+        }
+    )

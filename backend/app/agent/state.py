@@ -11,8 +11,12 @@ class AgentState(TypedDict, total=False):
     document_id: UUID | None
     message: str
     selected_text: str | None
+    system_prompt: str | None
     messages: Annotated[list[Any], add_messages]
     model_profile: ModelProfile | None
     response: str
     context_status: list[str]
     proposed_payload: dict[str, Any] | None
+    confirmation_id: str | None
+    workspace_diff: dict[str, Any] | None
+    workspace_nodes: list[dict[str, Any]] | None

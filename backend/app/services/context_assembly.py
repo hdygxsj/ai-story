@@ -17,6 +17,7 @@ from app.models import (
     Message,
     ModelProfile,
     Novel,
+    RelationshipEdge,
     TimelineEvent,
     WorkspaceNode,
 )
@@ -200,10 +201,17 @@ async def _load_structured_assets(session: AsyncSession, novel_id: UUID) -> list
     assets = await session.scalars(select(CreativeAsset).where(CreativeAsset.novel_id == novel_id).limit(8))
     states = await session.scalars(select(CharacterState).where(CharacterState.novel_id == novel_id).limit(8))
     events = await session.scalars(select(TimelineEvent).where(TimelineEvent.novel_id == novel_id).limit(8))
+    relationships = await session.scalars(
+        select(RelationshipEdge).where(RelationshipEdge.novel_id == novel_id).limit(8)
+    )
     lines: list[str] = []
     lines.extend(f"素材 {item.name}：{item.summary}" for item in assets)
     lines.extend(f"角色状态 {item.character_name}：{item.state}" for item in states)
     lines.extend(f"时间线 {item.title}：{item.summary}" for item in events)
+    lines.extend(
+        f"人物关系 {item.source_character} {item.relationship_type} {item.target_character}：{item.description}"
+        for item in relationships
+    )
     return lines
 
 
@@ -217,7 +225,11 @@ async def _load_neighboring_chapters(
     nodes = list(
         await session.scalars(
             select(WorkspaceNode)
-            .where(WorkspaceNode.novel_id == novel_id, WorkspaceNode.node_type == "chapter")
+            .where(
+                WorkspaceNode.novel_id == novel_id,
+                WorkspaceNode.node_type == "chapter",
+                WorkspaceNode.status != "trashed",
+            )
             .order_by(WorkspaceNode.position, WorkspaceNode.id)
         )
     )
@@ -330,6 +342,12 @@ async def assemble_context(
                 query=user_message,
                 limit=8,
                 model_profile=model_profile,
+                excluded_source_types={
+                    "character_state",
+                    "creative_asset",
+                    "relationship_edge",
+                    "timeline_event",
+                },
             )
             rag_results = [chunk.text for chunk in chunks]
         except Exception:

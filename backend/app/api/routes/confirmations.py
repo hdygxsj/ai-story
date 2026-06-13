@@ -10,6 +10,7 @@ from app.db.session import get_session
 from app.models import Document, DocumentVersion, PendingConfirmation, User
 from app.schemas.confirmation import ConfirmationResponse
 from app.services.novels import get_owned_novel
+from app.services.document_actions import approve_document_confirmation
 from app.services.rag import extract_text_from_prosemirror, index_text
 
 router = APIRouter(tags=["confirmations"])
@@ -35,7 +36,7 @@ async def approve_confirmation(
     confirmation_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> PendingConfirmation:
+) -> dict:
     confirmation = await session.scalar(
         select(PendingConfirmation).where(PendingConfirmation.id == confirmation_id)
     )
@@ -45,7 +46,19 @@ async def approve_confirmation(
     if confirmation.status != "pending":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Confirmation already resolved")
 
-    if confirmation.action_type == "rewrite_selection":
+    document_id = None
+    if confirmation.action_type in {"document_update", "selection_replace", "version_restore"} or (
+        confirmation.action_type == "rewrite_selection"
+        and confirmation.payload.get("expected_updated_at") is not None
+    ):
+        result = await approve_document_confirmation(
+            session,
+            owner_id=current_user.id,
+            confirmation=confirmation,
+        )
+        document_id = UUID(result["document_id"])
+        await session.refresh(confirmation)
+    elif confirmation.action_type == "rewrite_selection":
         document = await session.scalar(
             select(Document).where(
                 Document.id == UUID(confirmation.payload["document_id"]),
@@ -67,10 +80,21 @@ async def approve_confirmation(
             text=extract_text_from_prosemirror(document.content),
         )
 
-    confirmation.status = "approved"
-    await session.commit()
-    await session.refresh(confirmation)
-    return confirmation
+        confirmation.status = "approved"
+        await session.commit()
+        await session.refresh(confirmation)
+        document_id = document.id
+    else:
+        confirmation.status = "approved"
+        await session.commit()
+        await session.refresh(confirmation)
+    return {
+        "id": confirmation.id,
+        "action_type": confirmation.action_type,
+        "status": confirmation.status,
+        "payload": confirmation.payload,
+        "document_id": document_id,
+    }
 
 
 @router.post("/confirmations/{confirmation_id}/reject", response_model=ConfirmationResponse)

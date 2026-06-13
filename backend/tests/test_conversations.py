@@ -42,15 +42,18 @@ def test_create_conversation_and_list_messages(client: TestClient | None = None)
 
 def test_agent_stream_persists_messages(monkeypatch) -> None:
     class FakeChatModel:
-        async def astream(self, messages):
+        def bind_tools(self, tools):
+            return self
+
+        def invoke(self, messages):
             from langchain_core.messages import AIMessage
 
-            yield AIMessage(content="我可以帮你继续写下去。")
+            return AIMessage(content="我可以帮你继续写下去。")
 
-    monkeypatch.setattr("app.agent.chat_stream.build_chat_model", lambda profile, purpose="chat": FakeChatModel())
     async def fake_search_rag(*args, **kwargs):
         return []
 
+    monkeypatch.setattr("app.agent.graph.build_chat_model", lambda profile, purpose="chat": FakeChatModel())
     monkeypatch.setattr("app.services.context_assembly.search_rag_chunks", fake_search_rag)
 
     client = TestClient(app)

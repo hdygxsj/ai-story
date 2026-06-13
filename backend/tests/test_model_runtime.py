@@ -323,14 +323,40 @@ def test_model_profile_route_encrypts_api_key_before_storage() -> None:
     assert "sk-live-secret" not in created.text
 
 
-def test_agent_streaming_endpoint_returns_incremental_response(monkeypatch) -> None:
+def _fake_chat_model_factory():
     class FakeChatModel:
-        async def astream(self, messages):
+        def bind_tools(self, tools):
+            return self
+
+        def invoke(self, messages):
             from langchain_core.messages import AIMessage
 
-            yield AIMessage(content="我可以帮你继续写下去。")
+            return AIMessage(content="我可以帮你继续写下去。")
 
-    monkeypatch.setattr("app.agent.chat_stream.build_chat_model", lambda profile, purpose="chat": FakeChatModel())
+    return FakeChatModel()
+
+
+def test_agent_streaming_endpoint_returns_incremental_response(monkeypatch) -> None:
+    from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_core.messages import AIMessage, AIMessageChunk
+    from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
+
+    class StreamingFakeChatModel(BaseChatModel):
+        @property
+        def _llm_type(self):
+            return "streaming-fake"
+
+        def bind_tools(self, tools):
+            return self
+
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+            return ChatResult(generations=[ChatGeneration(message=AIMessage(content="我可以帮你继续写下去。"))])
+
+        def _stream(self, messages, stop=None, run_manager=None, **kwargs):
+            yield ChatGenerationChunk(message=AIMessageChunk(content="我可以帮你"))
+            yield ChatGenerationChunk(message=AIMessageChunk(content="继续写下去。"))
+
+    monkeypatch.setattr("app.agent.graph.build_chat_model", lambda profile, purpose="chat": StreamingFakeChatModel())
 
     client = TestClient(app)
     headers = auth_headers(client)
@@ -362,5 +388,6 @@ def test_agent_streaming_endpoint_returns_incremental_response(monkeypatch) -> N
         body = "".join(response.iter_text())
 
     assert response.status_code == 200
-    assert "data:" in body
-    assert "我可以帮你继续写下去" in body
+    assert body.count('"type": "delta"') == 2
+    assert "我可以帮你" in body
+    assert "继续写下去。" in body

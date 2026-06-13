@@ -5,6 +5,7 @@ export type Confirmation = {
   action_type: string;
   status: string;
   payload: Record<string, unknown>;
+  document_id?: string | null;
 };
 
 export function listConfirmations(token: string, novelId: string) {

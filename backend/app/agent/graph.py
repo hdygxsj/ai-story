@@ -3,13 +3,28 @@ import json
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.runnables import RunnableLambda
 from langgraph.graph import END, StateGraph
-from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.prebuilt import tools_condition
 
-from app.agent.context import ContextBudget, ContextPack, build_context_pack
+from app.agent.context import ContextPack
 from app.agent.model_runtime import build_chat_model
 from app.agent.state import AgentState
 from app.agent.tools import classify_agent_intent, get_agent_tools
+from app.models import ModelProfile
+
+
+def _default_system_prompt(state: AgentState) -> str:
+    novel_id = state.get("novel_id")
+    lines = [
+        "你是 AI 小说工坊的共创 Agent，帮助用户规划故事、改写段落、记录记忆、整理章节树和检索上下文。",
+        "请使用与用户相同的语言回复，给出具体、可执行的建议。",
+        "当用户要求创建、移动、重命名、删除章节或文件夹，整理记忆、素材、时间线时，优先调用相应工具，不要只给口头建议。",
+        "当用户要求写完、生成或保存完整章节到工作台时，必须调用 create_chapter_with_content。只有工具返回成功后才能说已写入或已完成。",
+    ]
+    if novel_id is not None:
+        lines.append(f"当前小说 ID: {novel_id}")
+    return "\n".join(lines)
 
 
 def _build_agent_system_prompt(pack: ContextPack) -> str:
@@ -23,8 +38,10 @@ def _build_agent_system_prompt(pack: ContextPack) -> str:
         "conversation_history": "对话历史",
     }
     lines = [
-        "你是 AI 小说工坊的共创 Agent，帮助用户规划故事、改写段落、记录记忆和检索上下文。",
+        "你是 AI 小说工坊的共创 Agent，帮助用户规划故事、改写段落、记录记忆、整理章节树和检索上下文。",
         "请使用与用户相同的语言回复，给出具体、可执行的建议。",
+        "当用户要求创建、移动、重命名、删除章节或文件夹，整理记忆、素材、时间线时，优先调用相应工具。",
+        "当用户要求写完、生成或保存完整章节到工作台时，必须调用 create_chapter_with_content。只有工具返回成功后才能说已写入或已完成。",
     ]
     for item in pack.items:
         if item.source == "user_instruction":
@@ -48,78 +65,6 @@ def _message_text(content: Any) -> str:
     return str(content).strip()
 
 
-def _invoke_chat_model(state: AgentState, pack: ContextPack) -> dict[str, Any]:
-    model_profile = state.get("model_profile")
-    if model_profile is None:
-        return {
-            "response": "请先在 Agent 配置中为当前小说绑定并保存可用的对话模型。",
-            "context_status": pack.status_messages,
-            "proposed_payload": None,
-        }
-
-    try:
-        model = build_chat_model(model_profile, purpose="chat")
-        ai_message = model.invoke(
-            [
-                SystemMessage(content=_build_agent_system_prompt(pack)),
-                HumanMessage(content=state["message"]),
-            ]
-        )
-    except Exception as exc:
-        return {
-            "response": f"对话模型调用失败：{exc}",
-            "context_status": pack.status_messages,
-            "proposed_payload": None,
-        }
-
-    response = _message_text(ai_message.content)
-    return {
-        "response": response or "模型未返回内容，请稍后重试。",
-        "context_status": pack.status_messages,
-        "proposed_payload": None,
-    }
-
-
-def agent_node(state: AgentState) -> dict[str, Any]:
-    pack = build_context_pack(
-        user_instruction=state["message"],
-        current_document_text="",
-        selected_text=state.get("selected_text"),
-        key_memories=[],
-        structured_memories=[],
-        neighboring_chapters=[],
-        rag_results=[],
-        budget=ContextBudget(max_tokens=8000, response_tokens=1000),
-    )
-    intent = classify_agent_intent(state["message"], state.get("selected_text"))
-    if intent == "rewrite_selection" and state.get("selected_text") and state.get("document_id"):
-        messages = list(state.get("messages", []))
-        if not messages:
-            messages.append(HumanMessage(content=state["message"]))
-        messages.append(
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "propose_rewrite",
-                        "args": {
-                            "document_id": str(state["document_id"]),
-                            "selected_text": state["selected_text"],
-                            "instruction": state["message"],
-                        },
-                        "id": "call_propose_rewrite",
-                    }
-                ],
-            )
-        )
-        return {"messages": messages, "context_status": pack.status_messages}
-
-    return {
-        "messages": [*state.get("messages", []), HumanMessage(content=state["message"])],
-        **_invoke_chat_model(state, pack),
-    }
-
-
 def _parse_tool_content(content: Any) -> dict[str, Any]:
     if isinstance(content, dict):
         return content
@@ -132,48 +77,208 @@ def _parse_tool_content(content: Any) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def finalize_node(state: AgentState) -> dict[str, Any]:
-    if state.get("response"):
-        return {}
-
-    tool_messages = [message for message in state.get("messages", []) if isinstance(message, ToolMessage)]
-    if not tool_messages:
-        pack = build_context_pack(
-            user_instruction=state["message"],
-            current_document_text="",
-            selected_text=state.get("selected_text"),
-            key_memories=[],
-            structured_memories=[],
-            neighboring_chapters=[],
-            rag_results=[],
-            budget=ContextBudget(max_tokens=8000, response_tokens=1000),
-        )
-        return _invoke_chat_model(state, pack)
-
-    tool_result = _parse_tool_content(tool_messages[-1].content)
+def _tool_side_effects(tool_result: dict[str, Any]) -> dict[str, Any]:
+    effects: dict[str, Any] = {}
+    if tool_result.get("workspace_diff") is not None:
+        effects["workspace_diff"] = tool_result["workspace_diff"]
+    if tool_result.get("workspace_nodes") is not None:
+        effects["workspace_nodes"] = tool_result["workspace_nodes"]
+    if tool_result.get("confirmation_id") is not None:
+        effects["confirmation_id"] = tool_result["confirmation_id"]
     if tool_result.get("action_type") == "rewrite_selection":
-        return {
-            "response": str(tool_result["message"]),
-            "proposed_payload": tool_result["payload"],
-        }
+        effects["proposed_payload"] = tool_result.get("payload")
+    return effects
 
-    return {
-        "response": "I prepared an Agent proposal for review.",
-        "proposed_payload": tool_result.get("payload"),
-    }
+
+def _serialize_tool_result(result: Any) -> str:
+    if isinstance(result, str):
+        return result
+    return json.dumps(result, ensure_ascii=False, default=str)
+
+
+def _remove_incomplete_tool_call_history(messages: list[Any]) -> list[Any]:
+    cleaned: list[Any] = []
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        if not isinstance(message, AIMessage) or not message.tool_calls:
+            cleaned.append(message)
+            index += 1
+            continue
+
+        expected_ids = {str(call.get("id", "")) for call in message.tool_calls}
+        tool_messages: list[ToolMessage] = []
+        cursor = index + 1
+        while cursor < len(messages) and isinstance(messages[cursor], ToolMessage):
+            tool_messages.append(messages[cursor])
+            cursor += 1
+        received_ids = {str(tool_message.tool_call_id) for tool_message in tool_messages}
+        if expected_ids and expected_ids.issubset(received_ids):
+            cleaned.append(message)
+            cleaned.extend(tool_messages)
+        index = cursor
+    return cleaned
 
 
 def build_agent_graph(
     tools: list | None = None,
     checkpointer=None,
+    model_profile: ModelProfile | None = None,
 ):
     tool_list = tools or get_agent_tools()
+    tools_by_name = {tool.name: tool for tool in tool_list}
+    bound_model_profile = model_profile
+
+    def tool_calls_from_state(state: AgentState) -> list[dict[str, Any]]:
+        messages = list(state.get("messages", []))
+        if not messages or not isinstance(messages[-1], AIMessage):
+            return []
+        return list(messages[-1].tool_calls)
+
+    def tool_message(tool_call: dict[str, Any], result: Any) -> ToolMessage:
+        tool_name = str(tool_call.get("name", ""))
+        return ToolMessage(
+            content=_serialize_tool_result(result),
+            name=tool_name,
+            tool_call_id=str(tool_call.get("id", tool_name)),
+        )
+
+    def sequential_tools_node_sync(state: AgentState) -> dict[str, Any]:
+        tool_messages: list[ToolMessage] = []
+        for tool_call in tool_calls_from_state(state):
+            tool_name = str(tool_call.get("name", ""))
+            tool = tools_by_name.get(tool_name)
+            result: Any = (
+                tool.invoke(tool_call.get("args", {}))
+                if tool is not None
+                else {"status": "error", "message": f"未知工具：{tool_name}"}
+            )
+            tool_messages.append(tool_message(tool_call, result))
+        return {"messages": tool_messages}
+
+    async def sequential_tools_node_async(state: AgentState) -> dict[str, Any]:
+        tool_messages: list[ToolMessage] = []
+        for tool_call in tool_calls_from_state(state):
+            tool_name = str(tool_call.get("name", ""))
+            tool = tools_by_name.get(tool_name)
+            if tool is None:
+                result: Any = {"status": "error", "message": f"未知工具：{tool_name}"}
+            else:
+                result = await tool.ainvoke(tool_call.get("args", {}))
+            tool_messages.append(tool_message(tool_call, result))
+        return {"messages": tool_messages}
+
+    def prepare_agent_call(state: AgentState) -> tuple[list[Any], Any, str | None]:
+        prior = _remove_incomplete_tool_call_history(list(state.get("messages", [])))
+        intent = classify_agent_intent(state["message"], state.get("selected_text"))
+        if (
+            intent == "rewrite_selection"
+            and state.get("selected_text")
+            and state.get("document_id")
+            and not any(isinstance(message, ToolMessage) for message in prior)
+        ):
+            messages = prior or [HumanMessage(content=state["message"])]
+            messages.append(
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "propose_rewrite",
+                            "args": {
+                                "document_id": str(state["document_id"]),
+                                "selected_text": state["selected_text"],
+                                "instruction": state["message"],
+                            },
+                            "id": "call_propose_rewrite",
+                        }
+                    ],
+                )
+            )
+            return messages, None, "rewrite"
+
+        model_profile = bound_model_profile
+        tool_messages = [message for message in prior if isinstance(message, ToolMessage)]
+        if model_profile is None:
+            if tool_messages:
+                return prior, None, "done"
+            return [HumanMessage(content=state["message"])], None, "missing_model"
+
+        system_prompt = state.get("system_prompt") or _default_system_prompt(state)
+        if not prior:
+            prior = [SystemMessage(content=system_prompt), HumanMessage(content=state["message"])]
+
+        model = build_chat_model(model_profile, purpose="chat").bind_tools(tool_list)
+        return prior, model, None
+
+    def agent_node_sync(state: AgentState) -> dict[str, Any]:
+        prior, model, shortcut = prepare_agent_call(state)
+        if shortcut == "rewrite":
+            return {"messages": prior}
+        if shortcut == "done":
+            return {}
+        if shortcut == "missing_model":
+            return {"messages": prior, "response": "请先在 Agent 配置中为当前小说绑定并保存可用的对话模型。"}
+        ai_message = model.invoke(prior)
+        updates: dict[str, Any] = {"messages": [ai_message]}
+        if not ai_message.tool_calls:
+            updates["response"] = _message_text(ai_message.content) or "操作已完成。"
+        return updates
+
+    async def agent_node_async(state: AgentState) -> dict[str, Any]:
+        prior, model, shortcut = prepare_agent_call(state)
+        if shortcut == "rewrite":
+            return {"messages": prior}
+        if shortcut == "done":
+            return {}
+        if shortcut == "missing_model":
+            return {"messages": prior, "response": "请先在 Agent 配置中为当前小说绑定并保存可用的对话模型。"}
+
+        ai_message = None
+        if hasattr(model, "astream"):
+            async for chunk in model.astream(prior):
+                ai_message = chunk if ai_message is None else ai_message + chunk
+        else:
+            ai_message = model.invoke(prior)
+        if ai_message is None:
+            ai_message = AIMessage(content="")
+        updates: dict[str, Any] = {"messages": [ai_message]}
+        if not ai_message.tool_calls:
+            updates["response"] = _message_text(ai_message.content) or "操作已完成。"
+        return updates
+
+    def finalize_node(state: AgentState) -> dict[str, Any]:
+        tool_messages = [message for message in state.get("messages", []) if isinstance(message, ToolMessage)]
+        if not tool_messages:
+            if state.get("response"):
+                return {}
+            return {"response": "我没有拿到工具结果，请换个说法再试一次。"}
+
+        tool_results = [_parse_tool_content(message.content) for message in tool_messages]
+        tool_result = tool_results[-1]
+        if tool_result.get("action_type") == "rewrite_selection":
+            return {
+                "response": str(tool_result.get("message", "我已草拟改写方案，请确认后再应用。")),
+                "proposed_payload": tool_result.get("payload"),
+            }
+
+        message = state.get("response") or tool_result.get("message")
+        if not message:
+            message = "操作已完成。" if tool_result.get("status") == "ok" else "操作失败，请检查参数后重试。"
+
+        effects: dict[str, Any] = {}
+        for result in tool_results:
+            effects.update(_tool_side_effects(result))
+        return {
+            "response": str(message),
+            **effects,
+        }
+
     graph = StateGraph(AgentState)
-    graph.add_node("agent", agent_node)
-    graph.add_node("tools", ToolNode(tool_list))
+    graph.add_node("agent", RunnableLambda(agent_node_sync, afunc=agent_node_async))
+    graph.add_node("tools", RunnableLambda(sequential_tools_node_sync, afunc=sequential_tools_node_async))
     graph.add_node("finalize", finalize_node)
     graph.set_entry_point("agent")
     graph.add_conditional_edges("agent", tools_condition, {"tools": "tools", END: "finalize"})
-    graph.add_edge("tools", "finalize")
+    graph.add_edge("tools", "agent")
     graph.add_edge("finalize", END)
     return graph.compile(checkpointer=checkpointer)

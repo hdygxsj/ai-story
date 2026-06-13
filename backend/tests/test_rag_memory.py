@@ -71,6 +71,51 @@ def test_approved_memory_indexes_rag_chunk_for_search() -> None:
     assert results.json()[0]["source_type"] == "memory"
 
 
+def test_rag_search_excludes_trashed_document_chunks() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client)
+    novel = client.post("/novels", headers=headers, json={"title": "Trashed RAG Novel"}).json()
+    chapter = client.post(
+        f"/novels/{novel['id']}/nodes",
+        headers=headers,
+        json={"title": "Discarded", "node_type": "chapter", "parent_id": None},
+    ).json()
+    client.patch(
+        f"/documents/{chapter['document_id']}",
+        headers=headers,
+        json={
+            "content": {
+                "type": "doc",
+                "content": [
+                    {"type": "paragraph", "content": [{"type": "text", "text": "obsolete lighthouse clue"}]}
+                ],
+            }
+        },
+    )
+    reorder = client.patch(
+        f"/novels/{novel['id']}/nodes/reorder",
+        headers=headers,
+        json={
+            "items": [
+                {
+                    "id": chapter["id"],
+                    "parent_id": None,
+                    "position": 0,
+                    "status": "trashed",
+                }
+            ]
+        },
+    )
+
+    assert reorder.status_code == 200
+    assert reorder.json()[0]["status"] == "trashed"
+
+    results = client.get(f"/novels/{novel['id']}/rag/search?query=lighthouse", headers=headers)
+
+    assert results.status_code == 200
+    assert results.json() == []
+
+
 def test_context_loader_prioritizes_key_memory_and_rag_results() -> None:
     pack = build_agent_context(
         user_instruction="Continue the scene.",

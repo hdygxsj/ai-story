@@ -190,4 +190,55 @@ describe("calculateWorkspaceDrop", () => {
     expect(container.querySelector(".ant-tree-treenode-draggable")).toBeTruthy();
     expect(container.querySelector(".ant-tree-draggable-icon")).not.toBeInTheDocument();
   });
+
+  it("collapses and expands the recycle bin section", async () => {
+    const user = userEvent.setup();
+    render(
+      <WorkspaceTree
+        nodes={[
+          ...nodes,
+          {
+            id: "trashed-1",
+            novel_id: "novel-1",
+            parent_id: null,
+            document_id: null,
+            title: "已删除文件夹",
+            node_type: "folder",
+            status: "trashed",
+            position: 0,
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "恢复 已删除文件夹" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "收起回收站" }));
+    expect(screen.queryByRole("button", { name: "恢复 已删除文件夹" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "展开回收站" }));
+    expect(screen.getByRole("button", { name: "恢复 已删除文件夹" })).toBeInTheDocument();
+  });
+
+  it("keeps the recycle bin in a separate bottom section", () => {
+    render(
+      <WorkspaceTree
+        nodes={[
+          ...nodes,
+          {
+            id: "trashed-bottom",
+            novel_id: "novel-1",
+            parent_id: null,
+            document_id: null,
+            title: "底部回收项",
+            node_type: "folder",
+            status: "trashed",
+            position: 0,
+          },
+        ]}
+      />,
+    );
+
+    const recycleBin = screen.getByLabelText("回收站");
+    expect(recycleBin).toHaveStyle({ flex: "0 1 auto", maxHeight: "40%", overflow: "auto" });
+    expect(recycleBin.parentElement).toHaveStyle({ display: "flex", flexDirection: "column", overflow: "hidden" });
+  });
 });

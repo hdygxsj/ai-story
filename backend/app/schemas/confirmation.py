@@ -9,5 +9,6 @@ class ConfirmationResponse(BaseModel):
     action_type: str
     status: str
     payload: dict[str, Any]
+    document_id: UUID | None = None
 
     model_config = ConfigDict(from_attributes=True)

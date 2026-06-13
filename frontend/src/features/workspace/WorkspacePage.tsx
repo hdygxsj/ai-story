@@ -1,3 +1,4 @@
+import { RightOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Empty, Form, Input, List, message, Select, Space, Statistic, Tabs, Tag, Timeline, Typography } from "antd";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
@@ -138,9 +139,14 @@ function profileToFormValues(profile: ModelProfile) {
   };
 }
 const treePanelWidthStorageKey = "ai-story-workspace-tree-width";
+const treePanelCollapsedStorageKey = "ai-story-workspace-tree-collapsed";
+const agentPanelWidthStorageKey = "ai-story-agent-panel-width";
 const defaultTreePanelWidth = 260;
+const defaultAgentPanelWidth = 420;
 const minTreePanelWidth = 220;
 const maxTreePanelWidth = 480;
+const minAgentPanelWidth = 320;
+const maxAgentPanelWidth = 640;
 
 function clampTreePanelWidth(width: number) {
   return Math.min(maxTreePanelWidth, Math.max(minTreePanelWidth, Math.round(width)));
@@ -149,6 +155,19 @@ function clampTreePanelWidth(width: number) {
 function initialTreePanelWidth() {
   const stored = Number(window.localStorage.getItem(treePanelWidthStorageKey));
   return Number.isFinite(stored) && stored > 0 ? clampTreePanelWidth(stored) : defaultTreePanelWidth;
+}
+
+function clampAgentPanelWidth(width: number) {
+  return Math.min(maxAgentPanelWidth, Math.max(minAgentPanelWidth, Math.round(width)));
+}
+
+function initialAgentPanelWidth() {
+  const stored = Number(window.localStorage.getItem(agentPanelWidthStorageKey));
+  return Number.isFinite(stored) && stored > 0 ? clampAgentPanelWidth(stored) : defaultAgentPanelWidth;
+}
+
+function initialTreePanelCollapsed() {
+  return window.localStorage.getItem(treePanelCollapsedStorageKey) === "true";
 }
 
 function providerLabel(value?: string | null): string {
@@ -263,7 +282,10 @@ export function WorkspacePage({
   const [isCreatingNewProfile, setIsCreatingNewProfile] = useState(false);
   const [modelProfileForm] = Form.useForm();
   const [treePanelWidth, setTreePanelWidth] = useState(initialTreePanelWidth);
+  const [agentPanelWidth, setAgentPanelWidth] = useState(initialAgentPanelWidth);
+  const [treePanelCollapsed, setTreePanelCollapsed] = useState(initialTreePanelCollapsed);
   const treeResizeStart = useRef<{ startX: number; startWidth: number } | null>(null);
+  const agentResizeStart = useRef<{ startX: number; startWidth: number } | null>(null);
 
   function handleEmbeddingProviderChange(providerKind: string) {
     if (providerKind !== "ollama") {
@@ -280,9 +302,27 @@ export function WorkspacePage({
     event.preventDefault();
   }
 
+  function handleAgentResizeStart(event: ReactMouseEvent<HTMLDivElement>) {
+    agentResizeStart.current = { startWidth: agentPanelWidth, startX: event.clientX };
+    event.preventDefault();
+  }
+
+  function setTreeCollapsed(collapsed: boolean) {
+    setTreePanelCollapsed(collapsed);
+    window.localStorage.setItem(treePanelCollapsedStorageKey, String(collapsed));
+  }
+
   useEffect(() => {
     function handleMouseMove(event: MouseEvent) {
       if (!treeResizeStart.current) {
+        if (!agentResizeStart.current) {
+          return;
+        }
+        const nextWidth = clampAgentPanelWidth(
+          agentResizeStart.current.startWidth + agentResizeStart.current.startX - event.clientX,
+        );
+        setAgentPanelWidth(nextWidth);
+        window.localStorage.setItem(agentPanelWidthStorageKey, String(nextWidth));
         return;
       }
       const nextWidth = clampTreePanelWidth(
@@ -294,6 +334,7 @@ export function WorkspacePage({
 
     function handleMouseUp() {
       treeResizeStart.current = null;
+      agentResizeStart.current = null;
     }
 
     window.addEventListener("mousemove", handleMouseMove);
@@ -452,15 +493,37 @@ export function WorkspacePage({
     setMemoryReviewCount(loadedMemoryReviews.filter((item) => item.status === "pending").length);
   }
 
+  async function refreshCreativeCollections() {
+    const [assets, events, states, relationships] = await Promise.all([
+      listCreativeAssets(token, novelId),
+      listTimelineEvents(token, novelId),
+      listCharacterStates(token, novelId),
+      listRelationshipEdges(token, novelId),
+    ]);
+    setCreativeAssets(assets);
+    setTimelineEvents(events);
+    setCharacterStates(states);
+    setRelationshipEdges(relationships);
+  }
+
   async function resolveConfirmation(confirmationId: string, action: "approve" | "reject") {
+    let resolved: Confirmation | null = null;
     if (action === "approve") {
-      await approveConfirmation(token, confirmationId);
+      resolved = await approveConfirmation(token, confirmationId);
     } else {
-      await rejectConfirmation(token, confirmationId);
+      resolved = await rejectConfirmation(token, confirmationId);
     }
     await refreshReviewQueues();
-    if (documentId) {
-      setDocument(await getDocument(token, documentId));
+    const changedDocumentId = resolved.document_id ?? documentId;
+    if (changedDocumentId) {
+      const [loadedDocument, loadedVersions] = await Promise.all([
+        getDocument(token, changedDocumentId),
+        listDocumentVersions(token, changedDocumentId),
+      ]);
+      if (changedDocumentId === documentId) {
+        setDocument(loadedDocument);
+        setVersions(loadedVersions);
+      }
     }
   }
 
@@ -812,22 +875,23 @@ export function WorkspacePage({
 
   const workspaceStats = (
     <Card
+      data-testid="workspace-overview"
       size="small"
       style={{
         background: "linear-gradient(135deg, rgba(255,122,24,0.12), rgba(255,255,255,0.86))",
         border: "1px solid rgba(255,122,24,0.16)",
-        borderRadius: 18,
+        borderRadius: 14,
         boxShadow: "0 12px 34px rgba(255,122,24,0.08)",
       }}
     >
-      <div style={{ alignItems: "center", display: "grid", gap: 14, gridTemplateColumns: "1.2fr repeat(4, minmax(90px, 1fr))" }}>
+      <div style={{ alignItems: "center", display: "grid", gap: 10, gridTemplateColumns: "1.2fr repeat(4, minmax(72px, 1fr))" }}>
         <div>
           <Typography.Text strong>作品概览</Typography.Text>
           <Typography.Text style={{ color: "#f97316", display: "block", fontSize: 12 }}>今日也要稳定更新</Typography.Text>
         </div>
-        <Statistic title="章节" value={chapterCount} styles={{ content: { color: "#111827", fontSize: 20 } }} />
-        <Statistic title="文件夹" value={folderCount} styles={{ content: { color: "#111827", fontSize: 20 } }} />
-        <Statistic title="当前字数" value={currentWordCount} styles={{ content: { color: "#111827", fontSize: 20 } }} />
+        <Statistic title="章节" value={chapterCount} styles={{ content: { color: "#111827", fontSize: 17 } }} />
+        <Statistic title="文件夹" value={folderCount} styles={{ content: { color: "#111827", fontSize: 17 } }} />
+        <Statistic title="当前字数" value={currentWordCount} styles={{ content: { color: "#111827", fontSize: 17 } }} />
         <Tag color={hasUnsavedDraft ? "orange" : "green"} style={{ justifySelf: "end", marginInlineEnd: 0 }}>
           {hasUnsavedDraft ? "有本地草稿" : "已同步"}
         </Tag>
@@ -838,6 +902,7 @@ export function WorkspacePage({
   const chapterTreePanel = (
     <WorkspaceTree
       nodes={nodes}
+      onCollapse={() => setTreeCollapsed(true)}
       onCreateChapter={(parentId) => void handleCreateWorkspaceNode("chapter", parentId ?? null)}
       onCreateFolder={(parentId) => void handleCreateWorkspaceNode("folder", parentId ?? null)}
       onMoveNode={(nodeId, parentId, position) =>
@@ -860,10 +925,19 @@ export function WorkspacePage({
       novelId={novelId}
       documentId={documentId}
       onClearSelectedText={() => setSelectedText(null)}
+      onDismissWorkspaceDiff={() => setWorkspaceDiff(null)}
+      onRunCompleted={() => refreshCreativeCollections()}
       onUndoWorkspaceDiff={() => void handleUndoWorkspaceDiff()}
       onWorkspaceOrganized={(updatedNodes, diff) => {
+        const previousIds = new Set(nodes.map((node) => node.id));
+        const createdNode = updatedNodes.find(
+          (node) => !previousIds.has(node.id) && node.document_id && node.status !== "trashed",
+        );
         setNodes(updatedNodes);
-        setWorkspaceDiff(diff);
+        setWorkspaceDiff(diff ?? null);
+        if (createdNode?.document_id) {
+          setDocumentId(createdNode.document_id);
+        }
       }}
       selectedText={selectedText}
       workspaceDiff={workspaceDiff}
@@ -871,33 +945,32 @@ export function WorkspacePage({
   );
 
   function renderWorkspaceShell(centerContent: ReactNode) {
+    const gridTemplateColumns = treePanelCollapsed
+      ? `minmax(0, 1fr) 6px ${agentPanelWidth}px`
+      : `${treePanelWidth}px 6px minmax(0, 1fr) 6px ${agentPanelWidth}px`;
     return (
       <div
         data-testid="workspace-shell"
         style={{
-          display: "grid",
-          gap: 12,
-          gridTemplateRows: "auto minmax(0, 1fr)",
           height: "100%",
           minHeight: 0,
           minWidth: 0,
         }}
       >
-        {workspaceStats}
         <div
           data-testid="workspace-grid"
           style={{
             display: "grid",
             gap: 14,
-            gridTemplateColumns: `${treePanelWidth}px 6px minmax(0, 1fr) clamp(300px, 28vw, 390px)`,
+            gridTemplateColumns,
             gridTemplateRows: "minmax(0, 1fr)",
             minHeight: 0,
             minWidth: 0,
             overflow: "hidden",
           }}
         >
-          {chapterTreePanel}
-          <div
+          {treePanelCollapsed ? null : chapterTreePanel}
+          {treePanelCollapsed ? null : <div
             aria-label="调整章节面板宽度"
             role="separator"
             aria-orientation="vertical"
@@ -919,8 +992,32 @@ export function WorkspacePage({
                 width: 2,
               }}
             />
+          </div>}
+          <div
+            data-testid="workspace-editor-column"
+            style={{ display: "grid", gap: 10, gridTemplateRows: "auto minmax(0, 1fr)", minHeight: 0, minWidth: 0, position: "relative" }}
+          >
+            {treePanelCollapsed ? (
+              <Button
+                aria-label="展开章节"
+                icon={<RightOutlined />}
+                onClick={() => setTreeCollapsed(false)}
+                size="small"
+                style={{ left: 8, position: "absolute", top: 8, zIndex: 3 }}
+              />
+            ) : null}
+            {workspaceStats}
+            <div style={{ minHeight: 0, minWidth: 0 }}>{centerContent}</div>
           </div>
-          {centerContent}
+          <div
+            aria-label="调整 Agent 面板宽度"
+            aria-orientation="vertical"
+            onMouseDown={handleAgentResizeStart}
+            role="separator"
+            style={{ alignSelf: "stretch", cursor: "col-resize", marginInline: -4, position: "relative", zIndex: 2 }}
+          >
+            <div style={{ background: "rgba(15,23,42,0.08)", borderRadius: 999, height: "100%", margin: "0 auto", width: 2 }} />
+          </div>
           {agentPanel}
         </div>
       </div>
