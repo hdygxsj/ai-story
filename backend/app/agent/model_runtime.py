@@ -3,7 +3,7 @@ from typing import Literal
 import httpx
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_openai import ChatOpenAI
+from app.agent.thinking_chat_model import ThinkingCompatibleChatOpenAI
 
 from app.core.config import settings
 from app.core.crypto import decrypt_api_key
@@ -114,7 +114,7 @@ def build_chat_model(profile: ModelProfile, purpose: ModelPurpose = "chat") -> B
             kwargs["base_url"] = base_url
         if profile.extra_headers:
             kwargs["default_headers"] = profile.extra_headers
-        return ChatOpenAI(**kwargs)
+        return ThinkingCompatibleChatOpenAI(**kwargs)
 
     raise ValueError(f"Unsupported model provider: {provider_kind}")
 

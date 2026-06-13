@@ -14,6 +14,9 @@ def format_agent_stream_error(exc: Exception) -> str:
     if name == "AuthenticationError" or "401" in text or "403" in text:
         return "模型 API Key 无效或权限不足，请检查配置。"
 
+    if "reasoning_content" in text and "thinking mode" in text.lower():
+        return "Thinking 模式模型在多轮工具调用时需要回传 reasoning_content，请更新后端或联系管理员。"
+
     if text:
         return f"Agent 调用失败：{text}"
 
