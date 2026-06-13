@@ -241,6 +241,28 @@ async def delete_creative_asset(
     return True
 
 
+async def delete_creative_assets(
+    session: AsyncSession,
+    *,
+    novel_id: UUID,
+    asset_ids: list[UUID],
+    actor_source: MaterialActorSource = "user",
+) -> dict[str, list[str]]:
+    deleted: list[str] = []
+    missing: list[str] = []
+    for asset_id in asset_ids:
+        if await delete_creative_asset(
+            session,
+            novel_id=novel_id,
+            asset_id=asset_id,
+            actor_source=actor_source,
+        ):
+            deleted.append(str(asset_id))
+        else:
+            missing.append(str(asset_id))
+    return {"deleted": deleted, "missing": missing}
+
+
 async def create_timeline_event(
     session: AsyncSession,
     *,
@@ -494,6 +516,27 @@ async def create_relationship_edge(
     metadata: dict[str, Any] | None = None,
     actor_source: MaterialActorSource = "user",
 ) -> RelationshipEdge:
+    existing = await session.scalar(
+        select(RelationshipEdge).where(
+            RelationshipEdge.novel_id == novel_id,
+            RelationshipEdge.source_character == source_character,
+            RelationshipEdge.target_character == target_character,
+            RelationshipEdge.relationship_type == relationship_type,
+        )
+    )
+    if existing is not None:
+        if description.strip() and description != existing.description:
+            updated = await update_relationship_edge(
+                session,
+                novel_id=novel_id,
+                edge_id=existing.id,
+                description=description,
+                metadata=metadata,
+                actor_source=actor_source,
+            )
+            return updated or existing
+        return existing
+
     edge = RelationshipEdge(
         novel_id=novel_id,
         source_character=source_character,

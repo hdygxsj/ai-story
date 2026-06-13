@@ -29,6 +29,14 @@
   margin-top: 12px;
 }
 
+.materials-panel-search {
+  margin-top: 14px;
+}
+
+.materials-panel-search .ant-input-prefix {
+  color: rgba(15, 23, 42, 0.45);
+}
+
 .materials-panel-stats .ant-tag {
   border-radius: 999px;
   font-size: 12px;
@@ -125,9 +133,42 @@
 .materials-panel-item-meta {
   align-items: center;
   display: flex;
+  flex: 1 1 auto;
   flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
+}
+
+.materials-panel-item-footer {
+  align-items: flex-end;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
   margin-top: 10px;
+}
+
+.materials-panel-item-id.ant-typography {
+  color: rgba(15, 23, 42, 0.45);
+  flex-shrink: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  margin: 0;
+  max-width: 52%;
+  text-align: right;
+}
+
+.materials-panel-item-id .ant-typography-copy {
+  color: rgba(15, 23, 42, 0.45);
+}
+
+.materials-panel-item-id span:not(.ant-typography-copy) {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
 }
 
 .materials-panel-type-tag.ant-tag {
@@ -277,6 +318,17 @@
   font-size: 13px;
   line-height: 1.55;
   margin: 0;
+}
+
+.relationship-graph-dedupe-hint {
+  background: rgba(255, 247, 237, 0.92);
+  border: 1px solid rgba(255, 122, 24, 0.18);
+  border-radius: 12px;
+  color: rgba(154, 52, 18, 0.92);
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 0;
+  padding: 10px 12px;
 }
 
 .materials-panel-changes {

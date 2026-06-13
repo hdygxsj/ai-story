@@ -70,6 +70,33 @@ describe("calculateWorkspaceDrop", () => {
     expect(changes).toContainEqual({ id: "chapter-1", parent_id: "folder-1", position: 0 });
   });
 
+  it("moves multiple selected chapters together above the first root item", () => {
+    const changes = calculateWorkspaceDrop(nodes, {
+      draggedId: "chapter-1",
+      draggedIds: ["chapter-1", "chapter-2"],
+      dropId: "folder-1",
+      dropPosition: -1,
+      dropToGap: true,
+    });
+
+    expect(changes).toContainEqual({ id: "chapter-1", parent_id: null, position: 0 });
+    expect(changes).toContainEqual({ id: "chapter-2", parent_id: null, position: 1 });
+    expect(changes).toContainEqual({ id: "folder-1", parent_id: null, position: 2 });
+  });
+
+  it("moves multiple selected chapters into a folder together", () => {
+    const changes = calculateWorkspaceDrop(nodes, {
+      draggedId: "chapter-1",
+      draggedIds: ["chapter-1", "chapter-2"],
+      dropId: "folder-1",
+      dropPosition: 0,
+      dropToGap: false,
+    });
+
+    expect(changes).toContainEqual({ id: "chapter-1", parent_id: "folder-1", position: 0 });
+    expect(changes).toContainEqual({ id: "chapter-2", parent_id: "folder-1", position: 1 });
+  });
+
   it("shows folder-specific copy when renaming a folder", async () => {
     const user = userEvent.setup();
     render(<WorkspaceTree nodes={nodes} />);
@@ -182,6 +209,20 @@ describe("calculateWorkspaceDrop", () => {
     const chapterTitle = screen.getByTestId("workspace-node-title-chapter-1");
     const chapterRow = chapterTitle.parentElement as HTMLElement;
     expect(chapterRow.querySelector(".anticon-file-text")).toBeTruthy();
+  });
+
+  it("supports ctrl-click multi-select before dragging", async () => {
+    const user = userEvent.setup();
+    const onReorderNodes = vi.fn();
+    render(<WorkspaceTree nodes={nodes} onReorderNodes={onReorderNodes} selectedDocumentId="doc-1" />);
+
+    await user.click(screen.getByText("第一章"));
+    await user.keyboard("{Control>}");
+    await user.click(screen.getByText("第二章"));
+    await user.keyboard("{/Control}");
+
+    expect(screen.getByText("第一章").closest(".ant-tree-treenode-selected")).toBeTruthy();
+    expect(screen.getByText("第二章").closest(".ant-tree-treenode-selected")).toBeTruthy();
   });
 
   it("keeps tree nodes draggable without showing a drag-handle icon", () => {

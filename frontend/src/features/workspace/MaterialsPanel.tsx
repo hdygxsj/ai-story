@@ -1,6 +1,6 @@
-import { BookOutlined, DeleteOutlined, EditOutlined, HistoryOutlined, TeamOutlined, UserOutlined } from "@ant-design/icons";
+import { BookOutlined, DeleteOutlined, EditOutlined, HistoryOutlined, SearchOutlined, TeamOutlined, UserOutlined } from "@ant-design/icons";
 import { Button, Card, Empty, Form, Input, Modal, Popconfirm, Select, Tabs, Tag, Timeline, Typography } from "antd";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import type { CharacterState, CreativeAsset, MaterialChange, RelationshipEdge } from "../../api/materials";
 import { RelationshipGraph } from "./RelationshipGraph";
@@ -57,8 +57,25 @@ function assetTypeColor(assetType: string) {
   return assetTypeColors[assetType] ?? "default";
 }
 
+function matchesMaterialSearch(query: string, ...parts: Array<string | undefined>) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) {
+    return true;
+  }
+  return parts.some((part) => part?.toLowerCase().includes(normalized));
+}
+
+function MaterialItemId({ id }: { id: string }) {
+  return (
+    <Typography.Text className="materials-panel-item-id" copyable={{ text: id }} title={id}>
+      {id}
+    </Typography.Text>
+  );
+}
+
 type CreativeAssetGridProps = {
   assets: CreativeAsset[];
+  searchQuery: string;
   onDeleteCreativeAsset?: (assetId: string) => Promise<void>;
   onUpdateCreativeAsset?: (
     assetId: string,
@@ -66,10 +83,17 @@ type CreativeAssetGridProps = {
   ) => Promise<void>;
 };
 
-function CreativeAssetGrid({ assets, onDeleteCreativeAsset, onUpdateCreativeAsset }: CreativeAssetGridProps) {
+function CreativeAssetGrid({ assets, searchQuery, onDeleteCreativeAsset, onUpdateCreativeAsset }: CreativeAssetGridProps) {
   const [editingAsset, setEditingAsset] = useState<CreativeAsset | null>(null);
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm<Pick<CreativeAsset, "asset_type" | "name" | "summary">>();
+  const filteredAssets = useMemo(
+    () =>
+      assets.filter((asset) =>
+        matchesMaterialSearch(searchQuery, asset.id, asset.name, asset.summary, asset.asset_type),
+      ),
+    [assets, searchQuery],
+  );
 
   function openEditModal(asset: CreativeAsset) {
     setEditingAsset(asset);
@@ -114,10 +138,20 @@ function CreativeAssetGrid({ assets, onDeleteCreativeAsset, onUpdateCreativeAsse
     );
   }
 
+  if (filteredAssets.length === 0) {
+    return (
+      <Empty
+        className="materials-panel-empty"
+        description="没有匹配的创作资产，试试其他关键词或 ID"
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+      />
+    );
+  }
+
   return (
     <>
       <div className="materials-panel-grid">
-        {assets.map((asset) => (
+        {filteredAssets.map((asset) => (
           <article className="materials-panel-item" key={asset.id}>
             <div className="materials-panel-item-header">
               <h4 className="materials-panel-item-title">{asset.name}</h4>
@@ -153,10 +187,13 @@ function CreativeAssetGrid({ assets, onDeleteCreativeAsset, onUpdateCreativeAsse
               ) : null}
             </div>
             <p className="materials-panel-item-summary">{asset.summary || "暂无摘要"}</p>
-            <div className="materials-panel-item-meta">
-              <Tag className="materials-panel-type-tag" color={assetTypeColor(asset.asset_type)}>
-                {assetTypeLabel(asset.asset_type)}
-              </Tag>
+            <div className="materials-panel-item-footer">
+              <div className="materials-panel-item-meta">
+                <Tag className="materials-panel-type-tag" color={assetTypeColor(asset.asset_type)}>
+                  {assetTypeLabel(asset.asset_type)}
+                </Tag>
+              </div>
+              <MaterialItemId id={asset.id} />
             </div>
           </article>
         ))}
@@ -188,7 +225,15 @@ function CreativeAssetGrid({ assets, onDeleteCreativeAsset, onUpdateCreativeAsse
   );
 }
 
-function CharacterStateGrid({ states }: { states: CharacterState[] }) {
+function CharacterStateGrid({ states, searchQuery }: { states: CharacterState[]; searchQuery: string }) {
+  const filteredStates = useMemo(
+    () =>
+      states.filter((state) =>
+        matchesMaterialSearch(searchQuery, state.id, state.character_name, state.state, state.scope),
+      ),
+    [searchQuery, states],
+  );
+
   if (states.length === 0) {
     return (
       <Empty
@@ -199,26 +244,56 @@ function CharacterStateGrid({ states }: { states: CharacterState[] }) {
     );
   }
 
+  if (filteredStates.length === 0) {
+    return (
+      <Empty
+        className="materials-panel-empty"
+        description="没有匹配的角色状态，试试其他关键词或 ID"
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+      />
+    );
+  }
+
   return (
     <div className="materials-panel-grid">
-      {states.map((state) => (
+      {filteredStates.map((state) => (
         <article className="materials-panel-item" key={state.id}>
           <h4 className="materials-panel-item-title">{state.character_name}</h4>
           <p className="materials-panel-item-summary">{state.state}</p>
-          {state.scope ? (
-            <div className="materials-panel-item-meta">
-              <Tag className="materials-panel-type-tag" color="purple">
-                {state.scope}
-              </Tag>
-            </div>
-          ) : null}
+          <div className="materials-panel-item-footer">
+            {state.scope ? (
+              <div className="materials-panel-item-meta">
+                <Tag className="materials-panel-type-tag" color="purple">
+                  {state.scope}
+                </Tag>
+              </div>
+            ) : (
+              <span />
+            )}
+            <MaterialItemId id={state.id} />
+          </div>
         </article>
       ))}
     </div>
   );
 }
 
-function RelationshipView({ edges }: { edges: RelationshipEdge[] }) {
+function RelationshipView({ edges, searchQuery }: { edges: RelationshipEdge[]; searchQuery: string }) {
+  const filteredEdges = useMemo(
+    () =>
+      edges.filter((edge) =>
+        matchesMaterialSearch(
+          searchQuery,
+          edge.id,
+          edge.source_character,
+          edge.target_character,
+          edge.relationship_type,
+          edge.description,
+        ),
+      ),
+    [edges, searchQuery],
+  );
+
   if (edges.length === 0) {
     return (
       <Empty
@@ -229,7 +304,17 @@ function RelationshipView({ edges }: { edges: RelationshipEdge[] }) {
     );
   }
 
-  return <RelationshipGraph edges={edges} />;
+  if (filteredEdges.length === 0) {
+    return (
+      <Empty
+        className="materials-panel-empty"
+        description="没有匹配的人物关系，试试其他关键词或 ID"
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+      />
+    );
+  }
+
+  return <RelationshipGraph edges={filteredEdges} />;
 }
 
 function formatChangeTime(value: string) {
@@ -240,7 +325,23 @@ function formatChangeTime(value: string) {
   return date.toLocaleString();
 }
 
-function MaterialChangesView({ changes }: { changes: MaterialChange[] }) {
+function MaterialChangesView({ changes, searchQuery }: { changes: MaterialChange[]; searchQuery: string }) {
+  const filteredChanges = useMemo(
+    () =>
+      changes.filter((change) =>
+        matchesMaterialSearch(
+          searchQuery,
+          change.id,
+          change.material_id,
+          change.summary,
+          change.material_type,
+          change.action,
+          change.actor_source,
+        ),
+      ),
+    [changes, searchQuery],
+  );
+
   if (changes.length === 0) {
     return (
       <Empty
@@ -251,10 +352,20 @@ function MaterialChangesView({ changes }: { changes: MaterialChange[] }) {
     );
   }
 
+  if (filteredChanges.length === 0) {
+    return (
+      <Empty
+        className="materials-panel-empty"
+        description="没有匹配的变更记录，试试其他关键词或 ID"
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+      />
+    );
+  }
+
   return (
     <Timeline
       className="materials-panel-changes"
-      items={changes.map((change) => ({
+      items={filteredChanges.map((change) => ({
         key: change.id,
         color: change.action === "deleted" ? "red" : change.action === "created" ? "green" : "blue",
         children: (
@@ -271,6 +382,7 @@ function MaterialChangesView({ changes }: { changes: MaterialChange[] }) {
               <Tag color={change.actor_source === "agent" ? "purple" : "default"}>
                 {actorLabels[change.actor_source] ?? change.actor_source}
               </Tag>
+              <MaterialItemId id={change.material_id} />
             </div>
           </article>
         ),
@@ -287,6 +399,7 @@ export function MaterialsPanel({
   onDeleteCreativeAsset,
   onUpdateCreativeAsset,
 }: MaterialsPanelProps) {
+  const [searchQuery, setSearchQuery] = useState("");
   const totalCount = creativeAssets.length + characterStates.length + relationshipEdges.length;
 
   return (
@@ -312,6 +425,14 @@ export function MaterialsPanel({
           <Tag color="purple">{relationshipEdges.length} 人物关系</Tag>
           <Tag color="cyan">{materialChanges.length} 条变更</Tag>
         </div>
+        <Input
+          allowClear
+          className="materials-panel-search"
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="按名称、内容或 ID 搜索当前标签页"
+          prefix={<SearchOutlined />}
+          value={searchQuery}
+        />
       </div>
 
       <Tabs
@@ -330,6 +451,7 @@ export function MaterialsPanel({
                 assets={creativeAssets}
                 onDeleteCreativeAsset={onDeleteCreativeAsset}
                 onUpdateCreativeAsset={onUpdateCreativeAsset}
+                searchQuery={searchQuery}
               />
             ),
           },
@@ -340,7 +462,7 @@ export function MaterialsPanel({
                 <UserOutlined /> 角色状态 ({characterStates.length})
               </span>
             ),
-            children: <CharacterStateGrid states={characterStates} />,
+            children: <CharacterStateGrid searchQuery={searchQuery} states={characterStates} />,
           },
           {
             key: "relationships",
@@ -349,7 +471,7 @@ export function MaterialsPanel({
                 <TeamOutlined /> 人物关系 ({relationshipEdges.length})
               </span>
             ),
-            children: <RelationshipView edges={relationshipEdges} />,
+            children: <RelationshipView edges={relationshipEdges} searchQuery={searchQuery} />,
           },
           {
             key: "changes",
@@ -358,7 +480,7 @@ export function MaterialsPanel({
                 <HistoryOutlined /> 变更记录 ({materialChanges.length})
               </span>
             ),
-            children: <MaterialChangesView changes={materialChanges} />,
+            children: <MaterialChangesView changes={materialChanges} searchQuery={searchQuery} />,
           },
         ]}
       />

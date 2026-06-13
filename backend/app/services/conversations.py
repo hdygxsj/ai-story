@@ -3,17 +3,33 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.conversation import Conversation, Message
 
+DEFAULT_CONVERSATION_TITLE = "新对话"
+
 
 def auto_title_from_message(message: str) -> str:
-    trimmed = message.strip()
+    trimmed = " ".join(message.strip().split())
     if not trimmed:
-        return "新对话"
-    return trimmed[:30]
+        return DEFAULT_CONVERSATION_TITLE
+    if len(trimmed) <= 30:
+        return trimmed
+    return f"{trimmed[:30]}…"
+
+
+def default_conversation_title(now: datetime | None = None) -> str:
+    current = now or datetime.now(UTC)
+    return f"{DEFAULT_CONVERSATION_TITLE} {current.strftime('%m/%d %H:%M')}"
+
+
+def is_default_conversation_title(title: str) -> bool:
+    stripped = title.strip()
+    if stripped == DEFAULT_CONVERSATION_TITLE:
+        return True
+    return stripped.startswith(f"{DEFAULT_CONVERSATION_TITLE} ")
 
 
 async def create_conversation(
@@ -44,6 +60,68 @@ async def list_conversations(session: AsyncSession, *, novel_id: UUID) -> list[C
         .order_by(Conversation.updated_at.desc(), Conversation.id)
     )
     return list(conversations)
+
+
+async def get_conversation_meta(
+    session: AsyncSession,
+    *,
+    conversation_id: UUID,
+) -> tuple[int, str | None]:
+    message_count = await session.scalar(
+        select(func.count())
+        .select_from(Message)
+        .where(Message.conversation_id == conversation_id)
+    )
+    count = int(message_count or 0)
+    if count == 0:
+        return 0, None
+
+    last_message = await session.scalar(
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.desc(), Message.id.desc())
+        .limit(1)
+    )
+    if last_message is None:
+        return count, None
+
+    preview = " ".join(last_message.content.strip().split())
+    if not preview:
+        return count, None
+    if len(preview) <= 80:
+        return count, preview
+    return count, f"{preview[:80]}…"
+
+
+async def maybe_auto_title_conversation(
+    session: AsyncSession,
+    *,
+    conversation: Conversation,
+    message: str,
+) -> Conversation:
+    if not is_default_conversation_title(conversation.title):
+        return conversation
+
+    existing_user_count = await session.scalar(
+        select(func.count())
+        .select_from(Message)
+        .where(
+            Message.conversation_id == conversation.id,
+            Message.role == "user",
+        )
+    )
+    if int(existing_user_count or 0) > 0:
+        return conversation
+
+    new_title = auto_title_from_message(message)
+    if new_title == DEFAULT_CONVERSATION_TITLE:
+        return conversation
+
+    conversation.title = new_title
+    conversation.updated_at = datetime.now(UTC)
+    await session.commit()
+    await session.refresh(conversation)
+    return conversation
 
 
 async def get_conversation(

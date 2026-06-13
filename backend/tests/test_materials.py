@@ -128,3 +128,23 @@ def test_material_changes_are_recorded_for_user_actions() -> None:
     assert changes[0]["actor_source"] == "user"
     assert changes[1]["action"] == "updated"
     assert changes[2]["action"] == "created"
+
+
+def test_create_relationship_edge_deduplicates_same_pair_and_type() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client)
+    novel = client.post("/novels", headers=headers, json={"title": "Relationship Novel"}).json()
+    payload = {
+        "source_character": "Mira",
+        "target_character": "Jon",
+        "relationship_type": "allies",
+        "description": "They trust each other.",
+    }
+
+    first = client.post(f"/novels/{novel['id']}/relationship-edges", headers=headers, json=payload)
+    second = client.post(f"/novels/{novel['id']}/relationship-edges", headers=headers, json=payload)
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["id"] == second.json()["id"]
+    assert len(client.get(f"/novels/{novel['id']}/relationship-edges", headers=headers).json()) == 1

@@ -245,7 +245,7 @@ describe("frontend data flow", () => {
 
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Agent" })).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "共创 Agent" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "执笔" })).toBeInTheDocument();
     await user.click(await screen.findByText("Chapter From API"));
 
     expect(await screen.findByText("Loaded chapter content")).toBeInTheDocument();
@@ -256,9 +256,9 @@ describe("frontend data flow", () => {
     expect(screen.queryByRole("tab", { name: "待审核" })).not.toBeInTheDocument();
     expect(screen.getByText("1 个模型配置")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "章节" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "共创 Agent" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "执笔" })).toBeInTheDocument();
     rerender(<WorkspacePage activeSection="confirmations" token="token" novelId="novel-1" />);
-    expect(await screen.findByText("段落改写")).toBeInTheDocument();
+    expect(screen.getAllByText("段落改写").length).toBeGreaterThanOrEqual(1);
     rerender(<WorkspacePage activeSection="materials" token="token" novelId="novel-1" />);
     expect(await screen.findByRole("heading", { name: "素材" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /创作资产/ })).toBeInTheDocument();
@@ -271,7 +271,7 @@ describe("frontend data flow", () => {
     await user.click(screen.getByRole("tab", { name: /人物关系/ }));
     expect(await screen.findByText("distrusts")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "章节" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "共创 Agent" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "执笔" })).toBeInTheDocument();
     await waitFor(() => expect(fetch).toHaveBeenCalledWith("http://localhost:8000/documents/doc-1", expect.anything()));
   });
 

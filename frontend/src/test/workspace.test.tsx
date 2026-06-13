@@ -66,7 +66,7 @@ describe("WorkspacePage", () => {
     expect(screen.queryByRole("tab", { name: "Agent" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "章节" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "正文编辑器" })).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "共创 Agent" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "执笔" })).toBeInTheDocument();
     expect(screen.getByTestId("tiptap-editor")).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Document editor" })).not.toBeInTheDocument();
     expect(screen.getByTestId("workspace-shell")).toHaveStyle({
@@ -409,7 +409,8 @@ describe("WorkspacePage", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorkspacePage activeSection="confirmations" token="test-token" novelId="novel-1" />);
-    await user.click(await screen.findByRole("button", { name: "写入正文" }));
+    const approveButtons = await screen.findAllByRole("button", { name: "写入正文" });
+    await user.click(approveButtons[0]!);
 
     await waitFor(() => expect(versionCalls).toBeGreaterThan(1));
     expect(await screen.findByText("2 个已保存版本")).toBeInTheDocument();

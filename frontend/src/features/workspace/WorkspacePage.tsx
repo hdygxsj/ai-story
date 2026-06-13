@@ -1119,7 +1119,15 @@ export function WorkspacePage({
             }}
           >
             {workspaceStats}
-            <div style={{ minHeight: 0, minWidth: 0 }}>{centerContent}</div>
+            <div
+              style={{
+                minHeight: 0,
+                minWidth: 0,
+                overflow: activeSection === "workspace" ? "hidden" : "auto",
+              }}
+            >
+              {centerContent}
+            </div>
           </div>
           <div
             aria-label="调整 Agent 面板宽度"
@@ -1136,7 +1144,7 @@ export function WorkspacePage({
     );
   }
 
-  const workspaceContent = renderWorkspaceShell(
+  const workspaceCenterContent = (
     <DocumentEditor
       chapterTitle={currentChapterTitle}
       content={editorContent}
@@ -1150,7 +1158,7 @@ export function WorkspacePage({
       onSelectText={setSelectedText}
       saveStatus={saving ? "saving" : hasUnsavedDraft ? "dirty" : "saved"}
       saving={saving}
-    />,
+    />
   );
 
   const agentConfigActionBar = (
@@ -1386,7 +1394,7 @@ export function WorkspacePage({
     </Card>
   );
 
-  const memoryContent = renderWorkspaceShell(
+  const memoryCenterContent = (
     <Card
       style={{
         border: "none",
@@ -1445,7 +1453,7 @@ export function WorkspacePage({
 
   const pendingReviewConfirmations = filterPendingConfirmations(confirmations);
 
-  const confirmationsContent = (
+  const confirmationsCenterContent = (
     <Card style={{ border: "none", boxShadow: "0 18px 45px rgba(15,23,42,0.08)" }}>
       <Typography.Title level={3}>确认</Typography.Title>
       <Typography.Paragraph>Agent 的写入动作会先进入这里，等待你通过或拒绝。</Typography.Paragraph>
@@ -1478,7 +1486,7 @@ export function WorkspacePage({
     </Card>
   );
 
-  const materialsContent = renderWorkspaceShell(
+  const materialsCenterContent = (
     <MaterialsPanel
       characterStates={characterStates}
       creativeAssets={creativeAssets}
@@ -1486,10 +1494,10 @@ export function WorkspacePage({
       onDeleteCreativeAsset={handleDeleteCreativeAsset}
       onUpdateCreativeAsset={handleUpdateCreativeAsset}
       relationshipEdges={relationshipEdges}
-    />,
+    />
   );
 
-  const timelineContent = renderWorkspaceShell(
+  const timelineCenterContent = (
     <Card
       data-testid="timeline-card"
       style={{
@@ -1530,16 +1538,16 @@ export function WorkspacePage({
           }))}
         />
       )}
-    </Card>,
+    </Card>
   );
 
-  const sectionContent: Record<WorkspaceSection, ReactNode> = {
+  const centerContentBySection: Record<WorkspaceSection, ReactNode> = {
     "agent-config": agentConfigContent,
-    confirmations: confirmationsContent,
-    materials: materialsContent,
-    memory: memoryContent,
-    timeline: timelineContent,
-    workspace: workspaceContent,
+    confirmations: confirmationsCenterContent,
+    materials: materialsCenterContent,
+    memory: memoryCenterContent,
+    timeline: timelineCenterContent,
+    workspace: workspaceCenterContent,
   };
 
   return (
@@ -1548,10 +1556,10 @@ export function WorkspacePage({
         height: "100%",
         minHeight: 0,
         minWidth: 0,
-        overflow: activeSection === "workspace" ? "hidden" : "auto",
+        overflow: "hidden",
       }}
     >
-      {sectionContent[activeSection]}
+      {renderWorkspaceShell(centerContentBySection[activeSection])}
     </div>
   );
 }

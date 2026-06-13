@@ -21,10 +21,11 @@ from app.schemas.conversation import (
 )
 from app.services.context_settings import get_or_create_context_settings, update_context_settings
 from app.services.conversations import (
-    auto_title_from_message,
     create_conversation,
+    default_conversation_title,
     delete_conversation,
     get_conversation,
+    get_conversation_meta,
     list_conversations,
     list_messages,
     update_conversation_title,
@@ -42,7 +43,21 @@ async def get_novel_conversations(
 ) -> list[ConversationResponse]:
     await get_owned_novel(session, current_user, novel_id)
     conversations = await list_conversations(session, novel_id=novel_id)
-    return [ConversationResponse.model_validate(item) for item in conversations]
+    responses: list[ConversationResponse] = []
+    for conversation in conversations:
+        message_count, preview = await get_conversation_meta(session, conversation_id=conversation.id)
+        responses.append(
+            ConversationResponse(
+                id=conversation.id,
+                novel_id=conversation.novel_id,
+                title=conversation.title,
+                created_at=conversation.created_at,
+                updated_at=conversation.updated_at,
+                message_count=message_count,
+                preview=preview,
+            )
+        )
+    return responses
 
 
 @router.post(
@@ -61,7 +76,7 @@ async def post_novel_conversation(
         session,
         novel_id=novel_id,
         user_id=current_user.id,
-        title=payload.title or "新对话",
+        title=payload.title or default_conversation_title(),
     )
     return ConversationResponse.model_validate(conversation)
 

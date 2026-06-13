@@ -1,7 +1,8 @@
 import { CaretRightOutlined, FileTextOutlined, FolderOutlined, LeftOutlined, PlusOutlined, UndoOutlined } from "@ant-design/icons";
 import { Button, Dropdown, Input, Modal, Space, Tree, Typography } from "antd";
 import type { MenuProps } from "antd";
-import { useMemo, useState } from "react";
+import type { Key } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { WorkspaceNode } from "../../api/workspace";
 
 type WorkspaceTreeProps = {
@@ -27,6 +28,7 @@ export type WorkspaceNodePositionChange = {
 
 type WorkspaceDropInput = {
   draggedId: string;
+  draggedIds?: string[];
   dropId: string;
   dropPosition: number;
   dropToGap: boolean;
@@ -73,12 +75,97 @@ function isDescendant(nodes: WorkspaceNode[], nodeId: string, possibleAncestorId
   return false;
 }
 
+function siblingRangeKeys(nodes: WorkspaceNode[], anchorKey: string, targetKey: string): string[] {
+  const anchor = nodes.find((node) => node.id === anchorKey);
+  const target = nodes.find((node) => node.id === targetKey);
+  if (!anchor || !target || anchor.parent_id !== target.parent_id) {
+    return [targetKey];
+  }
+  const siblings = sortedSiblings(nodes, anchor.parent_id);
+  const anchorIndex = siblings.findIndex((node) => node.id === anchorKey);
+  const targetIndex = siblings.findIndex((node) => node.id === targetKey);
+  const [start, end] = anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
+  return siblings.slice(start, end + 1).map((node) => node.id);
+}
+
+function resolveMovableIds(nodes: WorkspaceNode[], draggedId: string, draggedIds?: string[]): string[] {
+  const draggedNode = nodes.find((node) => node.id === draggedId);
+  if (!draggedNode) {
+    return [];
+  }
+  const requestedIds = draggedIds?.length ? draggedIds : [draggedId];
+  const movableIds = [...new Set(requestedIds)]
+    .filter((id) => {
+      if (id === draggedId) {
+        return true;
+      }
+      const node = nodes.find((item) => item.id === id);
+      return node?.parent_id === draggedNode.parent_id;
+    })
+    .sort((leftId, rightId) => {
+      const left = nodes.find((node) => node.id === leftId)!;
+      const right = nodes.find((node) => node.id === rightId)!;
+      return left.position - right.position || left.title.localeCompare(right.title);
+    });
+  return movableIds.includes(draggedId) ? movableIds : [...movableIds, draggedId];
+}
+
+function resolveInsertIndex(
+  nodes: WorkspaceNode[],
+  movableSet: Set<string>,
+  nextParentId: string | null,
+  dropId: string,
+  dropPosition: number,
+  dropToGap: boolean,
+  dropNode: WorkspaceNode,
+): number | null {
+  const targetSiblings = sortedSiblings(nodes, nextParentId).filter((node) => !movableSet.has(node.id));
+
+  if (!dropToGap && dropNode.node_type === "folder" && !movableSet.has(dropNode.id)) {
+    return targetSiblings.length;
+  }
+
+  if (movableSet.has(dropId)) {
+    if (!dropToGap) {
+      return null;
+    }
+    const siblings = sortedSiblings(nodes, dropNode.parent_id);
+    const dropIndex = siblings.findIndex((node) => node.id === dropId);
+    if (dropPosition < 0) {
+      let index = dropIndex - 1;
+      while (index >= 0 && movableSet.has(siblings[index].id)) {
+        index -= 1;
+      }
+      if (index < 0) {
+        return 0;
+      }
+      const referenceIndex = targetSiblings.findIndex((node) => node.id === siblings[index].id);
+      return referenceIndex < 0 ? 0 : referenceIndex + 1;
+    }
+    let index = dropIndex + 1;
+    while (index < siblings.length && movableSet.has(siblings[index].id)) {
+      index += 1;
+    }
+    if (index >= siblings.length) {
+      return targetSiblings.length;
+    }
+    const referenceIndex = targetSiblings.findIndex((node) => node.id === siblings[index].id);
+    return referenceIndex < 0 ? targetSiblings.length : referenceIndex;
+  }
+
+  const dropIndex = targetSiblings.findIndex((node) => node.id === dropId);
+  return dropPosition < 0 ? Math.max(dropIndex, 0) : Math.max(dropIndex + 1, 0);
+}
+
 export function calculateWorkspaceDrop(nodes: WorkspaceNode[], input: WorkspaceDropInput): WorkspaceNodePositionChange[] | null {
   const draggedNode = nodes.find((node) => node.id === input.draggedId);
   const dropNode = nodes.find((node) => node.id === input.dropId);
   if (!draggedNode || !dropNode || input.draggedId === input.dropId) {
     return null;
   }
+
+  const movableIds = resolveMovableIds(nodes, input.draggedId, input.draggedIds);
+  const movableSet = new Set(movableIds);
 
   const nextParentId =
     !input.dropToGap && dropNode.node_type === "folder"
@@ -87,19 +174,31 @@ export function calculateWorkspaceDrop(nodes: WorkspaceNode[], input: WorkspaceD
   if (nextParentId === draggedNode.id || (nextParentId && isDescendant(nodes, nextParentId, draggedNode.id))) {
     return null;
   }
+  for (const movableId of movableIds) {
+    if (nextParentId === movableId || (nextParentId && isDescendant(nodes, nextParentId, movableId))) {
+      return null;
+    }
+  }
+
+  const insertIndex = resolveInsertIndex(
+    nodes,
+    movableSet,
+    nextParentId,
+    input.dropId,
+    input.dropPosition,
+    input.dropToGap,
+    dropNode,
+  );
+  if (insertIndex === null) {
+    return null;
+  }
 
   const oldParentId = draggedNode.parent_id;
   const changes = new Map<string, WorkspaceNodePositionChange>();
-  const targetSiblings = sortedSiblings(nodes, nextParentId).filter((node) => node.id !== draggedNode.id);
-  const dropIndex = targetSiblings.findIndex((node) => node.id === input.dropId);
-  const targetIndex =
-    !input.dropToGap && dropNode.node_type === "folder"
-      ? targetSiblings.length
-      : input.dropPosition < 0
-        ? Math.max(dropIndex, 0)
-        : Math.max(dropIndex + 1, 0);
+  const targetSiblings = sortedSiblings(nodes, nextParentId).filter((node) => !movableSet.has(node.id));
+  const movableNodes = movableIds.map((id) => nodes.find((node) => node.id === id)!);
   const nextSiblings = [...targetSiblings];
-  nextSiblings.splice(Math.min(targetIndex, nextSiblings.length), 0, draggedNode);
+  nextSiblings.splice(Math.min(insertIndex, nextSiblings.length), 0, ...movableNodes);
 
   nextSiblings.forEach((node, position) => {
     if (node.parent_id !== nextParentId || node.position !== position) {
@@ -109,7 +208,7 @@ export function calculateWorkspaceDrop(nodes: WorkspaceNode[], input: WorkspaceD
 
   if (oldParentId !== nextParentId) {
     sortedSiblings(nodes, oldParentId)
-      .filter((node) => node.id !== draggedNode.id)
+      .filter((node) => !movableSet.has(node.id))
       .forEach((node, position) => {
         if (node.position !== position) {
           changes.set(node.id, { id: node.id, parent_id: oldParentId, position });
@@ -142,6 +241,9 @@ export function WorkspaceTree({
   const [renamingNode, setRenamingNode] = useState<WorkspaceNode | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
   const [recycleBinExpanded, setRecycleBinExpanded] = useState(false);
+  const [selectedNodeKeys, setSelectedNodeKeys] = useState<string[]>([]);
+  const [lastClickedNodeKey, setLastClickedNodeKey] = useState<string | null>(null);
+  const previousDocumentIdRef = useRef<string | null>(null);
   const renamingNodeLabel = renamingNode?.node_type === "folder" ? "文件夹" : "章节";
   const activeNodes = useMemo(() => nodes.filter((node) => node.status !== "trashed"), [nodes]);
   const trashedNodes = useMemo(() => nodes.filter((node) => node.status === "trashed"), [nodes]);
@@ -242,13 +344,45 @@ export function WorkspaceTree({
   }
 
   const treeData = buildTree(null);
-  const selectedNodeKeys = useMemo(() => {
+
+  useEffect(() => {
+    if (selectedDocumentId === previousDocumentIdRef.current) {
+      return;
+    }
+    previousDocumentIdRef.current = selectedDocumentId;
     if (!selectedDocumentId) {
-      return [];
+      return;
     }
     const selectedNode = activeNodes.find((node) => node.document_id === selectedDocumentId);
-    return selectedNode ? [selectedNode.id] : [];
+    if (!selectedNode) {
+      return;
+    }
+    setSelectedNodeKeys([selectedNode.id]);
+    setLastClickedNodeKey(selectedNode.id);
   }, [activeNodes, selectedDocumentId]);
+
+  function handleNodeSelect(_selectedKeys: Key[], info: { nativeEvent: MouseEvent; node: { key: Key } }) {
+    const clickedKey = String(info.node.key);
+    const clickedNode = activeNodes.find((node) => node.id === clickedKey);
+    const nativeEvent = info.nativeEvent;
+
+    if (nativeEvent.shiftKey && lastClickedNodeKey) {
+      setSelectedNodeKeys(siblingRangeKeys(activeNodes, lastClickedNodeKey, clickedKey));
+    } else if (nativeEvent.ctrlKey || nativeEvent.metaKey) {
+      const nextKeys = selectedNodeKeys.includes(clickedKey)
+        ? selectedNodeKeys.filter((key) => key !== clickedKey)
+        : [...selectedNodeKeys, clickedKey];
+      setSelectedNodeKeys(nextKeys.length ? nextKeys : [clickedKey]);
+      setLastClickedNodeKey(clickedKey);
+    } else {
+      setSelectedNodeKeys([clickedKey]);
+      setLastClickedNodeKey(clickedKey);
+    }
+
+    if (clickedNode?.document_id) {
+      onSelectDocument?.(clickedNode.document_id);
+    }
+  }
 
   function submitRename() {
     const nextTitle = renameTitle.trim();
@@ -286,26 +420,31 @@ export function WorkspaceTree({
               </Typography.Title>
               <Typography.Text type="secondary">章节、草稿和笔记</Typography.Text>
             </div>
-            {onCollapse ? (
-              <Button aria-label="收起章节" icon={<LeftOutlined />} onClick={onCollapse} size="small" type="text" />
-            ) : null}
+            <Space size={4}>
+              <Dropdown menu={createContextMenu(null)} trigger={["click"]}>
+                <Button icon={<PlusOutlined />} size="small" type="primary">
+                  新建
+                </Button>
+              </Dropdown>
+              {onCollapse ? (
+                <Button aria-label="收起章节" icon={<LeftOutlined />} onClick={onCollapse} size="small" type="text" />
+              ) : null}
+            </Space>
           </div>
-          <Dropdown menu={createContextMenu(null)} trigger={["click"]}>
-            <Button icon={<PlusOutlined />} size="small" type="primary">
-              新建
-            </Button>
-          </Dropdown>
           <Tree
             blockNode
             defaultExpandAll
             draggable={{ icon: false }}
+            multiple
             selectedKeys={selectedNodeKeys}
             treeData={treeData}
             onDrop={(info) => {
               const draggedId = String(info.dragNode.key);
               const dropId = String(info.node.key);
+              const draggedIds = selectedNodeKeys.includes(draggedId) ? selectedNodeKeys : [draggedId];
               const changes = calculateWorkspaceDrop(activeNodes, {
                 draggedId,
+                draggedIds,
                 dropId,
                 dropPosition: calculateTreeRelativeDropPosition(
                   info.dropPosition,
@@ -322,13 +461,7 @@ export function WorkspaceTree({
                 onMoveNode?.(draggedId, draggedChange.parent_id, draggedChange.position);
               }
             }}
-            onSelect={(selectedKeys) => {
-              const selectedKey = String(selectedKeys[0] ?? "");
-              const documentId = nodes.find((node) => node.id === selectedKey)?.document_id;
-              if (documentId) {
-                onSelectDocument?.(documentId);
-              }
-            }}
+            onSelect={handleNodeSelect}
           />
           </Space>
         </div>

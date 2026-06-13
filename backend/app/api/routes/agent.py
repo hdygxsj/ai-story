@@ -20,7 +20,7 @@ from app.schemas.agent import AgentMessageRequest, AgentMessageResponse
 from app.schemas.confirmation import ConfirmationResponse
 from app.schemas.workspace import WorkspaceNodeResponse
 from app.services.context_assembly import assemble_context
-from app.services.conversations import append_message, resolve_conversation_for_message
+from app.services.conversations import append_message, maybe_auto_title_conversation, resolve_conversation_for_message
 from app.services.document_actions import build_confirmation_responses
 from app.services.memory import create_memory_item
 from app.services.novels import get_owned_novel
@@ -65,6 +65,11 @@ async def send_agent_message(
         novel_id=novel_id,
         user_id=current_user.id,
         conversation_id=payload.conversation_id,
+        message=payload.message,
+    )
+    conversation = await maybe_auto_title_conversation(
+        session,
+        conversation=conversation,
         message=payload.message,
     )
     await append_message(
@@ -185,6 +190,11 @@ async def stream_agent_message(
         novel_id=novel_id,
         user_id=current_user.id,
         conversation_id=payload.conversation_id,
+        message=payload.message,
+    )
+    conversation = await maybe_auto_title_conversation(
+        session,
+        conversation=conversation,
         message=payload.message,
     )
     user_message = await append_message(

@@ -28,3 +28,7 @@ def test_append_agent_runtime_guidance_without_open_document() -> None:
 
     assert "create_chapter_with_content" in prompt
     assert "当前没有打开的文档" in prompt
+    assert "禁止只调用 create_workspace_node" in prompt
+    assert "禁止用 create_workspace_node" in prompt
+    assert "禁止让用户手动" in prompt
+    assert "delete_creative_assets" in prompt

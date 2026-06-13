@@ -10,6 +10,7 @@
 }
 
 .agent-panel-card .ant-card-head-title {
+  flex: 1;
   min-width: 0;
   padding: 8px 0;
 }
@@ -29,32 +30,120 @@
 .agent-panel-header {
   align-items: center;
   display: flex;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
   width: 100%;
+}
+
+.agent-panel-header-title {
+  flex-shrink: 0;
+}
+
+.agent-panel-toolbar-header {
+  border-bottom: none;
+  flex: 1;
+  margin-bottom: 0;
+  min-width: 0;
+  padding-bottom: 0;
 }
 
 .agent-panel-toolbar-row {
   align-items: center;
   display: flex;
   gap: 6px;
+  justify-content: flex-end;
   min-width: 0;
   width: 100%;
 }
 
-.agent-panel-toolbar-select {
-  flex: 1;
+.agent-panel-history-dropdown {
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+  max-width: 420px;
+  min-width: 360px;
+  padding: 10px;
+}
+
+.agent-panel-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.agent-panel-history-list:only-child {
+  margin-top: 0;
+}
+
+.agent-panel-history-item {
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font: inherit;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.agent-panel-history-item-main {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
   min-width: 0;
+  width: 100%;
 }
 
-.agent-panel-toolbar-select .ant-select-selector {
-  border-radius: 10px !important;
-}
-
-.agent-panel-toolbar-select .ant-select-selection-item {
+.agent-panel-history-item-title {
+  flex: 1;
+  font-weight: 600;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.agent-panel-history-item-time {
+  color: rgba(15, 23, 42, 0.45);
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.agent-panel-history-item-preview {
+  color: rgba(15, 23, 42, 0.55);
+  display: block;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-panel-history-item-active .agent-panel-history-item-preview,
+.agent-panel-history-item-active .agent-panel-history-item-time {
+  color: rgba(22, 119, 255, 0.72);
+}
+
+.agent-panel-history-item:hover {
+  background: rgba(15, 23, 42, 0.04);
+}
+
+.agent-panel-history-item-active {
+  background: rgba(22, 119, 255, 0.08);
+  color: #1677ff;
+}
+
+.agent-panel-history-item-active:hover {
+  background: rgba(22, 119, 255, 0.12);
 }
 
 .agent-panel-conversation-option {

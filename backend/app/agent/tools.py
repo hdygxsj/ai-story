@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 from langchain_core.tools import BaseTool, tool
@@ -172,6 +173,15 @@ class DeleteCreativeAssetArgs(BaseModel):
     asset_id: str = Field(description="Creative asset UUID")
 
 
+class DeleteCreativeAssetsArgs(BaseModel):
+    novel_id: str = Field(description="Novel UUID")
+    asset_ids: list[str] = Field(
+        min_length=1,
+        max_length=50,
+        description="Creative asset UUIDs to delete in one batch",
+    )
+
+
 class UpdateTimelineEventArgs(BaseModel):
     novel_id: str = Field(description="Novel UUID")
     event_id: str = Field(description="Timeline event UUID")
@@ -215,10 +225,51 @@ def draft_rewrite(selected_text: str, instruction: str) -> str:
     return f"{selected_text} The room turned tense as every sound seemed to wait for the next mistake."
 
 
+CHAPTER_CONTENT_WRITE_TOOLS = frozenset(
+    {
+        "create_chapter_with_content",
+        "propose_document_update",
+        "propose_selection_replace",
+        "propose_rewrite",
+    }
+)
+
+_CHAPTER_WRITE_PHRASES = (
+    "写进正文",
+    "写入正文",
+    "写正文",
+    "保存正文",
+    "写到工作台",
+    "保存到工作台",
+    "写进当前",
+    "写进章节",
+    "生成正文",
+    "续写正文",
+    "写入章节",
+    "保存到章节",
+    "写进文档",
+)
+
+
+def is_chapter_content_write_request(message: str) -> bool:
+    if any(phrase in message for phrase in _CHAPTER_WRITE_PHRASES):
+        return True
+    if re.search(r"(写|生成|创作|续写).{0,6}第.{0,3}章", message):
+        return True
+    write_verbs = ("写", "生成", "创作", "续写", "撰写", "保存")
+    content_targets = ("正文", "这章", "当前文档", "当前章节", "这一章", "工作台")
+    return any(verb in message for verb in write_verbs) and any(
+        target in message for target in content_targets
+    )
+
+
 def classify_agent_intent(message: str, selected_text: str | None) -> str:
     lowered = message.lower()
     if selected_text and ("rewrite" in lowered or "改写" in lowered or "重写" in lowered):
         return "rewrite_selection"
+
+    if is_chapter_content_write_request(message):
+        return "write_chapter_content"
 
     material_keywords = (
         "素材",
@@ -314,7 +365,7 @@ def create_workspace_node_tool(
     node_type: str,
     parent_id: str | None = None,
 ) -> dict[str, Any]:
-    """Create a folder, chapter, note, or draft node."""
+    """Create an empty folder shell only. For chapters with story text, use create_chapter_with_content instead."""
     return {"novel_id": novel_id, "title": title, "node_type": node_type, "parent_id": parent_id}
 
 
@@ -325,13 +376,13 @@ def create_chapter_with_content_tool(
     content: str,
     parent_id: str | None = None,
 ) -> dict[str, Any]:
-    """Create a chapter and persist its complete body in the workspace."""
+    """Create a chapter and persist complete non-empty body text when the user asks to write or generate chapter content."""
     return {"novel_id": novel_id, "title": title, "content": content, "parent_id": parent_id}
 
 
 @tool("propose_document_update", args_schema=ProposeDocumentUpdateArgs)
 def propose_document_update(document_id: str, content: str) -> dict[str, Any]:
-    """Propose replacing a complete document after user confirmation."""
+    """Persist complete chapter body into the open document; required when the user asks to write into current chapter text."""
     return {"document_id": document_id, "content": content, "status": "requires_runtime_loader"}
 
 
@@ -500,8 +551,14 @@ def update_creative_asset_tool(
 
 @tool("delete_creative_asset", args_schema=DeleteCreativeAssetArgs)
 def delete_creative_asset_tool(novel_id: str, asset_id: str) -> dict[str, Any]:
-    """Delete a creative asset by id."""
+    """Delete one creative asset by id. Execute directly; never ask the user to delete manually."""
     return {"novel_id": novel_id, "asset_id": asset_id}
+
+
+@tool("delete_creative_assets", args_schema=DeleteCreativeAssetsArgs)
+def delete_creative_assets_tool(novel_id: str, asset_ids: list[str]) -> dict[str, Any]:
+    """Delete multiple creative assets by id in one batch. Use when cleaning up old or duplicate assets."""
+    return {"novel_id": novel_id, "asset_ids": asset_ids}
 
 
 @tool("update_timeline_event", args_schema=UpdateTimelineEventArgs)
@@ -591,6 +648,7 @@ def get_agent_tools() -> list[BaseTool]:
         create_world_rule,
         update_creative_asset_tool,
         delete_creative_asset_tool,
+        delete_creative_assets_tool,
         list_timeline_events_tool,
         create_timeline_event,
         update_timeline_event_tool,

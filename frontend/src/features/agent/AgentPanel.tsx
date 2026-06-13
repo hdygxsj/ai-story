@@ -331,9 +331,28 @@ export function AgentPanel({
     <Card
       className="agent-panel-card"
       title={
-        <Typography.Title level={4} data-testid="agent-panel-header" style={{ margin: 0 }}>
-          共创 Agent
-        </Typography.Title>
+        <div className="agent-panel-header">
+          <Typography.Title className="agent-panel-header-title" data-testid="agent-panel-header" level={4} style={{ margin: 0 }}>
+            执笔
+          </Typography.Title>
+          <ConversationSidebar
+            activeConversationId={activeConversationId}
+            conversations={conversations}
+            disabled={streaming}
+            variant="header"
+            onCreateConversation={() => void handleCreateConversation().catch((caught: Error) => setError(caught.message))}
+            onDeleteConversation={(conversationId) =>
+              void handleDeleteConversation(conversationId).catch((caught: Error) => setError(caught.message))
+            }
+            onOpenContextSettings={() => setSettingsOpen(true)}
+            onRenameConversation={(conversationId, title) =>
+              void handleRenameConversation(conversationId, title).catch((caught: Error) => setError(caught.message))
+            }
+            onSelectConversation={(conversationId) =>
+              void handleSelectConversation(conversationId).catch((caught: Error) => setError(caught.message))
+            }
+          />
+        </div>
       }
       extra={
         streaming ? (
@@ -372,22 +391,6 @@ export function AgentPanel({
           type="warning"
         />
       ) : null}
-      <ConversationSidebar
-        activeConversationId={activeConversationId}
-        conversations={conversations}
-        disabled={streaming}
-        onCreateConversation={() => void handleCreateConversation().catch((caught: Error) => setError(caught.message))}
-        onDeleteConversation={(conversationId) =>
-          void handleDeleteConversation(conversationId).catch((caught: Error) => setError(caught.message))
-        }
-        onOpenContextSettings={() => setSettingsOpen(true)}
-        onRenameConversation={(conversationId, title) =>
-          void handleRenameConversation(conversationId, title).catch((caught: Error) => setError(caught.message))
-        }
-        onSelectConversation={(conversationId) =>
-          void handleSelectConversation(conversationId).catch((caught: Error) => setError(caught.message))
-        }
-      />
       <div className="agent-panel-chat">
         <ContextStatusBar detail={contextDetail} />
         <div

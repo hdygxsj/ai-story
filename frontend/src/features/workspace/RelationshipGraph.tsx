@@ -42,6 +42,29 @@ const RELATIONSHIP_COLORS: RelationshipColor[] = [
 const DIMMED_STROKE = "rgba(148, 163, 184, 0.28)";
 const DIMMED_LABEL = "rgba(100, 116, 139, 0.72)";
 
+function relationshipEdgeKey(edge: RelationshipEdge) {
+  return `${edge.source_character}\0${edge.target_character}\0${edge.relationship_type}`;
+}
+
+export function dedupeRelationshipEdges(edges: RelationshipEdge[]): {
+  edges: RelationshipEdge[];
+  hiddenCount: number;
+} {
+  const byKey = new Map<string, RelationshipEdge>();
+  for (const edge of edges) {
+    const key = relationshipEdgeKey(edge);
+    const existing = byKey.get(key);
+    if (!existing || (edge.description?.length ?? 0) >= (existing.description?.length ?? 0)) {
+      byKey.set(key, edge);
+    }
+  }
+  const uniqueEdges = Array.from(byKey.values());
+  return {
+    edges: uniqueEdges,
+    hiddenCount: Math.max(0, edges.length - uniqueEdges.length),
+  };
+}
+
 function buildRelationshipColorMap(edges: RelationshipEdge[]): Map<string, RelationshipColor> {
   const types = Array.from(new Set(edges.map((edge) => edge.relationship_type))).sort((left, right) =>
     left.localeCompare(right, "zh-CN"),
@@ -145,9 +168,10 @@ export function RelationshipGraph({ edges }: RelationshipGraphProps) {
   const [activeEdgeId, setActiveEdgeId] = useState<string | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
 
-  const nodes = useMemo(() => buildNodes(edges), [edges]);
-  const positionedEdges = useMemo(() => buildPositionedEdges(edges, nodes), [edges, nodes]);
-  const relationshipColors = useMemo(() => buildRelationshipColorMap(edges), [edges]);
+  const { edges: visibleEdges, hiddenCount } = useMemo(() => dedupeRelationshipEdges(edges), [edges]);
+  const nodes = useMemo(() => buildNodes(visibleEdges), [visibleEdges]);
+  const positionedEdges = useMemo(() => buildPositionedEdges(visibleEdges, nodes), [visibleEdges, nodes]);
+  const relationshipColors = useMemo(() => buildRelationshipColorMap(visibleEdges), [visibleEdges]);
   const relationshipColorIndex = useMemo(
     () => new Map(Array.from(relationshipColors.keys()).map((type, index) => [type, index])),
     [relationshipColors],
@@ -175,6 +199,11 @@ export function RelationshipGraph({ edges }: RelationshipGraphProps) {
 
   return (
     <div className="relationship-graph">
+      {hiddenCount > 0 ? (
+        <p className="relationship-graph-dedupe-hint">
+          已合并显示 {visibleEdges.length} 条关系，隐藏了 {hiddenCount} 条重复记录。可在 Agent 对话中清理重复数据。
+        </p>
+      ) : null}
       <svg
         aria-label="人物关系图谱"
         className="relationship-graph-canvas"

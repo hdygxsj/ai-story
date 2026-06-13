@@ -1,14 +1,20 @@
-import { DeleteOutlined, EditOutlined, MoreOutlined, PlusOutlined, SettingOutlined } from "@ant-design/icons";
-import { Button, Dropdown, Input, Modal, Select } from "antd";
+import { DeleteOutlined, EditOutlined, HistoryOutlined, MoreOutlined, PlusOutlined, SettingOutlined } from "@ant-design/icons";
+import { Button, Dropdown, Empty, Input, Modal } from "antd";
 import type { MenuProps } from "antd";
 import { useMemo, useState } from "react";
 
 import type { Conversation } from "../../api/conversations";
+import {
+  formatConversationTime,
+  getConversationSubtitle,
+  getConversationTooltip,
+} from "./conversationPresentation";
 
 type ConversationSidebarProps = {
   conversations: Conversation[];
   activeConversationId: string | null;
   disabled?: boolean;
+  variant?: "default" | "header";
   onCreateConversation: () => void;
   onDeleteConversation: (conversationId: string) => void;
   onOpenContextSettings: () => void;
@@ -20,6 +26,7 @@ export function ConversationSidebar({
   conversations,
   activeConversationId,
   disabled = false,
+  variant = "default",
   onCreateConversation,
   onDeleteConversation,
   onOpenContextSettings,
@@ -29,8 +36,26 @@ export function ConversationSidebar({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
   const [searchValue, setSearchValue] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId) ?? null;
+
+  const filteredConversations = useMemo(() => {
+    const keyword = searchValue.trim().toLowerCase();
+    if (!keyword) {
+      return conversations;
+    }
+    return conversations.filter((conversation) => {
+      const haystack = [conversation.title, conversation.preview ?? ""].join(" ").toLowerCase();
+      return haystack.includes(keyword);
+    });
+  }, [conversations, searchValue]);
+
+  function handleSelectConversation(conversationId: string) {
+    onSelectConversation(conversationId);
+    setHistoryOpen(false);
+    setSearchValue("");
+  }
 
   function openRename(conversationId: string, title: string) {
     setRenamingId(conversationId);
@@ -77,40 +102,67 @@ export function ConversationSidebar({
   }, [activeConversation, disabled, onDeleteConversation]);
 
   return (
-    <div className="agent-panel-toolbar" data-testid="agent-conversation-sidebar">
+    <div
+      className={`agent-panel-toolbar${variant === "header" ? " agent-panel-toolbar-header" : ""}`}
+      data-testid="agent-conversation-sidebar"
+    >
       <div className="agent-panel-toolbar-row">
-        <Select
-          allowClear={false}
-          className="agent-panel-toolbar-select"
-          disabled={disabled || conversations.length === 0}
-          dropdownStyle={{ maxWidth: 360, minWidth: 280 }}
-          listHeight={280}
-          optionFilterProp="label"
-          options={conversations.map((conversation) => ({
-            label: conversation.title,
-            title: conversation.title,
-            value: conversation.id,
-          }))}
-          optionRender={(option) => (
-            <span className="agent-panel-conversation-option" title={String(option.label ?? "")}>
-              {option.label}
-            </span>
-          )}
-          placeholder={conversations.length === 0 ? "暂无对话" : "选择历史对话"}
-          popupMatchSelectWidth={false}
-          searchValue={searchValue}
-          showSearch={conversations.length > 4}
-          size="small"
-          title={activeConversation?.title}
-          value={activeConversationId ?? undefined}
-          onChange={(value) => onSelectConversation(value)}
-          onDropdownVisibleChange={(open) => {
-            if (open) {
+        <Dropdown
+          disabled={disabled}
+          onOpenChange={(open) => {
+            setHistoryOpen(open);
+            if (!open) {
               setSearchValue("");
             }
           }}
-          onSearch={setSearchValue}
-        />
+          open={historyOpen}
+          overlayClassName="agent-panel-history-overlay"
+          popupRender={() => (
+            <div className="agent-panel-history-dropdown" data-testid="agent-conversation-history-dropdown">
+              {conversations.length > 4 ? (
+                <Input
+                  allowClear
+                  aria-label="搜索历史对话"
+                  placeholder="搜索对话"
+                  size="small"
+                  value={searchValue}
+                  onChange={(event) => setSearchValue(event.target.value)}
+                />
+              ) : null}
+              <div className="agent-panel-history-list">
+                {filteredConversations.length === 0 ? (
+                  <Empty description={conversations.length === 0 ? "暂无对话" : "没有匹配的对话"} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                ) : (
+                  filteredConversations.map((conversation) => (
+                    <button
+                      className={`agent-panel-history-item${conversation.id === activeConversationId ? " agent-panel-history-item-active" : ""}`}
+                      key={conversation.id}
+                      title={getConversationTooltip(conversation)}
+                      type="button"
+                      onClick={() => handleSelectConversation(conversation.id)}
+                    >
+                      <span className="agent-panel-history-item-main">
+                        <span className="agent-panel-history-item-title">{conversation.title}</span>
+                        <span className="agent-panel-history-item-time">{formatConversationTime(conversation.updated_at)}</span>
+                      </span>
+                      <span className="agent-panel-history-item-preview">{getConversationSubtitle(conversation)}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+          trigger={["click"]}
+        >
+          <Button
+            aria-label="历史对话"
+            disabled={disabled || conversations.length === 0}
+            icon={<HistoryOutlined />}
+            size="small"
+            title={activeConversation ? getConversationTooltip(activeConversation) : "历史对话"}
+            type="text"
+          />
+        </Dropdown>
         <Button
           aria-label="创建对话"
           disabled={disabled}

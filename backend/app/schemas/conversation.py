@@ -19,6 +19,8 @@ class ConversationResponse(BaseModel):
     title: str
     created_at: datetime
     updated_at: datetime
+    message_count: int = 0
+    preview: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

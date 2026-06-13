@@ -8,7 +8,7 @@ from app.agent.tool_runtime import build_runtime_tools
 from app.agent.tools import classify_agent_intent, get_agent_tools
 from app.core.crypto import encrypt_api_key
 from app.agent.context import ContextPack
-from app.models import Document, DocumentVersion, MemoryItem, MemoryReviewItem, ModelProfile, Novel, PendingConfirmation, RagChunk, User, WorkspaceNode
+from app.models import CreativeAsset, Document, DocumentVersion, MemoryItem, MemoryReviewItem, ModelProfile, Novel, PendingConfirmation, RagChunk, User, WorkspaceNode
 from app.services.materials import list_material_changes
 from app.services.rag import extract_text_from_prosemirror
 
@@ -61,6 +61,7 @@ def test_agent_tool_registry_exposes_structured_langchain_tools() -> None:
         "list_creative_assets",
         "update_creative_asset",
         "delete_creative_asset",
+        "delete_creative_assets",
         "list_timeline_events",
         "update_timeline_event",
         "delete_timeline_event",
@@ -117,6 +118,47 @@ async def test_agent_can_update_and_delete_creative_asset(session, monkeypatch) 
     assert changes[0].actor_source == "agent"
     assert changes[1].action == "updated"
     assert changes[2].action == "created"
+
+
+async def test_agent_can_batch_delete_creative_assets(session, monkeypatch) -> None:
+    async def fake_index_text(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.services.materials.index_text", fake_index_text)
+
+    user = User(email="batch-delete@example.com", username="batch-delete", password_hash="hash")
+    session.add(user)
+    await session.flush()
+    novel = Novel(owner_id=user.id, title="Batch Delete Novel")
+    session.add(novel)
+    await session.commit()
+
+    tools = {
+        tool.name: tool
+        for tool in build_runtime_tools(
+            session,
+            model_profile=None,
+            owner_id=user.id,
+            novel_id=novel.id,
+        )
+    }
+    first = await tools["create_character_asset"].ainvoke(
+        {"novel_id": str(novel.id), "name": "Old A", "summary": "Old summary A."}
+    )
+    second = await tools["create_character_asset"].ainvoke(
+        {"novel_id": str(novel.id), "name": "Old B", "summary": "Old summary B."}
+    )
+    result = await tools["delete_creative_assets"].ainvoke(
+        {"novel_id": str(novel.id), "asset_ids": [first["id"], second["id"], "00000000-0000-0000-0000-000000000999"]}
+    )
+
+    assets = list(
+        await session.scalars(__import__("sqlalchemy").select(CreativeAsset).where(CreativeAsset.novel_id == novel.id))
+    )
+    assert result["status"] == "ok"
+    assert len(result["deleted_ids"]) == 2
+    assert len(result["missing_ids"]) == 1
+    assert assets == []
 
 
 async def test_create_chapter_with_content_persists_workspace_document(session, monkeypatch) -> None:
@@ -265,6 +307,58 @@ def test_agent_classifies_vague_organize_as_chat() -> None:
 
 def test_agent_classifies_workspace_organize_shortcut() -> None:
     assert classify_agent_intent("帮我整理章节和草稿目录", None) == "organize_workspace"
+
+
+def test_agent_classifies_write_chapter_content_intent() -> None:
+    assert classify_agent_intent("先写进正文里", None) == "write_chapter_content"
+    assert classify_agent_intent("帮我把这章正文保存到工作台", None) == "write_chapter_content"
+    assert classify_agent_intent("我想写一个打怪升级的小说", None) == "chat"
+
+
+async def test_create_workspace_node_rejects_empty_chapter(session) -> None:
+    user = User(email="empty-chapter@example.com", username="empty-chapter", password_hash="hash")
+    session.add(user)
+    await session.flush()
+    novel = Novel(owner_id=user.id, title="Guard Novel")
+    session.add(novel)
+    await session.commit()
+
+    tools = {tool.name: tool for tool in build_runtime_tools(session, model_profile=None)}
+    result = await tools["create_workspace_node"].ainvoke(
+        {
+            "novel_id": str(novel.id),
+            "title": "第一章",
+            "node_type": "chapter",
+            "parent_id": None,
+        }
+    )
+    nodes = list(await session.scalars(select(WorkspaceNode)))
+
+    assert result["status"] == "error"
+    assert "create_chapter_with_content" in result["message"]
+    assert nodes == []
+
+
+async def test_create_workspace_node_still_allows_folder(session) -> None:
+    user = User(email="folder@example.com", username="folder", password_hash="hash")
+    session.add(user)
+    await session.flush()
+    novel = Novel(owner_id=user.id, title="Folder Novel")
+    session.add(novel)
+    await session.commit()
+
+    tools = {tool.name: tool for tool in build_runtime_tools(session, model_profile=None)}
+    result = await tools["create_workspace_node"].ainvoke(
+        {
+            "novel_id": str(novel.id),
+            "title": "第一卷",
+            "node_type": "folder",
+            "parent_id": None,
+        }
+    )
+
+    assert result["status"] == "ok"
+    assert result["node"]["node_type"] == "folder"
 
 
 def test_agent_removes_incomplete_tool_call_history() -> None:

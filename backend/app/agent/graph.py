@@ -10,7 +10,12 @@ from langgraph.prebuilt import tools_condition
 from app.agent.context import ContextPack
 from app.agent.model_runtime import build_chat_model
 from app.agent.state import AgentState
-from app.agent.tools import classify_agent_intent, get_agent_tools
+from app.agent.tools import (
+    CHAPTER_CONTENT_WRITE_TOOLS,
+    classify_agent_intent,
+    get_agent_tools,
+    is_chapter_content_write_request,
+)
 from app.models import ModelProfile
 
 _MEMORY_GUIDANCE = (
@@ -19,10 +24,33 @@ _MEMORY_GUIDANCE = (
 )
 _MATERIAL_GUIDANCE = (
     "当用户要求创建、修改、删除创作资产、时间线、角色状态或人物关系时，"
-    "直接调用相应 list/create/update/delete 工具，无需用户确认。"
-    "修改或删除前先 list 获取 id；可用 list_material_changes 查看变更记录。"
+    "必须直接调用相应 list/create/update/delete 工具，无需用户确认。"
+    "清理旧版或重复素材时，自行调用 delete_creative_asset 或 delete_creative_assets，"
+    "不要要求用户手动删除。修改或删除前先 list 获取 id。"
 )
 _DESTRUCTIVE_WRITE_GUIDANCE = "文档和工作区的破坏性写入仍须遵循现有确认流程。"
+_WRITE_CHAPTER_REMINDER = (
+    "\n\n【本次任务：写入章节正文】"
+    "必须调用 create_chapter_with_content（新章节）或 propose_document_update（当前文档），"
+    "禁止只用 create_workspace_node，禁止只在对话里展示长正文。"
+)
+_MISSED_CHAPTER_WRITE_RESPONSE = (
+    "正文尚未写入工作台。请再说一次要写哪一章，我会调用写作工具保存正文，而不是只在对话里展示。"
+)
+
+
+def _write_content_tools_called(tool_messages: list[ToolMessage]) -> bool:
+    return any(message.name in CHAPTER_CONTENT_WRITE_TOOLS for message in tool_messages)
+
+
+def _missed_chapter_write_response(state: AgentState, tool_messages: list[ToolMessage]) -> str | None:
+    if not is_chapter_content_write_request(str(state.get("message", ""))):
+        return None
+    if _write_content_tools_called(tool_messages):
+        return None
+    if tool_messages:
+        return None
+    return _MISSED_CHAPTER_WRITE_RESPONSE
 
 
 def _default_system_prompt(state: AgentState) -> str:
@@ -30,10 +58,11 @@ def _default_system_prompt(state: AgentState) -> str:
     lines = [
         "你是 AI 小说工坊的共创 Agent，帮助用户规划故事、改写段落、记录记忆、整理章节树和检索上下文。",
         "请使用与用户相同的语言回复，给出具体、可执行的建议。",
-        "当用户要求创建、移动、重命名、删除章节或文件夹，整理记忆、素材、时间线，或给当前小说改名时，优先调用相应工具，不要只给口头建议。",
-        "当用户要求写完、生成或保存完整章节到工作台时，必须调用 create_chapter_with_content；"
-        "当用户要求写入或更新当前章节正文时，必须调用 propose_document_update。"
+        "整理章节树（创建空文件夹/占位、移动、重命名、删除）时，调用 create_workspace_node 等工作区工具，不要只给口头建议。",
+        "用户要求写、生成、创作或保存章节正文时，禁止仅用 create_workspace_node 建空章节；"
+        "新章节必须调用 create_chapter_with_content，当前文档必须调用 propose_document_update。"
         "只有工具返回成功后才能说已写入或已完成。",
+        "整理记忆、素材、时间线，或给当前小说改名时，优先调用相应工具。",
         _MEMORY_GUIDANCE,
         _MATERIAL_GUIDANCE,
         _DESTRUCTIVE_WRITE_GUIDANCE,
@@ -56,10 +85,11 @@ def _build_agent_system_prompt(pack: ContextPack) -> str:
     lines = [
         "你是 AI 小说工坊的共创 Agent，帮助用户规划故事、改写段落、记录记忆、整理章节树和检索上下文。",
         "请使用与用户相同的语言回复，给出具体、可执行的建议。",
-        "当用户要求创建、移动、重命名、删除章节或文件夹，整理记忆、素材、时间线，或给当前小说改名时，优先调用相应工具。",
-        "当用户要求写完、生成或保存完整章节到工作台时，必须调用 create_chapter_with_content；"
-        "当用户要求写入或更新当前章节正文时，必须调用 propose_document_update。"
+        "整理章节树（创建空文件夹/占位、移动、重命名、删除）时，调用 create_workspace_node 等工作区工具，不要只给口头建议。",
+        "用户要求写、生成、创作或保存章节正文时，禁止仅用 create_workspace_node 建空章节；"
+        "新章节必须调用 create_chapter_with_content，当前文档必须调用 propose_document_update。"
         "只有工具返回成功后才能说已写入或已完成。",
+        "整理记忆、素材、时间线，或给当前小说改名时，优先调用相应工具。",
         _MEMORY_GUIDANCE,
         _MATERIAL_GUIDANCE,
         _DESTRUCTIVE_WRITE_GUIDANCE,
@@ -227,6 +257,8 @@ def build_agent_graph(
             return [HumanMessage(content=state["message"])], None, "missing_model"
 
         system_prompt = state.get("system_prompt") or _default_system_prompt(state)
+        if intent == "write_chapter_content":
+            system_prompt = f"{system_prompt}{_WRITE_CHAPTER_REMINDER}"
         if not prior:
             prior = [SystemMessage(content=system_prompt), HumanMessage(content=state["message"])]
 
@@ -271,6 +303,10 @@ def build_agent_graph(
 
     def finalize_node(state: AgentState) -> dict[str, Any]:
         tool_messages = [message for message in state.get("messages", []) if isinstance(message, ToolMessage)]
+        missed_write = _missed_chapter_write_response(state, tool_messages)
+        if missed_write:
+            return {"response": missed_write}
+
         if not tool_messages:
             if state.get("response"):
                 return {}

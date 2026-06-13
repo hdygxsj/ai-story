@@ -15,6 +15,7 @@ from app.agent.tools import (
     CreateWorkspaceNodeArgs,
     DeleteCharacterStateArgs,
     DeleteCreativeAssetArgs,
+    DeleteCreativeAssetsArgs,
     DeleteRelationshipEdgeArgs,
     DeleteTimelineEventArgs,
     ListMaterialChangesArgs,
@@ -70,6 +71,7 @@ from app.services.materials import (
     create_timeline_event,
     delete_character_state,
     delete_creative_asset,
+    delete_creative_assets,
     delete_relationship_edge,
     delete_timeline_event,
     list_material_changes,
@@ -159,7 +161,7 @@ def build_runtime_tools(
 
     @tool("propose_document_update", args_schema=ProposeDocumentUpdateArgs)
     async def propose_document_update_runtime(document_id: str, content: str) -> dict[str, Any]:
-        """Propose replacing a complete document after user confirmation."""
+        """Persist complete chapter body into the open document; required when the user asks to write into current chapter text."""
         scope = scoped_ids()
         if scope is None:
             return {"status": "error", "message": "工具缺少当前用户或小说作用域。"}
@@ -305,7 +307,16 @@ def build_runtime_tools(
     async def create_workspace_node_runtime(
         novel_id: str, title: str, node_type: str, parent_id: str | None = None
     ) -> dict[str, Any]:
-        """Create a folder, chapter, note, or draft node."""
+        """Create an empty folder shell only. For chapters with story text, use create_chapter_with_content instead."""
+        if node_type != "folder":
+            return {
+                "status": "error",
+                "message": (
+                    f"create_workspace_node 不能创建带正文的 {node_type}。"
+                    "写章节正文请调用 create_chapter_with_content；"
+                    "更新已有章节请调用 propose_document_update。"
+                ),
+            }
         return await create_workspace_node(
             session,
             novel_id=current_novel_id(novel_id),
@@ -321,7 +332,7 @@ def build_runtime_tools(
         content: str,
         parent_id: str | None = None,
     ) -> dict[str, Any]:
-        """Create a chapter and persist its complete body in the workspace."""
+        """Create a chapter and persist complete non-empty body text when the user asks to write or generate chapter content."""
         return await create_chapter_with_content(
             session,
             novel_id=current_novel_id(novel_id),
@@ -530,7 +541,7 @@ def build_runtime_tools(
 
     @tool("delete_creative_asset", args_schema=DeleteCreativeAssetArgs)
     async def delete_creative_asset_runtime(novel_id: str, asset_id: str) -> dict[str, Any]:
-        """Delete a creative asset by id."""
+        """Delete one creative asset by id. Execute directly; never ask the user to delete manually."""
         deleted = await delete_creative_asset(
             session,
             novel_id=current_novel_id(novel_id),
@@ -545,6 +556,30 @@ def build_runtime_tools(
             "action_type": "delete_creative_asset",
             "message": "已删除创作资产。",
             "id": asset_id,
+        }
+
+    @tool("delete_creative_assets", args_schema=DeleteCreativeAssetsArgs)
+    async def delete_creative_assets_runtime(novel_id: str, asset_ids: list[str]) -> dict[str, Any]:
+        """Delete multiple creative assets by id in one batch."""
+        result = await delete_creative_assets(
+            session,
+            novel_id=current_novel_id(novel_id),
+            asset_ids=[UUID(asset_id) for asset_id in asset_ids],
+            actor_source="agent",
+        )
+        if not result["deleted"]:
+            return {"status": "error", "message": "未找到可删除的创作资产。"}
+        await session.commit()
+        missing_count = len(result["missing"])
+        message = f"已删除 {len(result['deleted'])} 个创作资产。"
+        if missing_count:
+            message += f" {missing_count} 个 id 未找到。"
+        return {
+            "status": "ok",
+            "action_type": "delete_creative_assets",
+            "message": message,
+            "deleted_ids": result["deleted"],
+            "missing_ids": result["missing"],
         }
 
     @tool("list_timeline_events", args_schema=ListTimelineEventsArgs)
@@ -877,6 +912,7 @@ def build_runtime_tools(
         "create_world_rule": create_world_rule_runtime,
         "update_creative_asset": update_creative_asset_runtime,
         "delete_creative_asset": delete_creative_asset_runtime,
+        "delete_creative_assets": delete_creative_assets_runtime,
         "list_timeline_events": list_timeline_events_runtime,
         "create_timeline_event": create_timeline_event_runtime,
         "update_timeline_event": update_timeline_event_runtime,
