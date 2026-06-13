@@ -78,13 +78,34 @@ export type AgentStreamDonePayload = AgentMessageResponse & {
   proposed_payload?: Record<string, unknown> | null;
 };
 
-export type AgentStreamEvent = AgentStreamDeltaPayload | AgentStreamDonePayload;
+export type AgentStreamErrorPayload = {
+  type: "error";
+  message: string;
+};
+
+export type AgentStreamEvent = AgentStreamDeltaPayload | AgentStreamDonePayload | AgentStreamErrorPayload;
 
 export type AgentStreamHandlers = {
   onDelta: (content: string) => void;
   onDone: (payload: AgentStreamDonePayload) => void;
   onError: (error: Error) => void;
 };
+
+function normalizeAgentStreamError(error: unknown): Error {
+  if (!(error instanceof Error)) {
+    return new Error("Agent 流式请求失败");
+  }
+  const message = error.message.toLowerCase();
+  if (
+    message.includes("failed to fetch") ||
+    message.includes("network error") ||
+    message.includes("networkerror") ||
+    message.includes("load failed")
+  ) {
+    return new Error("无法连接到服务器，请确认 API 服务已启动。");
+  }
+  return error;
+}
 
 export async function streamAgentMessage(
   token: string,
@@ -108,7 +129,7 @@ export async function streamAgentMessage(
       body: JSON.stringify(payload),
     });
   } catch (error) {
-    handlers.onError(error instanceof Error ? error : new Error("Agent 流式请求失败"));
+    handlers.onError(normalizeAgentStreamError(error));
     return;
   }
 
@@ -125,6 +146,15 @@ export async function streamAgentMessage(
 
   const decoder = new TextDecoder();
   let buffer = "";
+  let completed = false;
+
+  function finishWithError(message: string) {
+    if (completed) {
+      return;
+    }
+    completed = true;
+    handlers.onError(new Error(message));
+  }
 
   function parseSseEvent(event: string) {
     const line = event
@@ -139,6 +169,11 @@ export async function streamAgentMessage(
       handlers.onDelta(parsed.content);
       return;
     }
+    if (parsed.type === "error") {
+      finishWithError(parsed.message);
+      return;
+    }
+    completed = true;
     handlers.onDone(parsed);
   }
 
@@ -159,7 +194,12 @@ export async function streamAgentMessage(
     if (buffer.trim()) {
       parseSseEvent(buffer);
     }
+    if (!completed) {
+      finishWithError("Agent 响应中断，请检查模型配置和网络连接。");
+    }
   } catch (error) {
-    handlers.onError(error instanceof Error ? error : new Error("Agent 流式响应解析失败"));
+    if (!completed) {
+      handlers.onError(normalizeAgentStreamError(error));
+    }
   }
 }

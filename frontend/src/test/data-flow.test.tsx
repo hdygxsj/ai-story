@@ -12,8 +12,11 @@ function jsonResponse(body: unknown) {
   });
 }
 
+let failNextMemoryDelete = false;
+
 describe("frontend data flow", () => {
   beforeEach(() => {
+    failNextMemoryDelete = false;
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -144,19 +147,28 @@ describe("frontend data flow", () => {
         if (url.endsWith("/documents/doc-3/versions")) {
           return Promise.resolve(jsonResponse([]));
         }
-        if (url.endsWith("/novels/novel-1/memory-review-items")) {
+        if (url.endsWith("/novels/novel-1/memory-items")) {
           return Promise.resolve(
             jsonResponse([
               {
-                id: "memory-review-1",
+                id: "memory-1",
                 memory_type: "key_memory",
                 title: "Core vow",
                 body: "Never forget the lighthouse.",
                 importance: 90,
-                status: "pending",
               },
             ]),
           );
+        }
+        if (url === "http://localhost:8000/memory-items/memory-1" && init?.method === "DELETE") {
+          if (failNextMemoryDelete) {
+            failNextMemoryDelete = false;
+            return Promise.resolve(new Response("error", { status: 500 }));
+          }
+          return Promise.resolve(new Response(null, { status: 204 }));
+        }
+        if (url.endsWith("/novels/novel-1/memory-review-items")) {
+          return Promise.resolve(jsonResponse([]));
         }
         if (url.endsWith("/novels/novel-1/confirmations")) {
           return Promise.resolve(
@@ -237,16 +249,25 @@ describe("frontend data flow", () => {
     expect(await screen.findByText("Loaded chapter content")).toBeInTheDocument();
     rerender(<WorkspacePage activeSection="memory" token="token" novelId="novel-1" />);
     expect(await screen.findByText("Core vow")).toBeInTheDocument();
+    expect(screen.getByText("Never forget the lighthouse.")).toBeInTheDocument();
+    expect(screen.getByText(/自动保存/)).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "待审核" })).not.toBeInTheDocument();
     expect(screen.getByText("1 个模型配置")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "章节" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "共创 Agent" })).toBeInTheDocument();
     rerender(<WorkspacePage activeSection="confirmations" token="token" novelId="novel-1" />);
     expect(await screen.findByText("rewrite_selection")).toBeInTheDocument();
     rerender(<WorkspacePage activeSection="materials" token="token" novelId="novel-1" />);
-    expect(await screen.findAllByText("Mira")).toHaveLength(2);
-    expect(screen.getByText("Storm Night")).toBeInTheDocument();
-    expect(screen.getByText("Hiding the map")).toBeInTheDocument();
-    expect(screen.getByText("distrusts")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "素材" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /创作资产/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /角色状态/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /人物关系/ })).toBeInTheDocument();
+    expect(screen.getByText("Lighthouse keeper")).toBeInTheDocument();
+    expect(screen.queryByText("Storm Night")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: /角色状态/ }));
+    expect(await screen.findByText("Hiding the map")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: /人物关系/ }));
+    expect(await screen.findByText("distrusts")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "章节" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "共创 Agent" })).toBeInTheDocument();
     await waitFor(() => expect(fetch).toHaveBeenCalledWith("http://localhost:8000/documents/doc-1", expect.anything()));
@@ -356,6 +377,39 @@ describe("frontend data flow", () => {
       );
       expect(restoreCall).toBeTruthy();
     });
+  });
+
+  it("shows automatic memories and lets the user delete one", async () => {
+    const user = userEvent.setup();
+    render(<WorkspacePage activeSection="memory" token="token" novelId="novel-1" />);
+
+    expect(await screen.findByText("Core vow")).toBeInTheDocument();
+    expect(screen.getByText("Never forget the lighthouse.")).toBeInTheDocument();
+    expect(screen.getByText(/自动保存/)).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "待审核" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /删\s*除/ }));
+    await user.click(await screen.findByRole("button", { name: /确认删除/ }));
+
+    await waitFor(() => expect(screen.queryByText("Core vow")).not.toBeInTheDocument());
+    expect(fetch).toHaveBeenCalledWith(
+      "http://localhost:8000/memory-items/memory-1",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("keeps the memory visible when deletion fails", async () => {
+    failNextMemoryDelete = true;
+    const user = userEvent.setup();
+
+    render(<WorkspacePage activeSection="memory" token="token" novelId="novel-1" />);
+    expect(await screen.findByText("Core vow")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /删\s*除/ }));
+    await user.click(await screen.findByRole("button", { name: /确认删除/ }));
+
+    expect(await screen.findByText("Core vow")).toBeInTheDocument();
+    expect(await screen.findByText("删除记忆失败")).toBeInTheDocument();
   });
 
   it("switches chapters without leaking the previous document and shows save feedback", async () => {

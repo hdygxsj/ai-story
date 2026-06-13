@@ -19,8 +19,11 @@
 }
 
 .agent-panel-toolbar {
-  flex: 1;
-  min-width: 0;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  flex-shrink: 0;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  width: 100%;
 }
 
 .agent-panel-header {
@@ -36,6 +39,7 @@
   display: flex;
   gap: 6px;
   min-width: 0;
+  width: 100%;
 }
 
 .agent-panel-toolbar-select {
@@ -45,6 +49,20 @@
 
 .agent-panel-toolbar-select .ant-select-selector {
   border-radius: 10px !important;
+}
+
+.agent-panel-toolbar-select .ant-select-selection-item {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-panel-conversation-option {
+  display: block;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agent-panel-chat {

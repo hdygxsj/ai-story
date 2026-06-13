@@ -44,3 +44,19 @@ export function rejectMemoryReviewItem(token: string, itemId: string) {
 export function listMemoryItems(token: string, novelId: string) {
   return apiRequest<MemoryItem[]>(`/novels/${novelId}/memory-items`, { token });
 }
+
+export function createMemoryItem(
+  token: string,
+  novelId: string,
+  payload: Omit<MemoryItem, "id"> & { metadata?: Record<string, unknown> },
+) {
+  return apiRequest<MemoryItem>(`/novels/${novelId}/memory-items`, {
+    method: "POST",
+    token,
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteMemoryItem(token: string, itemId: string) {
+  return apiRequest<void>(`/memory-items/${itemId}`, { method: "DELETE", token });
+}

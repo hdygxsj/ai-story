@@ -28,6 +28,7 @@ export function ConversationSidebar({
 }: ConversationSidebarProps) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
+  const [searchValue, setSearchValue] = useState("");
 
   const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId) ?? null;
 
@@ -82,16 +83,33 @@ export function ConversationSidebar({
           allowClear={false}
           className="agent-panel-toolbar-select"
           disabled={disabled || conversations.length === 0}
+          dropdownStyle={{ maxWidth: 360, minWidth: 280 }}
+          listHeight={280}
           optionFilterProp="label"
           options={conversations.map((conversation) => ({
             label: conversation.title,
+            title: conversation.title,
             value: conversation.id,
           }))}
-          placeholder="暂无对话"
+          optionRender={(option) => (
+            <span className="agent-panel-conversation-option" title={String(option.label ?? "")}>
+              {option.label}
+            </span>
+          )}
+          placeholder={conversations.length === 0 ? "暂无对话" : "选择历史对话"}
+          popupMatchSelectWidth={false}
+          searchValue={searchValue}
           showSearch={conversations.length > 4}
           size="small"
+          title={activeConversation?.title}
           value={activeConversationId ?? undefined}
           onChange={(value) => onSelectConversation(value)}
+          onDropdownVisibleChange={(open) => {
+            if (open) {
+              setSearchValue("");
+            }
+          }}
+          onSearch={setSearchValue}
         />
         <Button
           aria-label="创建对话"

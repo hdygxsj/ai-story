@@ -169,7 +169,8 @@ describe("WorkspacePage", () => {
 
     expect(await screen.findByText("作品概览")).toBeInTheDocument();
     expect(screen.getByTestId("workspace-editor-column")).toContainElement(screen.getByTestId("workspace-overview"));
-    expect(screen.getByTestId("agent-panel-header")).toContainElement(screen.getByTestId("agent-conversation-sidebar"));
+    expect(screen.getByTestId("agent-panel-header")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-conversation-sidebar")).toBeInTheDocument();
     expect(screen.getAllByText("1").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("章节").length).toBeGreaterThanOrEqual(2);
     expect(await screen.findByText("4")).toBeInTheDocument();

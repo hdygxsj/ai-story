@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.chat_stream import _sse, stream_agent_events
+from app.agent.stream_errors import format_agent_stream_error
 from app.agent.graph import _build_agent_system_prompt
 from app.agent.runtime import invoke_agent_graph
 from app.agent.tools import classify_agent_intent
@@ -191,6 +192,13 @@ async def stream_agent_message(
     )
 
     async def event_stream():
+        try:
+            async for raw_event in _stream_agent_response():
+                yield raw_event
+        except Exception as exc:
+            yield _sse({"type": "error", "message": format_agent_stream_error(exc)})
+
+    async def _stream_agent_response():
         if classify_agent_intent(payload.message, payload.selected_text) == "draft_key_memory":
             await create_memory_item(
                 session,

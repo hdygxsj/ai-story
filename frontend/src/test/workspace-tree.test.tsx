@@ -211,11 +211,11 @@ describe("calculateWorkspaceDrop", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "恢复 已删除文件夹" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "收起回收站" }));
     expect(screen.queryByRole("button", { name: "恢复 已删除文件夹" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "展开回收站" }));
     expect(screen.getByRole("button", { name: "恢复 已删除文件夹" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "收起回收站" }));
+    expect(screen.queryByRole("button", { name: "恢复 已删除文件夹" })).not.toBeInTheDocument();
   });
 
   it("keeps the recycle bin in a separate bottom section", () => {

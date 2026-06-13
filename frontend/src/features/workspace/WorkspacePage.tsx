@@ -1,23 +1,19 @@
 import { RightOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Empty, Form, Input, List, message, Select, Space, Statistic, Tabs, Tag, Timeline, Typography } from "antd";
+import { Alert, Button, Card, Empty, Form, Input, List, message, Popconfirm, Select, Space, Statistic, Tabs, Tag, Timeline, Typography } from "antd";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 
 import { AgentPanel } from "../agent/AgentPanel";
 import { DocumentEditor } from "../editor/DocumentEditor";
+import { MaterialsPanel } from "./MaterialsPanel";
 import { WorkspaceTree } from "./WorkspaceTree";
 import type { WorkspaceDiff } from "../../api/agent";
 import type { Confirmation } from "../../api/confirmations";
 import { approveConfirmation, listConfirmations, rejectConfirmation } from "../../api/confirmations";
 import type { DocumentBody, DocumentRecord, DocumentVersion } from "../../api/documents";
 import { getDocument, listDocumentVersions, updateDocument } from "../../api/documents";
-import type { MemoryItem, MemoryReviewItem } from "../../api/memory";
-import {
-  approveMemoryReviewItem,
-  listMemoryItems,
-  listMemoryReviewItems,
-  rejectMemoryReviewItem,
-} from "../../api/memory";
+import type { MemoryItem } from "../../api/memory";
+import { deleteMemoryItem, listMemoryItems } from "../../api/memory";
 import type { CharacterState, CreativeAsset, RelationshipEdge, TimelineEvent } from "../../api/materials";
 import {
   listCharacterStates,
@@ -261,10 +257,8 @@ export function WorkspacePage({
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
   const [selectedText, setSelectedText] = useState<string | null>(null);
   const [confirmationCount, setConfirmationCount] = useState(0);
-  const [memoryReviewCount, setMemoryReviewCount] = useState(0);
   const [modelProfileCount, setModelProfileCount] = useState(0);
   const [confirmations, setConfirmations] = useState<Confirmation[]>([]);
-  const [memoryReviews, setMemoryReviews] = useState<MemoryReviewItem[]>([]);
   const [memoryItems, setMemoryItems] = useState<MemoryItem[]>([]);
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [creativeAssets, setCreativeAssets] = useState<CreativeAsset[]>([]);
@@ -357,8 +351,7 @@ export function WorkspacePage({
         const [
           loadedNodes,
           confirmations,
-          memoryReviews,
-          approvedMemories,
+          memories,
           modelProfiles,
           assets,
           events,
@@ -367,7 +360,6 @@ export function WorkspacePage({
         ] = await Promise.all([
           listWorkspaceNodes(token, novelId),
           listConfirmations(token, novelId),
-          listMemoryReviewItems(token, novelId),
           listMemoryItems(token, novelId),
           listModelProfiles(token),
           listCreativeAssets(token, novelId),
@@ -384,15 +376,13 @@ export function WorkspacePage({
             return loadedNodes.find((node) => node.document_id)?.document_id ?? null;
           });
           setConfirmations(confirmations);
-          setMemoryReviews(memoryReviews);
-          setMemoryItems(approvedMemories);
+          setMemoryItems(memories);
           setModelProfiles(modelProfiles);
           setCreativeAssets(assets);
           setTimelineEvents(events);
           setCharacterStates(states);
           setRelationshipEdges(relationships);
           setConfirmationCount(confirmations.filter((item) => item.status === "pending").length);
-          setMemoryReviewCount(memoryReviews.filter((item) => item.status === "pending").length);
           setModelProfileCount(modelProfiles.length);
         }
       } catch {
@@ -481,16 +471,13 @@ export function WorkspacePage({
   }
 
   async function refreshReviewQueues() {
-    const [loadedConfirmations, loadedMemoryReviews, loadedMemoryItems] = await Promise.all([
+    const [loadedConfirmations, loadedMemoryItems] = await Promise.all([
       listConfirmations(token, novelId),
-      listMemoryReviewItems(token, novelId),
       listMemoryItems(token, novelId),
     ]);
     setConfirmations(loadedConfirmations);
-    setMemoryReviews(loadedMemoryReviews);
     setMemoryItems(loadedMemoryItems);
     setConfirmationCount(loadedConfirmations.filter((item) => item.status === "pending").length);
-    setMemoryReviewCount(loadedMemoryReviews.filter((item) => item.status === "pending").length);
   }
 
   async function refreshCreativeCollections() {
@@ -527,13 +514,13 @@ export function WorkspacePage({
     }
   }
 
-  async function resolveMemoryReview(itemId: string, action: "approve" | "reject") {
-    if (action === "approve") {
-      await approveMemoryReviewItem(token, itemId);
-    } else {
-      await rejectMemoryReviewItem(token, itemId);
+  async function removeMemory(itemId: string) {
+    try {
+      await deleteMemoryItem(token, itemId);
+      setMemoryItems((items) => items.filter((item) => item.id !== itemId));
+    } catch {
+      message.error("删除记忆失败");
     }
-    await refreshReviewQueues();
   }
 
   function handleSelectDocument(nextDocumentId: string) {
@@ -1297,64 +1284,47 @@ export function WorkspacePage({
       styles={{ body: { height: "100%", overflow: "auto" } }}
     >
       <Typography.Title level={3}>记忆</Typography.Title>
-      <Typography.Paragraph>在这里审核关键记忆、角色状态、时间线事件和 RAG 上下文。</Typography.Paragraph>
-      <Tag color="blue">{memoryReviewCount} 条待审核</Tag>
+      <Typography.Paragraph>
+        Agent 检测到的长期信息和你明确要求记录的内容会自动保存，你可以随时删除。
+      </Typography.Paragraph>
+      <Tag color="blue">{memoryItems.length} 条记忆</Tag>
       <Tag>{modelProfileCount} 个模型配置</Tag>
-      <Tabs
-        items={[
-          {
-            key: "pending",
-            label: "待审核",
-            children: (
-              <List
-                dataSource={memoryReviews.filter((item) => item.status === "pending")}
-                locale={{ emptyText: "没有待审核记忆" }}
-                renderItem={(item) => (
-                  <List.Item
-                    actions={[
-                      <Button size="small" onClick={() => void resolveMemoryReview(item.id, "approve")}>
-                        通过
-                      </Button>,
-                      <Button danger size="small" onClick={() => void resolveMemoryReview(item.id, "reject")}>
-                        拒绝
-                      </Button>,
-                    ]}
-                  >
-                    <List.Item.Meta
-                      description={`${item.memory_type} · importance ${item.importance}`}
-                      title={item.title}
-                    />
-                  </List.Item>
-                )}
-              />
-            ),
-          },
-          {
-            key: "approved",
-            label: "已确认",
-            children: (
-              <List
-                dataSource={memoryItems}
-                locale={{ emptyText: "还没有已确认记忆" }}
-                renderItem={(item) => (
-                  <List.Item>
-                    <List.Item.Meta
-                      description={
-                        <Space>
-                          <Tag color={item.memory_type === "context_snapshot" ? "purple" : "blue"}>
-                            {item.memory_type}
-                          </Tag>
-                          <span>importance {item.importance}</span>
-                        </Space>
-                      }
-                      title={item.title}
-                    />
-                  </List.Item>
-                )}
-              />
-            ),
-          },
-        ]}
+      <List
+        dataSource={memoryItems}
+        locale={{ emptyText: "还没有保存的记忆" }}
+        renderItem={(item) => (
+          <List.Item
+            actions={[
+              <Popconfirm
+                cancelText="取消"
+                description="删除后，Agent 将无法再从长期记忆中检索它。"
+                key="delete"
+                okText="确认删除"
+                onConfirm={() => void removeMemory(item.id)}
+                title="删除这条记忆？"
+              >
+                <Button danger size="small">
+                  删除
+                </Button>
+              </Popconfirm>,
+            ]}
+          >
+            <List.Item.Meta
+              description={
+                <Space direction="vertical" size={4}>
+                  <Typography.Paragraph style={{ marginBottom: 0 }}>{item.body}</Typography.Paragraph>
+                  <Space>
+                    <Tag color={item.memory_type === "context_snapshot" ? "purple" : "blue"}>
+                      {item.memory_type}
+                    </Tag>
+                    <span>importance {item.importance}</span>
+                  </Space>
+                </Space>
+              }
+              title={item.title}
+            />
+          </List.Item>
+        )}
         style={{ marginTop: 16 }}
       />
     </Card>
@@ -1394,54 +1364,11 @@ export function WorkspacePage({
   );
 
   const materialsContent = renderWorkspaceShell(
-    <Card
-      style={{
-        border: "none",
-        boxShadow: "0 18px 45px rgba(15,23,42,0.08)",
-        height: "100%",
-        minWidth: 0,
-      }}
-      styles={{ body: { height: "100%", overflow: "auto" } }}
-    >
-      <Typography.Title level={3}>素材</Typography.Title>
-      <Typography.Paragraph>管理结构化创作素材、时间线、角色状态和人物关系。</Typography.Paragraph>
-      <List
-        dataSource={creativeAssets}
-        header={<strong>创作资产</strong>}
-        renderItem={(asset) => (
-          <List.Item>
-            <List.Item.Meta description={`${asset.asset_type} · ${asset.summary}`} title={asset.name} />
-          </List.Item>
-        )}
-      />
-      <List
-        dataSource={timelineEvents}
-        header={<strong>时间线</strong>}
-        renderItem={(event) => (
-          <List.Item>
-            <List.Item.Meta description={event.event_time} title={event.title} />
-          </List.Item>
-        )}
-      />
-      <List
-        dataSource={characterStates}
-        header={<strong>角色状态</strong>}
-        renderItem={(state) => (
-          <List.Item>
-            <List.Item.Meta description={state.character_name} title={state.state} />
-          </List.Item>
-        )}
-      />
-      <List
-        dataSource={relationshipEdges}
-        header={<strong>人物关系</strong>}
-        renderItem={(edge) => (
-          <List.Item>
-            <List.Item.Meta description={`${edge.source_character} -> ${edge.target_character}`} title={edge.relationship_type} />
-          </List.Item>
-        )}
-      />
-    </Card>
+    <MaterialsPanel
+      characterStates={characterStates}
+      creativeAssets={creativeAssets}
+      relationshipEdges={relationshipEdges}
+    />,
   );
 
   const timelineContent = renderWorkspaceShell(

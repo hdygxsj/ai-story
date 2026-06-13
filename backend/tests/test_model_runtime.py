@@ -391,3 +391,54 @@ def test_agent_streaming_endpoint_returns_incremental_response(monkeypatch) -> N
     assert body.count('"type": "delta"') == 2
     assert "我可以帮你" in body
     assert "继续写下去。" in body
+
+
+def test_agent_stream_returns_error_event_when_model_call_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    from langchain_core.messages import AIMessageChunk
+
+    class FailingStreamingChatModel:
+        def bind_tools(self, _tools):
+            return self
+
+        async def astream(self, _messages):
+            if False:
+                yield AIMessageChunk(content="")
+            raise ConnectionError("Connection error.")
+
+    monkeypatch.setattr("app.agent.graph.build_chat_model", lambda profile, purpose="chat": FailingStreamingChatModel())
+
+    client = TestClient(app)
+    headers = auth_headers(client)
+    novel = client.post("/novels", headers=headers, json={"title": "Failing Stream Novel"}).json()
+    profile = client.post(
+        "/model-profiles",
+        headers=headers,
+        json={
+            "name": "Chat profile",
+            "provider_kind": "openai",
+            "api_key": "sk-test",
+            "chat_model": "gpt-4o",
+            "writing_model": "gpt-4o",
+            "summary_model": "gpt-4o-mini",
+        },
+    ).json()
+    client.patch(
+        f"/novels/{novel['id']}",
+        headers=headers,
+        json={"default_model_profile_id": profile["id"]},
+    )
+
+    with client.stream(
+        "POST",
+        f"/novels/{novel['id']}/agent/messages/stream",
+        headers=headers,
+        json={"message": "hello"},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    events = [json.loads(line.removeprefix("data: ")) for line in body.splitlines() if line.startswith("data: ")]
+    assert events[-1]["type"] == "error"
+    assert "无法连接模型服务" in events[-1]["message"]

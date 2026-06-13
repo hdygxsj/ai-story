@@ -139,7 +139,7 @@ export function WorkspaceTree({
 }: WorkspaceTreeProps) {
   const [renamingNode, setRenamingNode] = useState<WorkspaceNode | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
-  const [recycleBinExpanded, setRecycleBinExpanded] = useState(true);
+  const [recycleBinExpanded, setRecycleBinExpanded] = useState(false);
   const renamingNodeLabel = renamingNode?.node_type === "folder" ? "文件夹" : "章节";
   const activeNodes = useMemo(() => nodes.filter((node) => node.status !== "trashed"), [nodes]);
   const trashedNodes = useMemo(() => nodes.filter((node) => node.status === "trashed"), [nodes]);
