@@ -52,7 +52,7 @@ export function DocumentEditor({
       attributes: {
         "data-testid": "tiptap-editor",
         style:
-          "min-height: calc(100vh - 196px); padding: 30px 44px; border: none; border-radius: 18px; outline: none; background: #fff; box-shadow: inset 0 0 0 1px rgba(15,23,42,0.06); line-height: 1.9; font-size: 16px;",
+          "min-height: 100%; padding: 30px 44px; border: none; border-radius: 18px; outline: none; background: #fff; box-shadow: inset 0 0 0 1px rgba(15,23,42,0.06); line-height: 1.9; font-size: 16px;",
       },
       handleDOMEvents: {
         keyup: () => {
@@ -201,7 +201,7 @@ export function DocumentEditor({
           ref={editorShellRef}
           onKeyUpCapture={handleUseSelection}
           onMouseUpCapture={handleUseSelection}
-          style={{ position: "relative" }}
+          style={{ height: "100%", minHeight: 240, position: "relative" }}
         >
           <EditorContent editor={editor} />
           {pendingSelection && selectionToolbarPosition ? (

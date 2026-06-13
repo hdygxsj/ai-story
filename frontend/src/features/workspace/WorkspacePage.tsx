@@ -964,12 +964,15 @@ export function WorkspacePage({
             gap: 14,
             gridTemplateColumns,
             gridTemplateRows: "minmax(0, 1fr)",
+            height: "100%",
             minHeight: 0,
             minWidth: 0,
             overflow: "hidden",
           }}
         >
-          {treePanelCollapsed ? null : chapterTreePanel}
+          {treePanelCollapsed ? null : (
+            <div style={{ height: "100%", minHeight: 0, minWidth: 0, overflow: "hidden" }}>{chapterTreePanel}</div>
+          )}
           {treePanelCollapsed ? null : <div
             aria-label="调整章节面板宽度"
             role="separator"
@@ -995,7 +998,16 @@ export function WorkspacePage({
           </div>}
           <div
             data-testid="workspace-editor-column"
-            style={{ display: "grid", gap: 10, gridTemplateRows: "auto minmax(0, 1fr)", minHeight: 0, minWidth: 0, position: "relative" }}
+            style={{
+              display: "grid",
+              gap: 10,
+              gridTemplateRows: "auto minmax(0, 1fr)",
+              height: "100%",
+              minHeight: 0,
+              minWidth: 0,
+              overflow: "hidden",
+              position: "relative",
+            }}
           >
             {treePanelCollapsed ? (
               <Button
@@ -1018,7 +1030,7 @@ export function WorkspacePage({
           >
             <div style={{ background: "rgba(15,23,42,0.08)", borderRadius: 999, height: "100%", margin: "0 auto", width: 2 }} />
           </div>
-          {agentPanel}
+          <div style={{ height: "100%", minHeight: 0, minWidth: 0, overflow: "hidden" }}>{agentPanel}</div>
         </div>
       </div>
     );

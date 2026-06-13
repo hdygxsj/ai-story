@@ -268,7 +268,7 @@ export function WorkspaceTree({
           padding: 14,
         }}
       >
-        <div style={{ flex: "1 1 auto", minHeight: 0, overflow: "auto" }}>
+        <div style={{ flex: "1 1 0", minHeight: 0, overflow: "auto" }}>
           <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
           <div style={{ alignItems: "flex-start", display: "flex", justifyContent: "space-between", gap: 8 }}>
             <div>
@@ -330,6 +330,7 @@ export function WorkspaceTree({
                 flex: "0 1 auto",
                 marginTop: 8,
                 maxHeight: "40%",
+                minHeight: 0,
                 overflow: "auto",
                 paddingTop: 10,
               }}

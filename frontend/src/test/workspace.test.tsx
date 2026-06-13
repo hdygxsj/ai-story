@@ -75,10 +75,10 @@ describe("WorkspacePage", () => {
     expect(screen.getByTestId("workspace-grid")).toHaveStyle({
       gridTemplateColumns: "260px 6px minmax(0, 1fr) 6px 420px",
       gridTemplateRows: "minmax(0, 1fr)",
+      height: "100%",
       minHeight: "0",
       overflow: "hidden",
     });
-    expect(screen.getByTestId("workspace-grid")).not.toHaveStyle({ height: "100%" });
   });
 
   it("resizes and persists the chapter tree panel width", () => {
