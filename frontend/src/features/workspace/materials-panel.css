@@ -122,29 +122,145 @@
   margin: 0;
 }
 
-.materials-panel-relationship {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 10px 0 8px;
-}
-
-.materials-panel-relationship-node {
-  background: rgba(15, 23, 42, 0.04);
-  border-radius: 999px;
-  color: #0f172a;
-  font-size: 12px;
-  font-weight: 500;
-  padding: 4px 10px;
-}
-
-.materials-panel-relationship-arrow {
-  color: rgba(255, 122, 24, 0.85);
-  font-size: 12px;
-  font-weight: 600;
-}
-
 .materials-panel-empty {
   padding: 32px 0;
+}
+
+.relationship-graph {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  min-height: 360px;
+}
+
+.relationship-graph-canvas {
+  background:
+    radial-gradient(circle at center, rgba(255, 122, 24, 0.04) 0%, rgba(255, 255, 255, 0) 58%),
+    linear-gradient(180deg, rgba(248, 250, 252, 0.95) 0%, rgba(255, 255, 255, 0.98) 100%);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 16px;
+  color: rgba(255, 122, 24, 0.88);
+  flex: 1 1 auto;
+  min-height: 280px;
+  width: 100%;
+}
+
+.relationship-graph-edge {
+  cursor: pointer;
+  fill: none;
+  stroke-width: 2;
+  transition: stroke 0.2s ease, stroke-width 0.2s ease;
+}
+
+.relationship-graph-edge-active,
+.relationship-graph-edge:hover {
+  stroke-width: 2.5;
+}
+
+.relationship-graph-edge-label {
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  paint-order: stroke;
+  pointer-events: all;
+  stroke: rgba(255, 255, 255, 0.92);
+  stroke-width: 4px;
+}
+
+.relationship-graph-node {
+  cursor: default;
+}
+
+.relationship-graph-node-circle {
+  fill: #fff7ed;
+  stroke: rgba(255, 122, 24, 0.35);
+  stroke-width: 2;
+  transition: fill 0.2s ease, stroke 0.2s ease, transform 0.2s ease;
+}
+
+.relationship-graph-node-active .relationship-graph-node-circle {
+  fill: #ffedd5;
+  stroke: rgba(255, 122, 24, 0.88);
+  stroke-width: 2.5;
+}
+
+.relationship-graph-node-dimmed .relationship-graph-node-circle {
+  fill: rgba(248, 250, 252, 0.95);
+  stroke: rgba(148, 163, 184, 0.35);
+}
+
+.relationship-graph-node-label {
+  fill: #0f172a;
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.relationship-graph-node-dimmed .relationship-graph-node-label {
+  fill: rgba(100, 116, 139, 0.82);
+}
+
+.relationship-graph-detail {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 14px;
+  min-height: 72px;
+  padding: 12px 14px;
+}
+
+.relationship-graph-detail-title {
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+
+.relationship-graph-detail-arrow {
+  margin: 0 8px;
+}
+
+.relationship-graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.relationship-graph-legend-item {
+  align-items: center;
+  color: rgba(15, 23, 42, 0.72);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+}
+
+.relationship-graph-legend-dot {
+  border-radius: 999px;
+  flex-shrink: 0;
+  height: 8px;
+  width: 8px;
+}
+
+.relationship-graph-detail-type {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+
+.relationship-graph-detail-description {
+  color: rgba(15, 23, 42, 0.68);
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.relationship-graph-detail-empty {
+  color: rgba(100, 116, 139, 0.82);
+}
+
+.relationship-graph-detail-hint {
+  color: rgba(100, 116, 139, 0.88);
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0;
 }

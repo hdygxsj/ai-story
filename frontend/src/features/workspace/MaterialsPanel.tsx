@@ -2,6 +2,7 @@ import { BookOutlined, TeamOutlined, UserOutlined } from "@ant-design/icons";
 import { Card, Empty, Tabs, Tag, Typography } from "antd";
 
 import type { CharacterState, CreativeAsset, RelationshipEdge } from "../../api/materials";
+import { RelationshipGraph } from "./RelationshipGraph";
 
 import "./materials-panel.css";
 
@@ -87,7 +88,7 @@ function CharacterStateGrid({ states }: { states: CharacterState[] }) {
   );
 }
 
-function RelationshipGrid({ edges }: { edges: RelationshipEdge[] }) {
+function RelationshipView({ edges }: { edges: RelationshipEdge[] }) {
   if (edges.length === 0) {
     return (
       <Empty
@@ -98,21 +99,7 @@ function RelationshipGrid({ edges }: { edges: RelationshipEdge[] }) {
     );
   }
 
-  return (
-    <div className="materials-panel-grid">
-      {edges.map((edge) => (
-        <article className="materials-panel-item" key={edge.id}>
-          <h4 className="materials-panel-item-title">{edge.relationship_type}</h4>
-          <div className="materials-panel-relationship">
-            <span className="materials-panel-relationship-node">{edge.source_character}</span>
-            <span className="materials-panel-relationship-arrow">→</span>
-            <span className="materials-panel-relationship-node">{edge.target_character}</span>
-          </div>
-          {edge.description ? <p className="materials-panel-item-summary">{edge.description}</p> : null}
-        </article>
-      ))}
-    </div>
-  );
+  return <RelationshipGraph edges={edges} />;
 }
 
 export function MaterialsPanel({ creativeAssets, characterStates, relationshipEdges }: MaterialsPanelProps) {
@@ -171,7 +158,7 @@ export function MaterialsPanel({ creativeAssets, characterStates, relationshipEd
                 <TeamOutlined /> 人物关系 ({relationshipEdges.length})
               </span>
             ),
-            children: <RelationshipGrid edges={relationshipEdges} />,
+            children: <RelationshipView edges={relationshipEdges} />,
           },
         ]}
       />
