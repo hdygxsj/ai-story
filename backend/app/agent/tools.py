@@ -99,7 +99,7 @@ class ProposeRewriteArgs(BaseModel):
     instruction: str = Field(description="Rewrite instruction")
 
 
-class ProposeKeyMemoryArgs(BaseModel):
+class SaveKeyMemoryArgs(BaseModel):
     novel_id: str = Field(description="Novel UUID")
     title: str = Field(description="Short memory title")
     body: str = Field(description="Memory body")
@@ -314,11 +314,11 @@ def propose_rewrite(document_id: str, selected_text: str, instruction: str) -> d
     }
 
 
-@tool("propose_key_memory", args_schema=ProposeKeyMemoryArgs)
-def propose_key_memory(novel_id: str, title: str, body: str, importance: int = 80) -> dict[str, Any]:
-    """Create a key memory review item."""
+@tool("save_key_memory", args_schema=SaveKeyMemoryArgs)
+def save_key_memory(novel_id: str, title: str, body: str, importance: int = 80) -> dict[str, Any]:
+    """Save a key memory directly without approval."""
     return {
-        "action_type": "memory_review",
+        "action_type": "memory_saved",
         "payload": {
             "novel_id": novel_id,
             "memory_type": "key_memory",
@@ -403,7 +403,7 @@ def get_agent_tools() -> list[BaseTool]:
         list_memory_items_tool,
         list_memory_review_items_tool,
         propose_rewrite,
-        propose_key_memory,
+        save_key_memory,
         list_creative_assets_tool,
         create_character_asset,
         create_world_rule,

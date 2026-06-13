@@ -21,7 +21,7 @@ from app.agent.tools import (
     ListTimelineEventsArgs,
     ListWorkspaceNodesArgs,
     OrganizeWorkspaceTreeArgs,
-    ProposeKeyMemoryArgs,
+    SaveKeyMemoryArgs,
     ProposeDocumentUpdateArgs,
     ProposeRewriteArgs,
     ProposeSelectionReplaceArgs,
@@ -53,6 +53,7 @@ from app.services.document_actions import (
     get_owned_document,
     list_owned_document_versions,
 )
+from app.services.memory import create_memory_item
 from app.services.memory_search import search_memory_items
 from app.services.rag import extract_text_from_prosemirror, index_text, search_rag_chunks
 from app.services.workspace_actions import (
@@ -360,26 +361,34 @@ def build_runtime_tools(
             ],
         }
 
-    @tool("propose_key_memory", args_schema=ProposeKeyMemoryArgs)
-    async def propose_key_memory_runtime(
+    @tool("save_key_memory", args_schema=SaveKeyMemoryArgs)
+    async def save_key_memory_runtime(
         novel_id: str, title: str, body: str, importance: int = 80
     ) -> dict[str, Any]:
-        """Create a key memory review item for user approval."""
-        item = MemoryReviewItem(
+        """Save durable novel memory without approval."""
+        scope = scoped_ids()
+        if scope is None:
+            return {
+                "status": "error",
+                "action_type": "memory_save_failed",
+                "message": "Authenticated owner and novel scope are required to save memory.",
+            }
+        memory = await create_memory_item(
+            session,
             novel_id=current_novel_id(novel_id),
             memory_type="key_memory",
             title=title,
             body=body,
             importance=importance,
+            metadata={"source": "agent_inferred"},
         )
-        session.add(item)
         await session.commit()
-        await session.refresh(item)
+        await session.refresh(memory)
         return {
             "status": "ok",
-            "action_type": "memory_review",
-            "message": f"已提交关键记忆「{title}」，请在记忆页审核。",
-            "review_item_id": str(item.id),
+            "action_type": "memory_saved",
+            "message": f"已保存关键记忆「{title}」。",
+            "memory_item_id": str(memory.id),
         }
 
     @tool("list_creative_assets", args_schema=ListCreativeAssetsArgs)
@@ -612,7 +621,7 @@ def build_runtime_tools(
         "cleanup_workspace_folders": cleanup_workspace_folders_runtime,
         "list_memory_items": list_memory_items_runtime,
         "list_memory_review_items": list_memory_review_items_runtime,
-        "propose_key_memory": propose_key_memory_runtime,
+        "save_key_memory": save_key_memory_runtime,
         "list_creative_assets": list_creative_assets_runtime,
         "create_character_asset": create_character_asset_runtime,
         "create_world_rule": create_world_rule_runtime,

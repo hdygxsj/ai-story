@@ -3,12 +3,27 @@ from uuid import UUID, uuid4
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool, tool
 
-from app.agent.graph import _remove_incomplete_tool_call_history, build_agent_graph
+from app.agent.graph import _build_agent_system_prompt, _remove_incomplete_tool_call_history, build_agent_graph
 from app.agent.tool_runtime import build_runtime_tools
 from app.agent.tools import classify_agent_intent, get_agent_tools
 from app.core.crypto import encrypt_api_key
-from app.models import Document, DocumentVersion, ModelProfile, Novel, PendingConfirmation, User, WorkspaceNode
+from app.agent.context import ContextPack
+from app.models import Document, DocumentVersion, MemoryItem, MemoryReviewItem, ModelProfile, Novel, PendingConfirmation, RagChunk, User, WorkspaceNode
 from app.services.rag import extract_text_from_prosemirror
+
+
+from sqlalchemy import select
+
+
+def _empty_context_pack() -> ContextPack:
+    return ContextPack(items=[], estimated_tokens=0, usage_ratio=0, status_messages=[])
+
+
+def test_default_agent_prompt_allows_selective_automatic_memory() -> None:
+    prompt = _build_agent_system_prompt(_empty_context_pack())
+    assert "save_key_memory" in prompt
+    assert "无需用户审批" in prompt
+    assert "文档和工作区的破坏性写入仍须遵循现有确认流程" in prompt
 
 
 def test_agent_tool_registry_exposes_structured_langchain_tools() -> None:
@@ -22,7 +37,7 @@ def test_agent_tool_registry_exposes_structured_langchain_tools() -> None:
         "search_memory",
         "search_rag",
         "propose_rewrite",
-        "propose_key_memory",
+        "save_key_memory",
         "create_character_asset",
         "create_world_rule",
         "create_timeline_event",

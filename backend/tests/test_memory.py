@@ -1,6 +1,13 @@
+from unittest.mock import AsyncMock
+
+import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.main import app
+from app.models import MemoryItem, Novel, RagChunk, User
+from app.services.memory import create_memory_item, delete_memory_item
 
 
 def auth_headers(client: TestClient) -> dict[str, str]:
@@ -40,3 +47,201 @@ def test_key_memory_is_created_as_review_item_then_approved() -> None:
     assert approved.status_code == 200
     assert approved.json()["memory_type"] == "key_memory"
     assert approved.json()["importance"] == 100
+
+
+def test_direct_memory_create_appears_in_formal_list_without_review_item() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client)
+    novel = client.post("/novels", headers=headers, json={"title": "Direct Memory Book"}).json()
+
+    created = client.post(
+        f"/novels/{novel['id']}/memory-items",
+        headers=headers,
+        json={
+            "memory_type": "character_fact",
+            "title": "A hidden lineage",
+            "body": "Mara is the last heir of the northern house.",
+            "importance": 80,
+            "metadata": {"origin": "direct-api"},
+        },
+    )
+
+    assert created.status_code == 201
+    memory_id = created.json()["id"]
+    formal_items = client.get(f"/novels/{novel['id']}/memory-items", headers=headers)
+    review_items = client.get(f"/novels/{novel['id']}/memory-review-items", headers=headers)
+
+    assert formal_items.status_code == 200
+    assert any(item["id"] == memory_id for item in formal_items.json())
+    assert review_items.status_code == 200
+    assert all(item["title"] != "A hidden lineage" for item in review_items.json())
+
+
+def test_memory_delete_hides_missing_items_and_other_owners() -> None:
+    client = TestClient(app)
+    owner_headers = auth_headers(client)
+    novel = client.post("/novels", headers=owner_headers, json={"title": "Owner Memory Book"}).json()
+    memory = client.post(
+        f"/novels/{novel['id']}/memory-items",
+        headers=owner_headers,
+        json={
+            "memory_type": "key_memory",
+            "title": "Owner-only memory",
+            "body": "Only the novel owner may remove this memory.",
+        },
+    ).json()
+
+    client.post(
+        "/auth/register",
+        json={"email": "memory-other@example.com", "username": "memory-other", "password": "secret123"},
+    )
+    other_token = client.post(
+        "/auth/login",
+        json={"login": "memory-other@example.com", "password": "secret123"},
+    ).json()["access_token"]
+    other_headers = {"Authorization": f"Bearer {other_token}"}
+
+    forbidden_delete = client.delete(f"/memory-items/{memory['id']}", headers=other_headers)
+    owner_delete = client.delete(f"/memory-items/{memory['id']}", headers=owner_headers)
+    repeated_delete = client.delete(f"/memory-items/{memory['id']}", headers=owner_headers)
+
+    assert forbidden_delete.status_code == 404
+    assert forbidden_delete.json() == {"detail": "Memory item not found"}
+    assert owner_delete.status_code == 204
+    assert owner_delete.content == b""
+    assert repeated_delete.status_code == 404
+    assert repeated_delete.json() == {"detail": "Memory item not found"}
+
+
+@pytest.mark.asyncio
+async def test_create_memory_item_persists_memory_and_rag_chunk(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = User(
+        email="create-memory@example.com",
+        username="create-memory",
+        password_hash="hashed",
+    )
+    session.add(owner)
+    await session.flush()
+    novel = Novel(owner_id=owner.id, title="Created Memory Novel")
+    session.add(novel)
+    await session.flush()
+
+    commit = AsyncMock()
+    with monkeypatch.context() as patch:
+        patch.setattr(session, "commit", commit)
+        memory = await create_memory_item(
+            session,
+            novel_id=novel.id,
+            memory_type="key_memory",
+            title="A binding promise",
+            body="The protagonist always protects the clinic.",
+            importance=85,
+            metadata={
+                "origin": "test",
+                "memory_type": "caller-value",
+                "importance": -1,
+            },
+        )
+        commit.assert_not_awaited()
+
+    await session.commit()
+
+    stored_memory = await session.scalar(select(MemoryItem).where(MemoryItem.id == memory.id))
+    stored_chunk = await session.scalar(
+        select(RagChunk).where(
+            RagChunk.novel_id == novel.id,
+            RagChunk.source_type == "memory",
+            RagChunk.source_id == str(memory.id),
+        )
+    )
+
+    assert stored_memory is memory
+    assert stored_memory.extra_metadata == {
+        "origin": "test",
+        "memory_type": "caller-value",
+        "importance": -1,
+    }
+    assert stored_chunk is not None
+    assert stored_chunk.novel_id == novel.id
+    assert stored_chunk.text == "A binding promise\nThe protagonist always protects the clinic."
+    assert stored_chunk.extra_metadata == {
+        "memory_type": "key_memory",
+        "importance": 85,
+        "origin": "test",
+    }
+
+
+@pytest.mark.asyncio
+async def test_delete_memory_item_removes_memory_and_rag_chunk(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = User(
+        email="delete-memory@example.com",
+        username="delete-memory",
+        password_hash="hashed",
+    )
+    session.add(owner)
+    await session.flush()
+    novel = Novel(owner_id=owner.id, title="Deleted Memory Novel")
+    other_owner = User(
+        email="other-memory@example.com",
+        username="other-memory",
+        password_hash="hashed",
+    )
+    session.add(other_owner)
+    await session.flush()
+    other_novel = Novel(owner_id=other_owner.id, title="Other Owner Novel")
+    session.add_all([novel, other_novel])
+    await session.flush()
+    memory = await create_memory_item(
+        session,
+        novel_id=novel.id,
+        memory_type="key_memory",
+        title="Temporary memory",
+        body="This memory should be removed.",
+    )
+    different_type_chunk = RagChunk(
+        novel_id=novel.id,
+        source_type="context_snapshot",
+        source_id=str(memory.id),
+        text="Keep same source id with a different type.",
+        embedding=[0.0] * 64,
+    )
+    other_novel_chunk = RagChunk(
+        novel_id=other_novel.id,
+        source_type="memory",
+        source_id=str(memory.id),
+        text="Keep same source id in another novel.",
+        embedding=[0.0] * 64,
+    )
+    session.add_all([different_type_chunk, other_novel_chunk])
+    await session.commit()
+
+    assert await delete_memory_item(session, owner_id=other_owner.id, item_id=memory.id) is False
+    assert await session.get(MemoryItem, memory.id) is memory
+
+    commit = AsyncMock()
+    with monkeypatch.context() as patch:
+        patch.setattr(session, "commit", commit)
+        deleted = await delete_memory_item(session, owner_id=owner.id, item_id=memory.id)
+        commit.assert_not_awaited()
+
+    await session.commit()
+    await session.flush()
+
+    assert deleted is True
+    assert await session.get(MemoryItem, memory.id) is None
+    assert await session.scalar(
+        select(RagChunk).where(
+            RagChunk.novel_id == novel.id,
+            RagChunk.source_type == "memory",
+            RagChunk.source_id == str(memory.id),
+        )
+    ) is None
+    assert await session.get(RagChunk, different_type_chunk.id) is different_type_chunk
+    assert await session.get(RagChunk, other_novel_chunk.id) is other_novel_chunk
+    assert await delete_memory_item(session, owner_id=other_owner.id, item_id=memory.id) is False

@@ -13,12 +13,13 @@ from app.agent.runtime import invoke_agent_graph
 from app.agent.tools import classify_agent_intent
 from app.api.deps import get_current_user
 from app.db.session import get_session
-from app.models import Document, MemoryReviewItem, ModelProfile, PendingConfirmation, User
+from app.models import Document, ModelProfile, PendingConfirmation, User
 from app.schemas.agent import AgentMessageRequest, AgentMessageResponse
 from app.schemas.confirmation import ConfirmationResponse
 from app.schemas.workspace import WorkspaceNodeResponse
 from app.services.context_assembly import assemble_context
 from app.services.conversations import append_message, resolve_conversation_for_message
+from app.services.memory import create_memory_item
 from app.services.novels import get_owned_novel
 from app.services.workspace_actions import cleanup_workspace_folders, load_workspace_nodes, organize_workspace_tree
 
@@ -191,23 +192,24 @@ async def stream_agent_message(
 
     async def event_stream():
         if classify_agent_intent(payload.message, payload.selected_text) == "draft_key_memory":
-            review_item = MemoryReviewItem(
+            await create_memory_item(
+                session,
                 novel_id=novel_id,
                 memory_type="key_memory",
                 title=payload.message[:60] or "关键记忆",
                 body=payload.message,
                 importance=80,
+                metadata={"source": "user_explicit"},
             )
-            session.add(review_item)
             await session.commit()
-            response = "已提交关键记忆，请在记忆页审核。"
+            response = "已保存到记忆。"
             await append_message(session, conversation=conversation, role="assistant", content=response)
             yield _sse({"type": "delta", "content": response})
             yield _sse(
                 {
                     "type": "done",
                     "message": response,
-                    "context_status": ["已创建记忆审核项。"],
+                    "context_status": ["已保存关键记忆。"],
                     "context_detail": None,
                     "conversation_id": str(conversation.id),
                     "confirmation": None,

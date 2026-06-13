@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,7 +9,7 @@ from app.api.deps import get_current_user
 from app.db.session import get_session
 from app.models import MemoryItem, MemoryReviewItem, User
 from app.schemas.memory import MemoryItemResponse, MemoryReviewCreate, MemoryReviewResponse
-from app.services.memory import approve_review_item
+from app.services.memory import approve_review_item, create_memory_item, delete_memory_item
 from app.services.novels import get_owned_novel
 from app.services.rag import index_text
 
@@ -119,3 +119,47 @@ async def list_memory_items(
         select(MemoryItem).where(MemoryItem.novel_id == novel_id).order_by(MemoryItem.created_at, MemoryItem.id)
     )
     return list(items)
+
+
+@router.post(
+    "/novels/{novel_id}/memory-items",
+    response_model=MemoryItemResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_formal_memory_item(
+    novel_id: UUID,
+    payload: MemoryReviewCreate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> MemoryItem:
+    await get_owned_novel(session, current_user, novel_id)
+    memory = await create_memory_item(
+        session,
+        novel_id=novel_id,
+        memory_type=payload.memory_type,
+        title=payload.title,
+        body=payload.body,
+        importance=payload.importance,
+        metadata=payload.metadata,
+    )
+    await session.commit()
+    await session.refresh(memory)
+    return memory
+
+
+@router.delete("/memory-items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_formal_memory_item(
+    item_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> Response:
+    deleted = await delete_memory_item(
+        session,
+        owner_id=current_user.id,
+        item_id=item_id,
+    )
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory item not found")
+
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
