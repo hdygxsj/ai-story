@@ -2,9 +2,9 @@ import Bubble from "@ant-design/x/es/bubble";
 import Sender from "@ant-design/x/es/sender";
 import { CloseOutlined, PushpinOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Flex, Space, Tag, Typography } from "antd";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import type { ContextDetail, WorkspaceDiff } from "../../api/agent";
+import type { AgentConfirmation, AgentToolCallRecord, ContextDetail, WorkspaceDiff } from "../../api/agent";
 import { streamAgentMessage } from "../../api/agent";
 import type { Conversation } from "../../api/conversations";
 import {
@@ -15,10 +15,12 @@ import {
   updateConversation,
 } from "../../api/conversations";
 import type { WorkspaceNode } from "../../api/workspace";
+import { AgentToolTrace } from "./AgentToolTrace";
 import { AgentMarkdown } from "./AgentMarkdown";
 import { ContextSettingsDrawer } from "./ContextSettingsDrawer";
 import { ContextStatusBar } from "./ContextStatusBar";
 import { ConversationSidebar } from "./ConversationSidebar";
+import { getStoredConversationId, setStoredConversationId } from "../workspace/workspaceSessionStorage";
 import "./agent-panel.css";
 
 type AgentPanelProps = {
@@ -30,6 +32,7 @@ type AgentPanelProps = {
   onClearSelectedText?: () => void;
   onDismissWorkspaceDiff?: () => void;
   onRunCompleted?: () => void | Promise<void>;
+  onResolveConfirmation?: (confirmationId: string, action: "approve" | "reject") => Promise<void>;
   onUndoWorkspaceDiff?: () => void;
   onWorkspaceOrganized?: (nodes: WorkspaceNode[], diff?: WorkspaceDiff | null) => void;
   rewriteRequest?: { id: number; text: string } | null;
@@ -41,6 +44,7 @@ type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  toolCalls?: AgentToolCallRecord[];
 };
 
 const WELCOME_MESSAGE = "告诉我你想创建、改写、记录或检索什么。";
@@ -53,6 +57,16 @@ function welcomeMessages(): ChatMessage[] {
   return [{ id: createMessageId("assistant"), role: "assistant", content: WELCOME_MESSAGE }];
 }
 
+function confirmationPreview(payload: Record<string, unknown>): string {
+  if (typeof payload.content === "string") {
+    return payload.content;
+  }
+  if (typeof payload.replacement_text === "string") {
+    return payload.replacement_text;
+  }
+  return "";
+}
+
 export function AgentPanel({
   hasModelProfile = true,
   onOpenModelConfig,
@@ -62,6 +76,7 @@ export function AgentPanel({
   onClearSelectedText,
   onDismissWorkspaceDiff,
   onRunCompleted,
+  onResolveConfirmation,
   onUndoWorkspaceDiff,
   onWorkspaceOrganized,
   rewriteRequest,
@@ -72,12 +87,21 @@ export function AgentPanel({
   const [messages, setMessages] = useState<ChatMessage[]>(welcomeMessages);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
-  const [pendingConfirmation, setPendingConfirmation] = useState<string | null>(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState<AgentConfirmation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [contextDetail, setContextDetail] = useState<ContextDetail | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const activeAssistantIdRef = useRef<string | null>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
+
+  const scrollMessagesToBottom = useCallback(() => {
+    const container = messagesScrollRef.current;
+    if (!container) {
+      return;
+    }
+    container.scrollTop = container.scrollHeight;
+  }, []);
 
   const refreshConversations = useCallback(async () => {
     const items = await listConversations(token, novelId);
@@ -97,6 +121,7 @@ export function AgentPanel({
           id: item.id,
           role: item.role === "user" ? "user" : "assistant",
           content: item.content,
+          toolCalls: item.metadata?.tool_calls,
         })),
       );
     },
@@ -104,14 +129,39 @@ export function AgentPanel({
   );
 
   useEffect(() => {
-    setActiveConversationId(null);
-    setMessages(welcomeMessages());
     setMessage("");
     setError(null);
     setContextDetail(null);
     setPendingConfirmation(null);
-    void refreshConversations().catch((caught: Error) => setError(caught.message));
-  }, [novelId, refreshConversations]);
+
+    void (async () => {
+      try {
+        const items = await refreshConversations();
+        const storedConversationId = getStoredConversationId(novelId);
+        if (storedConversationId && items.some((item) => item.id === storedConversationId)) {
+          setActiveConversationId(storedConversationId);
+          await loadConversationMessages(storedConversationId);
+          return;
+        }
+        setActiveConversationId(null);
+        setMessages(welcomeMessages());
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : String(caught));
+      }
+    })();
+  }, [loadConversationMessages, novelId, refreshConversations]);
+
+  useEffect(() => {
+    if (activeConversationId) {
+      setStoredConversationId(novelId, activeConversationId);
+    }
+  }, [activeConversationId, novelId]);
+
+  useLayoutEffect(() => {
+    scrollMessagesToBottom();
+    const frame = requestAnimationFrame(scrollMessagesToBottom);
+    return () => cancelAnimationFrame(frame);
+  }, [activeConversationId, messages, scrollMessagesToBottom]);
 
   function appendAssistantContent(assistantId: string, delta: string) {
     setMessages((current) =>
@@ -121,9 +171,39 @@ export function AgentPanel({
     );
   }
 
-  function finalizeAssistantMessage(assistantId: string, content: string) {
+  function finalizeAssistantMessage(
+    assistantId: string,
+    content: string,
+    toolCalls?: AgentToolCallRecord[],
+  ) {
     setMessages((current) =>
-      current.map((item) => (item.id === assistantId ? { ...item, content } : item)),
+      current.map((item) =>
+        item.id === assistantId
+          ? {
+              ...item,
+              content,
+              toolCalls: toolCalls ?? item.toolCalls,
+            }
+          : item,
+      ),
+    );
+  }
+
+  function upsertToolCall(assistantId: string, record: AgentToolCallRecord) {
+    setMessages((current) =>
+      current.map((item) => {
+        if (item.id !== assistantId) {
+          return item;
+        }
+        const existing = item.toolCalls ?? [];
+        const index = existing.findIndex((toolCall) => toolCall.id === record.id);
+        if (index === -1) {
+          return { ...item, toolCalls: [...existing, record] };
+        }
+        const next = [...existing];
+        next[index] = record;
+        return { ...item, toolCalls: next };
+      }),
     );
   }
 
@@ -139,7 +219,7 @@ export function AgentPanel({
     setMessages((current) => [
       ...current.filter((item) => item.content !== WELCOME_MESSAGE || item.role !== "assistant"),
       { id: createMessageId("user"), role: "user", content: value },
-      { id: assistantId, role: "assistant", content: "" },
+      { id: assistantId, role: "assistant", content: "", toolCalls: [] },
     ]);
     setMessage("");
 
@@ -156,6 +236,9 @@ export function AgentPanel({
         onDelta: (content) => {
           appendAssistantContent(assistantId, content);
         },
+        onToolCall: (record) => {
+          upsertToolCall(assistantId, record);
+        },
         onDone: (payload) => {
           if (payload.workspace_nodes) {
             onWorkspaceOrganized?.(payload.workspace_nodes, payload.workspace_diff);
@@ -164,11 +247,11 @@ export function AgentPanel({
             setActiveConversationId(payload.conversation_id);
           }
           setContextDetail(payload.context_detail ?? null);
-          setPendingConfirmation(payload.confirmation?.id ?? null);
+          setPendingConfirmation(payload.confirmation ?? null);
           const finalMessage = payload.confirmation
-            ? `${payload.message} 确认项 ${payload.confirmation.id} 正在等待处理。`
+            ? `${payload.message} 正文写入方案已生成，请在下方确认后应用到编辑器。`
             : payload.message;
-          finalizeAssistantMessage(assistantId, finalMessage);
+          finalizeAssistantMessage(assistantId, finalMessage, payload.tool_calls);
           setStreaming(false);
           activeAssistantIdRef.current = null;
           try {
@@ -224,9 +307,11 @@ export function AgentPanel({
     if (activeConversationId === conversationId) {
       if (remaining[0]) {
         setActiveConversationId(remaining[0].id);
+        setStoredConversationId(novelId, remaining[0].id);
         await loadConversationMessages(remaining[0].id);
       } else {
         setActiveConversationId(null);
+        setStoredConversationId(novelId, null);
         setMessages(welcomeMessages());
       }
     }
@@ -252,7 +337,7 @@ export function AgentPanel({
         streaming ? (
           <Tag color="processing">生成中</Tag>
         ) : pendingConfirmation ? (
-          <Tag color="gold">等待确认</Tag>
+          <Tag color="gold">等待写入确认</Tag>
         ) : (
           <Tag color="green">就绪</Tag>
         )
@@ -306,6 +391,7 @@ export function AgentPanel({
         <div
           className="agent-panel-messages"
           data-testid="agent-message-scroll"
+          ref={messagesScrollRef}
           style={{ flex: "1 1 0", minHeight: 0, overflow: "auto" }}
         >
           <Bubble.List
@@ -329,6 +415,57 @@ export function AgentPanel({
           />
         </div>
         {error ? <Alert message={error} showIcon style={{ flexShrink: 0 }} type="error" /> : null}
+        {pendingConfirmation ? (
+          <div
+            aria-label="Agent 正文写入确认"
+            data-testid="agent-write-confirmation"
+            style={{
+              background: "#f0fdf4",
+              border: "1px solid rgba(34,197,94,0.28)",
+              borderRadius: 16,
+              flexShrink: 0,
+              padding: 12,
+            }}
+          >
+            <Flex align="center" justify="space-between" gap={8} wrap="wrap">
+              <Space direction="vertical" size={4} style={{ flex: 1, minWidth: 0 }}>
+                <Typography.Text strong>正文写入待确认</Typography.Text>
+                <Typography.Text type="secondary">{pendingConfirmation.action_type}</Typography.Text>
+                <Typography.Paragraph
+                  ellipsis={{ rows: 4, expandable: true, symbol: "展开" }}
+                  style={{ marginBottom: 0, whiteSpace: "pre-wrap" }}
+                >
+                  {confirmationPreview(pendingConfirmation.payload)}
+                </Typography.Paragraph>
+              </Space>
+              <Space wrap>
+                <Button
+                  disabled={streaming || !onResolveConfirmation}
+                  size="small"
+                  type="primary"
+                  onClick={() =>
+                    void onResolveConfirmation?.(pendingConfirmation.id, "approve")
+                      .then(() => setPendingConfirmation(null))
+                      .catch((caught: Error) => setError(caught.message))
+                  }
+                >
+                  写入正文
+                </Button>
+                <Button
+                  disabled={streaming || !onResolveConfirmation}
+                  size="small"
+                  onClick={() =>
+                    void onResolveConfirmation?.(pendingConfirmation.id, "reject")
+                      .then(() => setPendingConfirmation(null))
+                      .catch((caught: Error) => setError(caught.message))
+                  }
+                >
+                  拒绝
+                </Button>
+              </Space>
+            </Flex>
+          </div>
+        ) : null}
         {workspaceDiff ? (
           <div
             aria-label="Agent 目录变更"

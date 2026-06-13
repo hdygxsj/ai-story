@@ -66,3 +66,65 @@ def test_materials_can_be_created_listed_and_indexed() -> None:
     rag = client.get(f"/novels/{novel['id']}/rag/search?query=lighthouse keeper", headers=headers)
     assert rag.status_code == 200
     assert rag.json()[0]["source_type"] == "creative_asset"
+
+
+def test_creative_assets_can_be_updated_and_deleted() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client)
+    novel = client.post("/novels", headers=headers, json={"title": "Materials Novel"}).json()
+
+    created = client.post(
+        f"/novels/{novel['id']}/creative-assets",
+        headers=headers,
+        json={
+            "asset_type": "character",
+            "name": "Mira",
+            "summary": "Mira is the lighthouse keeper.",
+        },
+    ).json()
+
+    updated = client.patch(
+        f"/novels/{novel['id']}/creative-assets/{created['id']}",
+        headers=headers,
+        json={"name": "Mira Vale", "summary": "Mira keeps the northern lighthouse."},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "Mira Vale"
+    assert updated.json()["summary"] == "Mira keeps the northern lighthouse."
+
+    rag = client.get(f"/novels/{novel['id']}/rag/search?query=northern lighthouse", headers=headers)
+    assert rag.status_code == 200
+    assert rag.json()[0]["source_type"] == "creative_asset"
+
+    deleted = client.delete(f"/novels/{novel['id']}/creative-assets/{created['id']}", headers=headers)
+    assert deleted.status_code == 204
+    assert client.get(f"/novels/{novel['id']}/creative-assets", headers=headers).json() == []
+
+    missing = client.delete(f"/novels/{novel['id']}/creative-assets/{created['id']}", headers=headers)
+    assert missing.status_code == 404
+
+
+def test_material_changes_are_recorded_for_user_actions() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client)
+    novel = client.post("/novels", headers=headers, json={"title": "Change Novel"}).json()
+
+    created = client.post(
+        f"/novels/{novel['id']}/creative-assets",
+        headers=headers,
+        json={"asset_type": "character", "name": "Jon", "summary": "A sailor."},
+    ).json()
+
+    client.patch(
+        f"/novels/{novel['id']}/creative-assets/{created['id']}",
+        headers=headers,
+        json={"summary": "A retired sailor."},
+    )
+    client.delete(f"/novels/{novel['id']}/creative-assets/{created['id']}", headers=headers)
+
+    changes = client.get(f"/novels/{novel['id']}/material-changes", headers=headers).json()
+    assert len(changes) == 3
+    assert changes[0]["action"] == "deleted"
+    assert changes[0]["actor_source"] == "user"
+    assert changes[1]["action"] == "updated"
+    assert changes[2]["action"] == "created"

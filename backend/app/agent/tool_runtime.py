@@ -13,6 +13,11 @@ from app.agent.tools import (
     CreateTimelineEventArgs,
     CreateWorldRuleArgs,
     CreateWorkspaceNodeArgs,
+    DeleteCharacterStateArgs,
+    DeleteCreativeAssetArgs,
+    DeleteRelationshipEdgeArgs,
+    DeleteTimelineEventArgs,
+    ListMaterialChangesArgs,
     ListCharacterStatesArgs,
     ListCreativeAssetsArgs,
     ListDocumentVersionsArgs,
@@ -32,6 +37,9 @@ from app.agent.tools import (
     RestoreWorkspaceNodeArgs,
     TrashWorkspaceNodeArgs,
     UpdateCharacterStateArgs,
+    UpdateCreativeAssetArgs,
+    UpdateRelationshipEdgeArgs,
+    UpdateTimelineEventArgs,
     UpdateWorkspaceNodeArgs,
     draft_rewrite,
     get_agent_tools,
@@ -52,6 +60,21 @@ from app.services.document_actions import (
     create_version_restore_proposal,
     get_owned_document,
     list_owned_document_versions,
+)
+from app.services.materials import (
+    create_character_state,
+    create_creative_asset,
+    create_relationship_edge,
+    create_timeline_event,
+    delete_character_state,
+    delete_creative_asset,
+    delete_relationship_edge,
+    delete_timeline_event,
+    list_material_changes,
+    update_character_state_record,
+    update_creative_asset,
+    update_relationship_edge,
+    update_timeline_event,
 )
 from app.services.memory import create_memory_item
 from app.services.memory_search import search_memory_items
@@ -410,18 +433,13 @@ def build_runtime_tools(
     @tool("create_character_asset", args_schema=CreateCharacterAssetArgs)
     async def create_character_asset_runtime(novel_id: str, name: str, summary: str) -> dict[str, Any]:
         """Create a character creative asset."""
-        asset = CreativeAsset(
-            novel_id=current_novel_id(novel_id), asset_type="character", name=name, summary=summary
-        )
-        session.add(asset)
-        await session.flush()
-        await index_text(
+        asset = await create_creative_asset(
             session,
             novel_id=current_novel_id(novel_id),
-            source_type="creative_asset",
-            source_id=str(asset.id),
-            text=f"character: {name}\n{summary}",
-            metadata={"asset_type": "character"},
+            asset_type="character",
+            name=name,
+            summary=summary,
+            actor_source="agent",
         )
         await session.commit()
         return {
@@ -434,18 +452,13 @@ def build_runtime_tools(
     @tool("create_world_rule", args_schema=CreateWorldRuleArgs)
     async def create_world_rule_runtime(novel_id: str, title: str, rule: str) -> dict[str, Any]:
         """Create a worldbuilding rule asset."""
-        asset = CreativeAsset(
-            novel_id=current_novel_id(novel_id), asset_type="world_rule", name=title, summary=rule
-        )
-        session.add(asset)
-        await session.flush()
-        await index_text(
+        asset = await create_creative_asset(
             session,
             novel_id=current_novel_id(novel_id),
-            source_type="creative_asset",
-            source_id=str(asset.id),
-            text=f"world_rule: {title}\n{rule}",
-            metadata={"asset_type": "world_rule"},
+            asset_type="world_rule",
+            name=title,
+            summary=rule,
+            actor_source="agent",
         )
         await session.commit()
         return {
@@ -453,6 +466,53 @@ def build_runtime_tools(
             "action_type": "create_world_rule",
             "message": f"已创建世界规则「{title}」。",
             "id": str(asset.id),
+        }
+
+    @tool("update_creative_asset", args_schema=UpdateCreativeAssetArgs)
+    async def update_creative_asset_runtime(
+        novel_id: str,
+        asset_id: str,
+        asset_type: str | None = None,
+        name: str | None = None,
+        summary: str | None = None,
+    ) -> dict[str, Any]:
+        """Update an existing creative asset by id."""
+        asset = await update_creative_asset(
+            session,
+            novel_id=current_novel_id(novel_id),
+            asset_id=UUID(asset_id),
+            asset_type=asset_type,
+            name=name,
+            summary=summary,
+            actor_source="agent",
+        )
+        if asset is None:
+            return {"status": "error", "message": "创作资产不存在。"}
+        await session.commit()
+        return {
+            "status": "ok",
+            "action_type": "update_creative_asset",
+            "message": f"已更新创作资产「{asset.name}」。",
+            "id": str(asset.id),
+        }
+
+    @tool("delete_creative_asset", args_schema=DeleteCreativeAssetArgs)
+    async def delete_creative_asset_runtime(novel_id: str, asset_id: str) -> dict[str, Any]:
+        """Delete a creative asset by id."""
+        deleted = await delete_creative_asset(
+            session,
+            novel_id=current_novel_id(novel_id),
+            asset_id=UUID(asset_id),
+            actor_source="agent",
+        )
+        if not deleted:
+            return {"status": "error", "message": "创作资产不存在。"}
+        await session.commit()
+        return {
+            "status": "ok",
+            "action_type": "delete_creative_asset",
+            "message": "已删除创作资产。",
+            "id": asset_id,
         }
 
     @tool("list_timeline_events", args_schema=ListTimelineEventsArgs)
@@ -476,17 +536,13 @@ def build_runtime_tools(
         novel_id: str, title: str, event_time: str, summary: str
     ) -> dict[str, Any]:
         """Create a timeline event."""
-        event = TimelineEvent(
-            novel_id=current_novel_id(novel_id), title=title, event_time=event_time, summary=summary
-        )
-        session.add(event)
-        await session.flush()
-        await index_text(
+        event = await create_timeline_event(
             session,
             novel_id=current_novel_id(novel_id),
-            source_type="timeline_event",
-            source_id=str(event.id),
-            text=f"{event_time}: {title}\n{summary}",
+            title=title,
+            event_time=event_time,
+            summary=summary,
+            actor_source="agent",
         )
         await session.commit()
         return {
@@ -494,6 +550,53 @@ def build_runtime_tools(
             "action_type": "create_timeline_event",
             "message": f"已创建时间线事件「{title}」。",
             "id": str(event.id),
+        }
+
+    @tool("update_timeline_event", args_schema=UpdateTimelineEventArgs)
+    async def update_timeline_event_runtime(
+        novel_id: str,
+        event_id: str,
+        title: str | None = None,
+        event_time: str | None = None,
+        summary: str | None = None,
+    ) -> dict[str, Any]:
+        """Update an existing timeline event by id."""
+        event = await update_timeline_event(
+            session,
+            novel_id=current_novel_id(novel_id),
+            event_id=UUID(event_id),
+            title=title,
+            event_time=event_time,
+            summary=summary,
+            actor_source="agent",
+        )
+        if event is None:
+            return {"status": "error", "message": "时间线事件不存在。"}
+        await session.commit()
+        return {
+            "status": "ok",
+            "action_type": "update_timeline_event",
+            "message": f"已更新时间线事件「{event.title}」。",
+            "id": str(event.id),
+        }
+
+    @tool("delete_timeline_event", args_schema=DeleteTimelineEventArgs)
+    async def delete_timeline_event_runtime(novel_id: str, event_id: str) -> dict[str, Any]:
+        """Delete a timeline event by id."""
+        deleted = await delete_timeline_event(
+            session,
+            novel_id=current_novel_id(novel_id),
+            event_id=UUID(event_id),
+            actor_source="agent",
+        )
+        if not deleted:
+            return {"status": "error", "message": "时间线事件不存在。"}
+        await session.commit()
+        return {
+            "status": "ok",
+            "action_type": "delete_timeline_event",
+            "message": "已删除时间线事件。",
+            "id": event_id,
         }
 
     @tool("list_character_states", args_schema=ListCharacterStatesArgs)
@@ -518,26 +621,65 @@ def build_runtime_tools(
         }
 
     @tool("update_character_state", args_schema=UpdateCharacterStateArgs)
-    async def update_character_state_runtime(novel_id: str, character_name: str, state: str) -> dict[str, Any]:
-        """Record a character state snapshot."""
-        character_state = CharacterState(
-            novel_id=current_novel_id(novel_id), character_name=character_name, state=state, scope="current"
-        )
-        session.add(character_state)
-        await session.flush()
-        await index_text(
-            session,
-            novel_id=current_novel_id(novel_id),
-            source_type="character_state",
-            source_id=str(character_state.id),
-            text=f"{character_name}: {state}",
-        )
+    async def update_character_state_runtime(
+        novel_id: str,
+        character_name: str,
+        state: str,
+        state_id: str | None = None,
+        scope: str | None = None,
+    ) -> dict[str, Any]:
+        """Create or update a character state snapshot."""
+        resolved_novel_id = current_novel_id(novel_id)
+        if state_id:
+            character_state = await update_character_state_record(
+                session,
+                novel_id=resolved_novel_id,
+                state_id=UUID(state_id),
+                character_name=character_name,
+                state=state,
+                scope=scope,
+                actor_source="agent",
+            )
+            if character_state is None:
+                return {"status": "error", "message": "角色状态不存在。"}
+            action_type = "update_character_state"
+            message = f"已更新角色「{character_state.character_name}」状态。"
+        else:
+            character_state = await create_character_state(
+                session,
+                novel_id=resolved_novel_id,
+                character_name=character_name,
+                state=state,
+                scope=scope or "current",
+                actor_source="agent",
+            )
+            action_type = "create_character_state"
+            message = f"已记录角色「{character_name}」状态。"
         await session.commit()
         return {
             "status": "ok",
-            "action_type": "update_character_state",
-            "message": f"已更新角色「{character_name}」状态。",
+            "action_type": action_type,
+            "message": message,
             "id": str(character_state.id),
+        }
+
+    @tool("delete_character_state", args_schema=DeleteCharacterStateArgs)
+    async def delete_character_state_runtime(novel_id: str, state_id: str) -> dict[str, Any]:
+        """Delete a character state record."""
+        deleted = await delete_character_state(
+            session,
+            novel_id=current_novel_id(novel_id),
+            state_id=UUID(state_id),
+            actor_source="agent",
+        )
+        if not deleted:
+            return {"status": "error", "message": "角色状态不存在。"}
+        await session.commit()
+        return {
+            "status": "ok",
+            "action_type": "delete_character_state",
+            "message": "已删除角色状态记录。",
+            "id": state_id,
         }
 
     @tool("create_relationship_edge", args_schema=CreateRelationshipEdgeArgs)
@@ -549,21 +691,14 @@ def build_runtime_tools(
         description: str = "",
     ) -> dict[str, Any]:
         """Create a relationship edge between characters."""
-        edge = RelationshipEdge(
+        edge = await create_relationship_edge(
+            session,
             novel_id=current_novel_id(novel_id),
             source_character=source_character,
             target_character=target_character,
             relationship_type=relationship_type,
             description=description,
-        )
-        session.add(edge)
-        await session.flush()
-        await index_text(
-            session,
-            novel_id=current_novel_id(novel_id),
-            source_type="relationship_edge",
-            source_id=str(edge.id),
-            text=f"{source_character} {relationship_type} {target_character}: {description}",
+            actor_source="agent",
         )
         await session.commit()
         return {
@@ -571,6 +706,88 @@ def build_runtime_tools(
             "action_type": "create_relationship_edge",
             "message": f"已记录 {source_character} 与 {target_character} 的关系。",
             "id": str(edge.id),
+        }
+
+    @tool("update_relationship_edge", args_schema=UpdateRelationshipEdgeArgs)
+    async def update_relationship_edge_runtime(
+        novel_id: str,
+        edge_id: str,
+        source_character: str | None = None,
+        target_character: str | None = None,
+        relationship_type: str | None = None,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Update an existing relationship edge by id."""
+        edge = await update_relationship_edge(
+            session,
+            novel_id=current_novel_id(novel_id),
+            edge_id=UUID(edge_id),
+            source_character=source_character,
+            target_character=target_character,
+            relationship_type=relationship_type,
+            description=description,
+            actor_source="agent",
+        )
+        if edge is None:
+            return {"status": "error", "message": "人物关系不存在。"}
+        await session.commit()
+        return {
+            "status": "ok",
+            "action_type": "update_relationship_edge",
+            "message": f"已更新 {edge.source_character} 与 {edge.target_character} 的关系。",
+            "id": str(edge.id),
+        }
+
+    @tool("delete_relationship_edge", args_schema=DeleteRelationshipEdgeArgs)
+    async def delete_relationship_edge_runtime(novel_id: str, edge_id: str) -> dict[str, Any]:
+        """Delete a relationship edge by id."""
+        deleted = await delete_relationship_edge(
+            session,
+            novel_id=current_novel_id(novel_id),
+            edge_id=UUID(edge_id),
+            actor_source="agent",
+        )
+        if not deleted:
+            return {"status": "error", "message": "人物关系不存在。"}
+        await session.commit()
+        return {
+            "status": "ok",
+            "action_type": "delete_relationship_edge",
+            "message": "已删除人物关系。",
+            "id": edge_id,
+        }
+
+    @tool("list_material_changes", args_schema=ListMaterialChangesArgs)
+    async def list_material_changes_runtime(
+        novel_id: str,
+        material_type: str | None = None,
+        material_id: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """List recent material create/update/delete history."""
+        changes = await list_material_changes(
+            session,
+            novel_id=current_novel_id(novel_id),
+            material_type=material_type,
+            material_id=UUID(material_id) if material_id else None,
+            limit=limit,
+        )
+        return {
+            "status": "ok",
+            "changes": [
+                {
+                    "id": str(change.id),
+                    "material_type": change.material_type,
+                    "material_id": str(change.material_id),
+                    "action": change.action,
+                    "actor_source": change.actor_source,
+                    "summary": change.summary,
+                    "before_data": change.before_data,
+                    "after_data": change.after_data,
+                    "created_at": change.created_at.isoformat(),
+                }
+                for change in changes
+            ],
         }
 
     @tool("propose_rewrite", args_schema=ProposeRewriteArgs)
@@ -625,11 +842,19 @@ def build_runtime_tools(
         "list_creative_assets": list_creative_assets_runtime,
         "create_character_asset": create_character_asset_runtime,
         "create_world_rule": create_world_rule_runtime,
+        "update_creative_asset": update_creative_asset_runtime,
+        "delete_creative_asset": delete_creative_asset_runtime,
         "list_timeline_events": list_timeline_events_runtime,
         "create_timeline_event": create_timeline_event_runtime,
+        "update_timeline_event": update_timeline_event_runtime,
+        "delete_timeline_event": delete_timeline_event_runtime,
         "list_character_states": list_character_states_runtime,
         "update_character_state": update_character_state_runtime,
+        "delete_character_state": delete_character_state_runtime,
         "create_relationship_edge": create_relationship_edge_runtime,
+        "update_relationship_edge": update_relationship_edge_runtime,
+        "delete_relationship_edge": delete_relationship_edge_runtime,
+        "list_material_changes": list_material_changes_runtime,
         "propose_rewrite": propose_rewrite_runtime,
     }
 

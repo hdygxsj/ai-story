@@ -1,4 +1,5 @@
 import { apiRequest } from "./http";
+import type { AgentToolCallRecord } from "./agent";
 
 export type Conversation = {
   id: string;
@@ -13,6 +14,9 @@ export type StoredMessage = {
   role: string;
   content: string;
   created_at: string;
+  metadata?: {
+    tool_calls?: AgentToolCallRecord[];
+  };
 };
 
 export function listConversations(token: string, novelId: string) {

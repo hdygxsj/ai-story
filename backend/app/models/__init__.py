@@ -8,6 +8,7 @@ from app.models.conversation import (
 )
 from app.models.document import Document, DocumentVersion
 from app.models.memory import MemoryItem, MemoryReviewItem
+from app.models.material_change import MaterialChange
 from app.models.materials import CharacterState, CreativeAsset, RelationshipEdge, TimelineEvent
 from app.models.model_profile import ModelProfile
 from app.models.novel import Novel
@@ -23,6 +24,7 @@ __all__ = [
     "DocumentVersion",
     "CharacterState",
     "CreativeAsset",
+    "MaterialChange",
     "MemoryItem",
     "MemoryReviewItem",
     "Message",

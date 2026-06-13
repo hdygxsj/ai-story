@@ -119,6 +119,99 @@ describe("WorkspacePage", () => {
     expect(window.localStorage.getItem("ai-story-workspace-tree-collapsed")).toBe("false");
   });
 
+  it("restores the last selected chapter after refresh", async () => {
+    window.localStorage.setItem("ai-story-workspace-last-document", JSON.stringify({ "novel-1": "doc-2" }));
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/novels/novel-1/nodes")) {
+          return Promise.resolve(
+            jsonResponse([
+              { id: "node-1", title: "第一章", node_type: "chapter", parent_id: null, document_id: "doc-1", position: 0 },
+              { id: "node-2", title: "第二章", node_type: "chapter", parent_id: null, document_id: "doc-2", position: 1 },
+            ]),
+          );
+        }
+        if (url.endsWith("/documents/doc-2")) {
+          return Promise.resolve(
+            jsonResponse({
+              id: "doc-2",
+              content: {
+                type: "doc",
+                content: [{ type: "paragraph", content: [{ type: "text", text: "第二章内容" }] }],
+              },
+            }),
+          );
+        }
+        const conversationResponse = conversationMockResponse(url);
+        if (conversationResponse) {
+          return Promise.resolve(conversationResponse);
+        }
+        return Promise.resolve(jsonResponse([]));
+      }),
+    );
+
+    render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
+
+    expect(await screen.findByLabelText("章节名称")).toHaveValue("第二章");
+    expect(await screen.findByText("第二章内容")).toBeInTheDocument();
+  });
+
+  it("restores the last agent conversation after refresh", async () => {
+    window.localStorage.setItem("ai-story-workspace-last-conversation", JSON.stringify({ "novel-1": "conv-2" }));
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/novels/novel-1/conversations")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: "conv-1",
+                novel_id: "novel-1",
+                title: "对话一",
+                created_at: "2026-06-14T00:00:00Z",
+                updated_at: "2026-06-14T00:00:00Z",
+              },
+              {
+                id: "conv-2",
+                novel_id: "novel-1",
+                title: "对话二",
+                created_at: "2026-06-14T00:00:00Z",
+                updated_at: "2026-06-14T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/novels/novel-1/conversations/conv-2/messages")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: "msg-1",
+                role: "user",
+                content: "上次聊的内容",
+                created_at: "2026-06-14T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        return Promise.resolve(jsonResponse([]));
+      }),
+    );
+
+    render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("上次聊的内容")).toBeInTheDocument();
+    });
+
+    const messageScroll = screen.getByTestId("agent-message-scroll");
+    expect(messageScroll.scrollTop).toBe(messageScroll.scrollHeight);
+  });
+
   it("resizes and persists the Agent panel width", () => {
     window.localStorage.setItem("ai-story-agent-panel-width", "500");
     render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
@@ -983,5 +1076,86 @@ describe("WorkspacePage", () => {
 
     expect(await screen.findByText("第一章已经写入工作台")).toBeInTheDocument();
     expect(screen.getByText("第一章")).toBeInTheDocument();
+  });
+
+  it("shows inline confirmation to write generated body into the current document", async () => {
+    const user = userEvent.setup();
+    let approved = false;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const conversationResponse = conversationMockResponse(url);
+      if (conversationResponse) {
+        return Promise.resolve(conversationResponse);
+      }
+      if (url.endsWith("/novels/novel-1/nodes")) {
+        return Promise.resolve(
+          jsonResponse([
+            { id: "node-1", title: "第一章", node_type: "chapter", parent_id: null, document_id: "doc-1", position: 0 },
+          ]),
+        );
+      }
+      if (url.endsWith("/documents/doc-1/versions")) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith("/documents/doc-1")) {
+        return Promise.resolve(
+          jsonResponse({
+            id: "doc-1",
+            content: {
+              type: "doc",
+              content: [{ type: "paragraph", content: [{ type: "text", text: approved ? "Agent 已写入正文" : "旧正文" }] }],
+            },
+          }),
+        );
+      }
+      if (url.endsWith("/confirmations/confirmation-write/approve") && init?.method === "POST") {
+        approved = true;
+        return Promise.resolve(
+          jsonResponse({
+            id: "confirmation-write",
+            action_type: "document_update",
+            status: "approved",
+            payload: { content: "Agent 已写入正文" },
+            document_id: "doc-1",
+          }),
+        );
+      }
+      if (url.endsWith("/novels/novel-1/confirmations")) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith("/novels/novel-1/agent/messages/stream")) {
+        return Promise.resolve(
+          sseResponse([
+            { type: "delta", content: "已生成正文更新方案。" },
+            {
+              type: "done",
+              message: "已生成正文更新方案。",
+              context_status: [],
+              conversation_id: "conv-write-body",
+              confirmation: {
+                id: "confirmation-write",
+                action_type: "document_update",
+                status: "pending",
+                payload: { content: "Agent 已写入正文" },
+              },
+              workspace_nodes: null,
+            },
+          ]),
+        );
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
+    expect(await screen.findByText("旧正文")).toBeInTheDocument();
+    await user.type(
+      screen.getByPlaceholderText("让 Agent 规划、改写、记录记忆或检索上下文"),
+      "把这段正文写进当前章节{Enter}",
+    );
+
+    expect(await screen.findByTestId("agent-write-confirmation")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "写入正文" }));
+    expect(await screen.findByText("Agent 已写入正文")).toBeInTheDocument();
   });
 });

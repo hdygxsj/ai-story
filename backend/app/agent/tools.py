@@ -141,6 +141,8 @@ class UpdateCharacterStateArgs(BaseModel):
     novel_id: str
     character_name: str
     state: str
+    state_id: str | None = Field(default=None, description="Existing character state UUID to update")
+    scope: str | None = Field(default=None, description="Scope label such as chapter_3 or global")
 
 
 class CreateRelationshipEdgeArgs(BaseModel):
@@ -149,6 +151,58 @@ class CreateRelationshipEdgeArgs(BaseModel):
     target_character: str
     relationship_type: str
     description: str = ""
+
+
+class UpdateCreativeAssetArgs(BaseModel):
+    novel_id: str = Field(description="Novel UUID")
+    asset_id: str = Field(description="Creative asset UUID")
+    asset_type: str | None = Field(default=None, description="Asset type such as character or world_rule")
+    name: str | None = Field(default=None, description="Updated asset name")
+    summary: str | None = Field(default=None, description="Updated asset summary")
+
+
+class DeleteCreativeAssetArgs(BaseModel):
+    novel_id: str = Field(description="Novel UUID")
+    asset_id: str = Field(description="Creative asset UUID")
+
+
+class UpdateTimelineEventArgs(BaseModel):
+    novel_id: str = Field(description="Novel UUID")
+    event_id: str = Field(description="Timeline event UUID")
+    title: str | None = Field(default=None, description="Updated event title")
+    event_time: str | None = Field(default=None, description="Updated event time label")
+    summary: str | None = Field(default=None, description="Updated event summary")
+
+
+class DeleteTimelineEventArgs(BaseModel):
+    novel_id: str = Field(description="Novel UUID")
+    event_id: str = Field(description="Timeline event UUID")
+
+
+class DeleteCharacterStateArgs(BaseModel):
+    novel_id: str = Field(description="Novel UUID")
+    state_id: str = Field(description="Character state UUID")
+
+
+class UpdateRelationshipEdgeArgs(BaseModel):
+    novel_id: str = Field(description="Novel UUID")
+    edge_id: str = Field(description="Relationship edge UUID")
+    source_character: str | None = Field(default=None, description="Updated source character")
+    target_character: str | None = Field(default=None, description="Updated target character")
+    relationship_type: str | None = Field(default=None, description="Updated relationship type")
+    description: str | None = Field(default=None, description="Updated relationship description")
+
+
+class DeleteRelationshipEdgeArgs(BaseModel):
+    novel_id: str = Field(description="Novel UUID")
+    edge_id: str = Field(description="Relationship edge UUID")
+
+
+class ListMaterialChangesArgs(BaseModel):
+    novel_id: str = Field(description="Novel UUID")
+    material_type: str | None = Field(default=None, description="Optional material type filter")
+    material_id: str | None = Field(default=None, description="Optional material UUID filter")
+    limit: int = Field(default=20, ge=1, le=100)
 
 
 def draft_rewrite(selected_text: str, instruction: str) -> str:
@@ -366,9 +420,87 @@ def list_character_states_tool(novel_id: str) -> dict[str, Any]:
 
 
 @tool("update_character_state", args_schema=UpdateCharacterStateArgs)
-def update_character_state(novel_id: str, character_name: str, state: str) -> dict[str, Any]:
-    """Record a character state snapshot."""
+def update_character_state(
+    novel_id: str,
+    character_name: str,
+    state: str,
+    state_id: str | None = None,
+    scope: str | None = None,
+) -> dict[str, Any]:
+    """Create or update a character state snapshot."""
     return {"action_type": "update_character_state", "payload": locals()}
+
+
+@tool("delete_character_state", args_schema=DeleteCharacterStateArgs)
+def delete_character_state_tool(novel_id: str, state_id: str) -> dict[str, Any]:
+    """Delete a character state record."""
+    return {"novel_id": novel_id, "state_id": state_id}
+
+
+@tool("update_creative_asset", args_schema=UpdateCreativeAssetArgs)
+def update_creative_asset_tool(
+    novel_id: str,
+    asset_id: str,
+    asset_type: str | None = None,
+    name: str | None = None,
+    summary: str | None = None,
+) -> dict[str, Any]:
+    """Update an existing creative asset by id."""
+    return {"novel_id": novel_id, "asset_id": asset_id}
+
+
+@tool("delete_creative_asset", args_schema=DeleteCreativeAssetArgs)
+def delete_creative_asset_tool(novel_id: str, asset_id: str) -> dict[str, Any]:
+    """Delete a creative asset by id."""
+    return {"novel_id": novel_id, "asset_id": asset_id}
+
+
+@tool("update_timeline_event", args_schema=UpdateTimelineEventArgs)
+def update_timeline_event_tool(
+    novel_id: str,
+    event_id: str,
+    title: str | None = None,
+    event_time: str | None = None,
+    summary: str | None = None,
+) -> dict[str, Any]:
+    """Update an existing timeline event by id."""
+    return {"novel_id": novel_id, "event_id": event_id}
+
+
+@tool("delete_timeline_event", args_schema=DeleteTimelineEventArgs)
+def delete_timeline_event_tool(novel_id: str, event_id: str) -> dict[str, Any]:
+    """Delete a timeline event by id."""
+    return {"novel_id": novel_id, "event_id": event_id}
+
+
+@tool("update_relationship_edge", args_schema=UpdateRelationshipEdgeArgs)
+def update_relationship_edge_tool(
+    novel_id: str,
+    edge_id: str,
+    source_character: str | None = None,
+    target_character: str | None = None,
+    relationship_type: str | None = None,
+    description: str | None = None,
+) -> dict[str, Any]:
+    """Update an existing relationship edge by id."""
+    return {"novel_id": novel_id, "edge_id": edge_id}
+
+
+@tool("delete_relationship_edge", args_schema=DeleteRelationshipEdgeArgs)
+def delete_relationship_edge_tool(novel_id: str, edge_id: str) -> dict[str, Any]:
+    """Delete a relationship edge by id."""
+    return {"novel_id": novel_id, "edge_id": edge_id}
+
+
+@tool("list_material_changes", args_schema=ListMaterialChangesArgs)
+def list_material_changes_tool(
+    novel_id: str,
+    material_type: str | None = None,
+    material_id: str | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """List recent material create/update/delete history."""
+    return {"novel_id": novel_id, "material_type": material_type, "material_id": material_id, "limit": limit}
 
 
 @tool("create_relationship_edge", args_schema=CreateRelationshipEdgeArgs)
@@ -407,9 +539,17 @@ def get_agent_tools() -> list[BaseTool]:
         list_creative_assets_tool,
         create_character_asset,
         create_world_rule,
+        update_creative_asset_tool,
+        delete_creative_asset_tool,
         list_timeline_events_tool,
         create_timeline_event,
+        update_timeline_event_tool,
+        delete_timeline_event_tool,
         list_character_states_tool,
         update_character_state,
+        delete_character_state_tool,
         create_relationship_edge,
+        update_relationship_edge_tool,
+        delete_relationship_edge_tool,
+        list_material_changes_tool,
     ]

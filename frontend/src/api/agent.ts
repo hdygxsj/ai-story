@@ -21,6 +21,14 @@ export type ContextDetail = {
   snapshot_id?: string | null;
 };
 
+export type AgentToolCallRecord = {
+  id: string;
+  tool: string;
+  status: "running" | "ok" | "error";
+  args?: Record<string, unknown>;
+  summary?: string | null;
+};
+
 export type AgentMessageResponse = {
   message: string;
   context_status: string[];
@@ -29,6 +37,7 @@ export type AgentMessageResponse = {
   confirmation: AgentConfirmation | null;
   workspace_diff?: WorkspaceDiff | null;
   workspace_nodes?: WorkspaceNode[] | null;
+  tool_calls?: AgentToolCallRecord[];
 };
 
 export type WorkspaceDiffSnapshot = {
@@ -83,10 +92,19 @@ export type AgentStreamErrorPayload = {
   message: string;
 };
 
-export type AgentStreamEvent = AgentStreamDeltaPayload | AgentStreamDonePayload | AgentStreamErrorPayload;
+export type AgentStreamToolCallPayload = AgentToolCallRecord & {
+  type: "tool_call";
+};
+
+export type AgentStreamEvent =
+  | AgentStreamDeltaPayload
+  | AgentStreamDonePayload
+  | AgentStreamErrorPayload
+  | AgentStreamToolCallPayload;
 
 export type AgentStreamHandlers = {
   onDelta: (content: string) => void;
+  onToolCall: (record: AgentToolCallRecord) => void;
   onDone: (payload: AgentStreamDonePayload) => void;
   onError: (error: Error) => void;
 };
@@ -167,6 +185,10 @@ export async function streamAgentMessage(
     const parsed = JSON.parse(line.slice(6)) as AgentStreamEvent;
     if (parsed.type === "delta") {
       handlers.onDelta(parsed.content);
+      return;
+    }
+    if (parsed.type === "tool_call") {
+      handlers.onToolCall(parsed);
       return;
     }
     if (parsed.type === "error") {

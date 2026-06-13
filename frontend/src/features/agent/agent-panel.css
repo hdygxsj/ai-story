@@ -100,3 +100,20 @@
 .agent-panel-input .ant-sender-content {
   padding: 8px 10px;
 }
+
+.agent-tool-trace {
+  margin-bottom: 8px;
+}
+
+.agent-tool-trace .ant-collapse {
+  background: rgba(248, 250, 252, 0.96);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+}
+
+.agent-tool-trace-item {
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 10px;
+  padding: 8px 10px;
+}

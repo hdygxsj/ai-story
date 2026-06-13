@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.chat_stream import _sse, stream_agent_events
 from app.agent.stream_errors import format_agent_stream_error
 from app.agent.graph import _build_agent_system_prompt
+from app.agent.prompts import append_agent_runtime_guidance
 from app.agent.runtime import invoke_agent_graph
 from app.agent.tools import classify_agent_intent
 from app.api.deps import get_current_user
@@ -102,10 +103,10 @@ async def send_agent_message(
         user_message=payload.message,
         model_profile=model_profile,
     )
-    system_prompt = (
-        _build_agent_system_prompt(assembled.pack)
-        + f"\n\n当前小说 ID: {novel.id}"
-        + "\n可用工具包括：章节树增删改查、完整章节写入、记忆读写、素材与时间线整理。需要实际操作时请调用工具。"
+    system_prompt = append_agent_runtime_guidance(
+        _build_agent_system_prompt(assembled.pack),
+        novel_id=novel.id,
+        document_id=payload.document_id,
     )
 
     result = await invoke_agent_graph(
@@ -273,12 +274,14 @@ async def stream_agent_message(
             event_payload: dict[str, Any] = json.loads(raw_event[6:].strip())
             if event_payload.get("type") == "done":
                 final_message = str(event_payload.get("message", ""))
+                tool_calls = event_payload.get("tool_calls") or []
                 if final_message:
                     await append_message(
                         session,
                         conversation=conversation,
                         role="assistant",
                         content=final_message,
+                        metadata={"tool_calls": tool_calls} if tool_calls else None,
                     )
                 event_payload["conversation_id"] = str(conversation.id)
                 if event_payload.get("proposed_payload"):

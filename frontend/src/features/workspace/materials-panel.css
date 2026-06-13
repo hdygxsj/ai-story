@@ -98,7 +98,21 @@
   font-size: 15px;
   font-weight: 600;
   line-height: 1.4;
-  margin: 0 0 6px;
+  margin: 0;
+}
+
+.materials-panel-item-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.materials-panel-item-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
 }
 
 .materials-panel-item-summary {
@@ -263,4 +277,27 @@
   font-size: 13px;
   line-height: 1.55;
   margin: 0;
+}
+
+.materials-panel-changes {
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.materials-panel-change-item {
+  padding-bottom: 4px;
+}
+
+.materials-panel-change-header {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.materials-panel-change-time {
+  font-size: 12px;
+  white-space: nowrap;
 }

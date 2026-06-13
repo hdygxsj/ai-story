@@ -9,6 +9,7 @@ from app.agent.tools import classify_agent_intent, get_agent_tools
 from app.core.crypto import encrypt_api_key
 from app.agent.context import ContextPack
 from app.models import Document, DocumentVersion, MemoryItem, MemoryReviewItem, ModelProfile, Novel, PendingConfirmation, RagChunk, User, WorkspaceNode
+from app.services.materials import list_material_changes
 from app.services.rag import extract_text_from_prosemirror
 
 
@@ -22,6 +23,7 @@ def _empty_context_pack() -> ContextPack:
 def test_default_agent_prompt_allows_selective_automatic_memory() -> None:
     prompt = _build_agent_system_prompt(_empty_context_pack())
     assert "save_key_memory" in prompt
+    assert "propose_document_update" in prompt
     assert "无需用户审批" in prompt
     assert "文档和工作区的破坏性写入仍须遵循现有确认流程" in prompt
 
@@ -56,8 +58,64 @@ def test_agent_tool_registry_exposes_structured_langchain_tools() -> None:
         "cleanup_workspace_folders",
         "list_memory_items",
         "list_creative_assets",
+        "update_creative_asset",
+        "delete_creative_asset",
         "list_timeline_events",
+        "update_timeline_event",
+        "delete_timeline_event",
+        "delete_character_state",
+        "update_relationship_edge",
+        "delete_relationship_edge",
+        "list_material_changes",
     }.issubset(tool_names)
+
+
+async def test_agent_can_update_and_delete_creative_asset(session, monkeypatch) -> None:
+    async def fake_index_text(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.services.materials.index_text", fake_index_text)
+
+    user = User(email="material-agent@example.com", username="material-agent", password_hash="hash")
+    session.add(user)
+    await session.flush()
+    novel = Novel(owner_id=user.id, title="Material Novel")
+    session.add(novel)
+    await session.commit()
+
+    tools = {
+        tool.name: tool
+        for tool in build_runtime_tools(
+            session,
+            model_profile=None,
+            owner_id=user.id,
+            novel_id=novel.id,
+        )
+    }
+    created = await tools["create_character_asset"].ainvoke(
+        {"novel_id": str(novel.id), "name": "Mira", "summary": "Keeper of the lighthouse."}
+    )
+    asset_id = created["id"]
+
+    updated = await tools["update_creative_asset"].ainvoke(
+        {
+            "novel_id": str(novel.id),
+            "asset_id": asset_id,
+            "summary": "Retired lighthouse keeper.",
+        }
+    )
+    deleted = await tools["delete_creative_asset"].ainvoke(
+        {"novel_id": str(novel.id), "asset_id": asset_id}
+    )
+
+    changes = await list_material_changes(session, novel_id=novel.id)
+    assert updated["status"] == "ok"
+    assert deleted["status"] == "ok"
+    assert len(changes) == 3
+    assert changes[0].action == "deleted"
+    assert changes[0].actor_source == "agent"
+    assert changes[1].action == "updated"
+    assert changes[2].action == "created"
 
 
 async def test_create_chapter_with_content_persists_workspace_document(session, monkeypatch) -> None:

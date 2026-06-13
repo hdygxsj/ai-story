@@ -24,3 +24,4 @@ class AgentMessageResponse(BaseModel):
     confirmation: ConfirmationResponse | None = None
     workspace_diff: dict[str, Any] | None = None
     workspace_nodes: list[WorkspaceNodeResponse] | None = None
+    tool_calls: list[dict[str, Any]] = []

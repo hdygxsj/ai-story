@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.graph import _build_agent_system_prompt
+from app.agent.prompts import append_agent_runtime_guidance
 from app.agent.runtime import stream_agent_graph
 from app.agent.tools import classify_agent_intent
 from app.models import ModelProfile, Novel
@@ -57,10 +58,10 @@ async def stream_agent_events(
         )
         return
 
-    system_prompt = (
-        _build_agent_system_prompt(pack)
-        + f"\n\n当前小说 ID: {novel.id}"
-        + "\n可用工具包括：章节树增删改查、完整章节写入、记忆读写、素材与时间线整理。需要实际操作时请调用工具。"
+    system_prompt = append_agent_runtime_guidance(
+        _build_agent_system_prompt(pack),
+        novel_id=novel.id,
+        document_id=document_id,
     )
 
     result: dict[str, Any] = {}
@@ -82,6 +83,8 @@ async def stream_agent_events(
         if event_type == "delta":
             streamed_content += str(payload)
             yield _sse({"type": "delta", "content": str(payload)})
+        elif event_type == "tool_call":
+            yield _sse({"type": "tool_call", **(payload if isinstance(payload, dict) else {})})
         else:
             result = payload if isinstance(payload, dict) else {}
 
@@ -99,5 +102,6 @@ async def stream_agent_events(
             "proposed_payload": result.get("proposed_payload"),
             "workspace_diff": result.get("workspace_diff"),
             "workspace_nodes": result.get("workspace_nodes"),
+            "tool_calls": result.get("tool_calls") or [],
         }
     )

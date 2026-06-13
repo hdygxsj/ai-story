@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.checkpoint import get_checkpointer
 from app.agent.graph import build_agent_graph
 from app.agent.tool_runtime import build_runtime_tools
+from app.agent.tool_trace import build_tool_call_record, summarize_tool_result, tool_result_status
 from app.models import ModelProfile
 
 
@@ -60,18 +61,63 @@ async def stream_agent_graph(
     graph = build_agent_graph(tools=tools, checkpointer=checkpointer, model_profile=model_profile)
     invoke_state = {key: value for key, value in state.items() if key != "model_profile"}
     final_result: dict[str, Any] | None = None
+    tool_calls: list[dict[str, Any]] = []
+    tool_calls_by_id: dict[str, dict[str, Any]] = {}
+
     async for event in graph.astream_events(
         invoke_state,
         graph_invoke_config(conversation_id),
         version="v2",
     ):
-        if event["event"] == "on_chat_model_stream":
+        event_type = event.get("event")
+        if event_type == "on_chat_model_stream":
             chunk = event.get("data", {}).get("chunk")
             content = getattr(chunk, "content", "")
             if isinstance(content, str) and content:
                 yield "delta", content
-        if event["event"] == "on_chain_end" and event.get("name") == "LangGraph":
+            continue
+
+        if event_type == "on_tool_start":
+            run_id = str(event.get("run_id") or "")
+            tool_name = str(event.get("name") or "tool")
+            tool_input = event.get("data", {}).get("input")
+            record = build_tool_call_record(
+                run_id=run_id,
+                tool=tool_name,
+                status="running",
+                args=tool_input,
+            )
+            tool_calls_by_id[run_id] = record
+            tool_calls.append(record)
+            yield "tool_call", record
+            continue
+
+        if event_type == "on_tool_end":
+            run_id = str(event.get("run_id") or "")
+            tool_name = str(event.get("name") or "tool")
+            output = event.get("data", {}).get("output")
+            record = build_tool_call_record(
+                run_id=run_id,
+                tool=tool_name,
+                status=tool_result_status(output),
+                args=event.get("data", {}).get("input"),
+                summary=summarize_tool_result(output),
+            )
+            tool_calls_by_id[run_id] = record
+            for index, existing in enumerate(tool_calls):
+                if existing.get("id") == run_id:
+                    tool_calls[index] = record
+                    break
+            else:
+                tool_calls.append(record)
+            yield "tool_call", record
+            continue
+
+        if event_type == "on_chain_end" and event.get("name") == "LangGraph":
             output = event.get("data", {}).get("output")
             if isinstance(output, dict):
                 final_result = output
-    yield "done", final_result or {}
+
+    done_payload = dict(final_result or {})
+    done_payload["tool_calls"] = list(tool_calls)
+    yield "done", done_payload

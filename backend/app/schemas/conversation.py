@@ -27,5 +27,6 @@ class MessageResponse(BaseModel):
     role: str
     content: str
     created_at: datetime
+    metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="extra_metadata")
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)

@@ -16,6 +16,7 @@ type WorkspaceTreeProps = {
   onRestoreNode?: (nodeId: string) => void;
   onSelectDocument?: (documentId: string) => void;
   onTrashNode?: (nodeId: string) => void;
+  selectedDocumentId?: string | null;
 };
 
 export type WorkspaceNodePositionChange = {
@@ -136,6 +137,7 @@ export function WorkspaceTree({
   onRestoreNode,
   onSelectDocument,
   onTrashNode,
+  selectedDocumentId = null,
 }: WorkspaceTreeProps) {
   const [renamingNode, setRenamingNode] = useState<WorkspaceNode | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
@@ -240,6 +242,13 @@ export function WorkspaceTree({
   }
 
   const treeData = buildTree(null);
+  const selectedNodeKeys = useMemo(() => {
+    if (!selectedDocumentId) {
+      return [];
+    }
+    const selectedNode = activeNodes.find((node) => node.document_id === selectedDocumentId);
+    return selectedNode ? [selectedNode.id] : [];
+  }, [activeNodes, selectedDocumentId]);
 
   function submitRename() {
     const nextTitle = renameTitle.trim();
@@ -290,6 +299,7 @@ export function WorkspaceTree({
             blockNode
             defaultExpandAll
             draggable={{ icon: false }}
+            selectedKeys={selectedNodeKeys}
             treeData={treeData}
             onDrop={(info) => {
               const draggedId = String(info.dragNode.key);

@@ -17,6 +17,11 @@ _MEMORY_GUIDANCE = (
     "当对话中出现会影响后续创作的持久事实、约束、偏好、角色状态或剧情信息时，"
     "调用 save_key_memory 直接保存，无需用户审批。不要保存临时信息或重复内容。"
 )
+_MATERIAL_GUIDANCE = (
+    "当用户要求创建、修改、删除创作资产、时间线、角色状态或人物关系时，"
+    "直接调用相应 list/create/update/delete 工具，无需用户确认。"
+    "修改或删除前先 list 获取 id；可用 list_material_changes 查看变更记录。"
+)
 _DESTRUCTIVE_WRITE_GUIDANCE = "文档和工作区的破坏性写入仍须遵循现有确认流程。"
 
 
@@ -26,8 +31,11 @@ def _default_system_prompt(state: AgentState) -> str:
         "你是 AI 小说工坊的共创 Agent，帮助用户规划故事、改写段落、记录记忆、整理章节树和检索上下文。",
         "请使用与用户相同的语言回复，给出具体、可执行的建议。",
         "当用户要求创建、移动、重命名、删除章节或文件夹，整理记忆、素材、时间线时，优先调用相应工具，不要只给口头建议。",
-        "当用户要求写完、生成或保存完整章节到工作台时，必须调用 create_chapter_with_content。只有工具返回成功后才能说已写入或已完成。",
+        "当用户要求写完、生成或保存完整章节到工作台时，必须调用 create_chapter_with_content；"
+        "当用户要求写入或更新当前章节正文时，必须调用 propose_document_update。"
+        "只有工具返回成功后才能说已写入或已完成。",
         _MEMORY_GUIDANCE,
+        _MATERIAL_GUIDANCE,
         _DESTRUCTIVE_WRITE_GUIDANCE,
     ]
     if novel_id is not None:
@@ -49,8 +57,11 @@ def _build_agent_system_prompt(pack: ContextPack) -> str:
         "你是 AI 小说工坊的共创 Agent，帮助用户规划故事、改写段落、记录记忆、整理章节树和检索上下文。",
         "请使用与用户相同的语言回复，给出具体、可执行的建议。",
         "当用户要求创建、移动、重命名、删除章节或文件夹，整理记忆、素材、时间线时，优先调用相应工具。",
-        "当用户要求写完、生成或保存完整章节到工作台时，必须调用 create_chapter_with_content。只有工具返回成功后才能说已写入或已完成。",
+        "当用户要求写完、生成或保存完整章节到工作台时，必须调用 create_chapter_with_content；"
+        "当用户要求写入或更新当前章节正文时，必须调用 propose_document_update。"
+        "只有工具返回成功后才能说已写入或已完成。",
         _MEMORY_GUIDANCE,
+        _MATERIAL_GUIDANCE,
         _DESTRUCTIVE_WRITE_GUIDANCE,
     ]
     for item in pack.items:

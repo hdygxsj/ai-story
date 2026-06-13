@@ -14,12 +14,15 @@ import type { DocumentBody, DocumentRecord, DocumentVersion } from "../../api/do
 import { getDocument, listDocumentVersions, updateDocument } from "../../api/documents";
 import type { MemoryItem } from "../../api/memory";
 import { deleteMemoryItem, listMemoryItems } from "../../api/memory";
-import type { CharacterState, CreativeAsset, RelationshipEdge, TimelineEvent } from "../../api/materials";
+import type { CharacterState, CreativeAsset, MaterialChange, RelationshipEdge, TimelineEvent } from "../../api/materials";
 import {
+  deleteCreativeAsset,
   listCharacterStates,
   listCreativeAssets,
+  listMaterialChanges,
   listRelationshipEdges,
   listTimelineEvents,
+  updateCreativeAsset,
 } from "../../api/materials";
 import type { ModelProfile } from "../../api/modelProfiles";
 import type { ModelProfileConnectivityResult, ModelProfilePurpose } from "../../api/modelProfiles";
@@ -39,6 +42,7 @@ import {
   reorderWorkspaceNodes,
   updateWorkspaceNode,
 } from "../../api/workspace";
+import { getStoredDocumentId, setStoredDocumentId } from "./workspaceSessionStorage";
 
 type WorkspacePageProps = {
   activeSection?: WorkspaceSection;
@@ -251,7 +255,7 @@ export function WorkspacePage({
   novelId,
 }: WorkspacePageProps) {
   const [nodes, setNodes] = useState<WorkspaceNode[]>([]);
-  const [documentId, setDocumentId] = useState<string | null>(null);
+  const [documentId, setDocumentId] = useState<string | null>(() => getStoredDocumentId(novelId));
   const [document, setDocument] = useState<DocumentRecord | null>(null);
   const [draftsByDocumentId, setDraftsByDocumentId] = useState<Record<string, DocumentBody>>({});
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
@@ -265,6 +269,7 @@ export function WorkspacePage({
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
   const [characterStates, setCharacterStates] = useState<CharacterState[]>([]);
   const [relationshipEdges, setRelationshipEdges] = useState<RelationshipEdge[]>([]);
+  const [materialChanges, setMaterialChanges] = useState<MaterialChange[]>([]);
   const [workspaceDiff, setWorkspaceDiff] = useState<WorkspaceDiff | null>(null);
   const [saving, setSaving] = useState(false);
   const [modelProfileSaving, setModelProfileSaving] = useState(false);
@@ -344,6 +349,10 @@ export function WorkspacePage({
   }, [novelId]);
 
   useEffect(() => {
+    setDocumentId(getStoredDocumentId(novelId));
+  }, [novelId]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function loadWorkspace() {
@@ -357,6 +366,7 @@ export function WorkspacePage({
           events,
           states,
           relationships,
+          changes,
         ] = await Promise.all([
           listWorkspaceNodes(token, novelId),
           listConfirmations(token, novelId),
@@ -366,15 +376,27 @@ export function WorkspacePage({
           listTimelineEvents(token, novelId),
           listCharacterStates(token, novelId),
           listRelationshipEdges(token, novelId),
+          listMaterialChanges(token, novelId),
         ]);
         if (!cancelled) {
           setNodes(loadedNodes);
-          setDocumentId((current) => {
-            if (current && loadedNodes.some((node) => node.document_id === current)) {
-              return current;
+          const resolvedDocumentId = (() => {
+            const storedDocumentId = getStoredDocumentId(novelId);
+            if (
+              storedDocumentId &&
+              loadedNodes.some(
+                (node) => node.document_id === storedDocumentId && node.status !== "trashed",
+              )
+            ) {
+              return storedDocumentId;
             }
-            return loadedNodes.find((node) => node.document_id)?.document_id ?? null;
-          });
+            return (
+              loadedNodes.find((node) => node.document_id && node.status !== "trashed")?.document_id ??
+              null
+            );
+          })();
+          setDocumentId(resolvedDocumentId);
+          setStoredDocumentId(novelId, resolvedDocumentId);
           setConfirmations(confirmations);
           setMemoryItems(memories);
           setModelProfiles(modelProfiles);
@@ -382,6 +404,7 @@ export function WorkspacePage({
           setTimelineEvents(events);
           setCharacterStates(states);
           setRelationshipEdges(relationships);
+          setMaterialChanges(changes);
           setConfirmationCount(confirmations.filter((item) => item.status === "pending").length);
           setModelProfileCount(modelProfiles.length);
         }
@@ -481,16 +504,18 @@ export function WorkspacePage({
   }
 
   async function refreshCreativeCollections() {
-    const [assets, events, states, relationships] = await Promise.all([
+    const [assets, events, states, relationships, changes] = await Promise.all([
       listCreativeAssets(token, novelId),
       listTimelineEvents(token, novelId),
       listCharacterStates(token, novelId),
       listRelationshipEdges(token, novelId),
+      listMaterialChanges(token, novelId),
     ]);
     setCreativeAssets(assets);
     setTimelineEvents(events);
     setCharacterStates(states);
     setRelationshipEdges(relationships);
+    setMaterialChanges(changes);
   }
 
   async function resolveConfirmation(confirmationId: string, action: "approve" | "reject") {
@@ -510,6 +535,14 @@ export function WorkspacePage({
       if (changedDocumentId === documentId) {
         setDocument(loadedDocument);
         setVersions(loadedVersions);
+        setDraftsByDocumentId((current) => {
+          if (!(changedDocumentId in current)) {
+            return current;
+          }
+          const next = { ...current };
+          delete next[changedDocumentId];
+          return next;
+        });
       }
     }
   }
@@ -523,8 +556,40 @@ export function WorkspacePage({
     }
   }
 
+  async function handleUpdateCreativeAsset(
+    assetId: string,
+    payload: Pick<CreativeAsset, "asset_type" | "name" | "summary">,
+  ) {
+    try {
+      const updated = await updateCreativeAsset(token, novelId, assetId, payload);
+      setCreativeAssets((items) => items.map((item) => (item.id === assetId ? updated : item)));
+      const changes = await listMaterialChanges(token, novelId);
+      setMaterialChanges(changes);
+      message.success("创作资产已更新");
+    } catch {
+      message.error("更新创作资产失败");
+    }
+  }
+
+  async function handleDeleteCreativeAsset(assetId: string) {
+    try {
+      await deleteCreativeAsset(token, novelId, assetId);
+      setCreativeAssets((items) => items.filter((item) => item.id !== assetId));
+      const changes = await listMaterialChanges(token, novelId);
+      setMaterialChanges(changes);
+      message.success("创作资产已删除");
+    } catch {
+      message.error("删除创作资产失败");
+    }
+  }
+
   function handleSelectDocument(nextDocumentId: string) {
+    selectDocument(nextDocumentId);
+  }
+
+  function selectDocument(nextDocumentId: string | null) {
     setDocumentId(nextDocumentId);
+    setStoredDocumentId(novelId, nextDocumentId);
   }
 
   function buildModelProfilePayload(
@@ -783,7 +848,7 @@ export function WorkspacePage({
     const node = await createWorkspaceNode(token, novelId, title, nodeType, parentId);
     setNodes((current) => [...current, node]);
     if (node.document_id) {
-      setDocumentId(node.document_id);
+      selectDocument(node.document_id);
     }
   }
 
@@ -827,7 +892,7 @@ export function WorkspacePage({
     setNodes(updatedNodes);
     if (status === "trashed" && currentChapterNode && targetNodes.some((node) => node.id === currentChapterNode.id)) {
       const nextDocumentId = updatedNodes.find((node) => node.status !== "trashed" && node.document_id)?.document_id ?? null;
-      setDocumentId(nextDocumentId);
+      selectDocument(nextDocumentId);
     }
   }
 
@@ -900,6 +965,7 @@ export function WorkspacePage({
       onRenameNode={(nodeId, title) => void handleUpdateWorkspaceNode(nodeId, { title })}
       onRestoreNode={(nodeId) => void handleWorkspaceNodeStatus(nodeId, "draft")}
       onSelectDocument={handleSelectDocument}
+      selectedDocumentId={documentId}
       onTrashNode={(nodeId) => void handleWorkspaceNodeStatus(nodeId, "trashed")}
     />
   );
@@ -913,7 +979,11 @@ export function WorkspacePage({
       documentId={documentId}
       onClearSelectedText={() => setSelectedText(null)}
       onDismissWorkspaceDiff={() => setWorkspaceDiff(null)}
-      onRunCompleted={() => refreshCreativeCollections()}
+      onRunCompleted={async () => {
+        await refreshCreativeCollections();
+        await refreshReviewQueues();
+      }}
+      onResolveConfirmation={(confirmationId, action) => resolveConfirmation(confirmationId, action)}
       onUndoWorkspaceDiff={() => void handleUndoWorkspaceDiff()}
       onWorkspaceOrganized={(updatedNodes, diff) => {
         const previousIds = new Set(nodes.map((node) => node.id));
@@ -923,7 +993,7 @@ export function WorkspacePage({
         setNodes(updatedNodes);
         setWorkspaceDiff(diff ?? null);
         if (createdNode?.document_id) {
-          setDocumentId(createdNode.document_id);
+          selectDocument(createdNode.document_id);
         }
       }}
       selectedText={selectedText}
@@ -1353,7 +1423,7 @@ export function WorkspacePage({
             ]}
           >
             <List.Item.Meta
-              description={String(confirmation.payload.replacement_text ?? "")}
+              description={String(confirmation.payload.replacement_text ?? confirmation.payload.content ?? "")}
               title={confirmation.action_type}
             />
           </List.Item>
@@ -1367,6 +1437,9 @@ export function WorkspacePage({
     <MaterialsPanel
       characterStates={characterStates}
       creativeAssets={creativeAssets}
+      materialChanges={materialChanges}
+      onDeleteCreativeAsset={handleDeleteCreativeAsset}
+      onUpdateCreativeAsset={handleUpdateCreativeAsset}
       relationshipEdges={relationshipEdges}
     />,
   );
