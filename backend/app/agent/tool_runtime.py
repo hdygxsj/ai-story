@@ -40,6 +40,7 @@ from app.agent.tools import (
     UpdateCreativeAssetArgs,
     UpdateRelationshipEdgeArgs,
     UpdateTimelineEventArgs,
+    UpdateNovelArgs,
     UpdateWorkspaceNodeArgs,
     draft_rewrite,
     get_agent_tools,
@@ -51,6 +52,7 @@ from app.models import (
     MemoryItem,
     MemoryReviewItem,
     ModelProfile,
+    Novel,
     RelationshipEdge,
     TimelineEvent,
 )
@@ -262,6 +264,36 @@ def build_runtime_tools(
         if scope is None:
             return {"status": "error", "message": "工具缺少当前用户或小说作用域。"}
         return await restore_workspace_node(session, novel_id=scope[1], node_id=UUID(node_id))
+
+    @tool("update_novel", args_schema=UpdateNovelArgs)
+    async def update_novel_runtime(
+        novel_id: str,
+        title: str | None = None,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Rename a novel or update its description."""
+        if title is None and description is None:
+            return {"status": "error", "message": "请提供要更新的标题或简介。"}
+        resolved_novel_id = current_novel_id(novel_id)
+        novel = await session.scalar(select(Novel).where(Novel.id == resolved_novel_id))
+        if novel is None:
+            return {"status": "error", "message": "小说不存在。"}
+        if title is not None:
+            novel.title = title
+        if description is not None:
+            novel.description = description
+        await session.commit()
+        await session.refresh(novel)
+        message = f"已将小说重命名为「{novel.title}」。" if title is not None else "已更新小说信息。"
+        return {
+            "status": "ok",
+            "message": message,
+            "novel_updated": {
+                "id": str(novel.id),
+                "title": novel.title,
+                "description": novel.description,
+            },
+        }
 
     @tool("list_workspace_nodes", args_schema=ListWorkspaceNodesArgs)
     async def list_workspace_nodes_runtime(novel_id: str) -> dict[str, Any]:
@@ -824,6 +856,7 @@ def build_runtime_tools(
         "search_memory": search_memory_runtime,
         "search_rag": search_rag_runtime,
         "read_document": read_document_runtime,
+        "update_novel": update_novel_runtime,
         "list_workspace_nodes": list_workspace_nodes_runtime,
         "create_workspace_node": create_workspace_node_runtime,
         "create_chapter_with_content": create_chapter_with_content_runtime,

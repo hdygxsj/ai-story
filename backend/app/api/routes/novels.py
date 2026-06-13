@@ -136,16 +136,21 @@ async def update_novel(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> Novel:
     novel = await get_owned_novel(session, current_user, novel_id)
-    if payload.default_model_profile_id is not None:
-        model_profile = await session.scalar(
-            select(ModelProfile).where(
-                ModelProfile.id == payload.default_model_profile_id,
-                ModelProfile.owner_id == current_user.id,
+    if payload.title is not None:
+        novel.title = payload.title
+    if payload.description is not None:
+        novel.description = payload.description
+    if "default_model_profile_id" in payload.model_fields_set:
+        if payload.default_model_profile_id is not None:
+            model_profile = await session.scalar(
+                select(ModelProfile).where(
+                    ModelProfile.id == payload.default_model_profile_id,
+                    ModelProfile.owner_id == current_user.id,
+                )
             )
-        )
-        if model_profile is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model profile not found")
-    novel.default_model_profile_id = payload.default_model_profile_id
+            if model_profile is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model profile not found")
+        novel.default_model_profile_id = payload.default_model_profile_id
     await session.commit()
     await session.refresh(novel)
     return novel

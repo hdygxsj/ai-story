@@ -74,6 +74,21 @@ def test_update_novel_default_model_profile() -> None:
     assert response.json()["default_model_profile_id"] == profile["id"]
 
 
+def test_update_novel_title() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client, email="novel-rename@example.com", username="novelrename")
+
+    novel = client.post("/novels", headers=headers, json={"title": "Old Title"}).json()
+    response = client.patch(
+        f"/novels/{novel['id']}",
+        headers=headers,
+        json={"title": "New Title"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["title"] == "New Title"
+
+
 def test_folder_node_does_not_create_document() -> None:
     client = TestClient(app)
     headers = auth_headers(client, email="folder@example.com", username="folderuser")

@@ -159,6 +159,7 @@ async def send_agent_message(
         confirmation=confirmation,
         workspace_diff=result.get("workspace_diff"),
         workspace_nodes=workspace_nodes,
+        novel_updated=result.get("novel_updated"),
     )
 
 

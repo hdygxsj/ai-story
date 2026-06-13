@@ -30,7 +30,7 @@ def _default_system_prompt(state: AgentState) -> str:
     lines = [
         "你是 AI 小说工坊的共创 Agent，帮助用户规划故事、改写段落、记录记忆、整理章节树和检索上下文。",
         "请使用与用户相同的语言回复，给出具体、可执行的建议。",
-        "当用户要求创建、移动、重命名、删除章节或文件夹，整理记忆、素材、时间线时，优先调用相应工具，不要只给口头建议。",
+        "当用户要求创建、移动、重命名、删除章节或文件夹，整理记忆、素材、时间线，或给当前小说改名时，优先调用相应工具，不要只给口头建议。",
         "当用户要求写完、生成或保存完整章节到工作台时，必须调用 create_chapter_with_content；"
         "当用户要求写入或更新当前章节正文时，必须调用 propose_document_update。"
         "只有工具返回成功后才能说已写入或已完成。",
@@ -56,7 +56,7 @@ def _build_agent_system_prompt(pack: ContextPack) -> str:
     lines = [
         "你是 AI 小说工坊的共创 Agent，帮助用户规划故事、改写段落、记录记忆、整理章节树和检索上下文。",
         "请使用与用户相同的语言回复，给出具体、可执行的建议。",
-        "当用户要求创建、移动、重命名、删除章节或文件夹，整理记忆、素材、时间线时，优先调用相应工具。",
+        "当用户要求创建、移动、重命名、删除章节或文件夹，整理记忆、素材、时间线，或给当前小说改名时，优先调用相应工具。",
         "当用户要求写完、生成或保存完整章节到工作台时，必须调用 create_chapter_with_content；"
         "当用户要求写入或更新当前章节正文时，必须调用 propose_document_update。"
         "只有工具返回成功后才能说已写入或已完成。",
@@ -108,6 +108,8 @@ def _tool_side_effects(tool_result: dict[str, Any]) -> dict[str, Any]:
         effects["confirmation_id"] = tool_result["confirmation_id"]
     if tool_result.get("action_type") == "rewrite_selection":
         effects["proposed_payload"] = tool_result.get("payload")
+    if tool_result.get("novel_updated") is not None:
+        effects["novel_updated"] = tool_result["novel_updated"]
     return effects
 
 

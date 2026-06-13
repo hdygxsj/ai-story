@@ -16,6 +16,8 @@ class NovelImport(BaseModel):
 
 
 class NovelUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = None
     default_model_profile_id: UUID | None = None
 
 

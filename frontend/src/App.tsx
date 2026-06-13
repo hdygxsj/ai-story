@@ -1,5 +1,5 @@
 import { BookOutlined, DownOutlined, PlusOutlined, SettingOutlined } from "@ant-design/icons";
-import { App as AntApp, Avatar, Button, ConfigProvider, Dropdown, Flex, Form, Input, Layout, Menu, Modal, Typography } from "antd";
+import { App as AntApp, Avatar, Badge, Button, ConfigProvider, Dropdown, Flex, Form, Input, Layout, Menu, Modal, Typography } from "antd";
 import "antd/dist/reset.css";
 import { useEffect, useState } from "react";
 
@@ -14,6 +14,7 @@ import { WorkspacePage } from "./features/workspace/WorkspacePage";
 const workspaceMenuItems: { key: WorkspaceSection; label: string }[] = [
   { key: "workspace", label: "工作台" },
   { key: "memory", label: "记忆" },
+  { key: "confirmations", label: "确认" },
   { key: "materials", label: "素材" },
   { key: "timeline", label: "时间线" },
   { key: "agent-config", label: "Agent配置" },
@@ -86,6 +87,7 @@ export function App() {
   const [creatingNovel, setCreatingNovel] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importingNovel, setImportingNovel] = useState(false);
+  const [pendingConfirmationCount, setPendingConfirmationCount] = useState(0);
 
   useEffect(() => {
     function handlePopState() {
@@ -271,7 +273,25 @@ export function App() {
                 mode="horizontal"
                 onClick={({ key }) => navigateSection(key as WorkspaceSection)}
                 selectedKeys={activeSection === "novels" ? [] : [activeSection]}
-                items={workspaceMenuItems}
+                items={workspaceMenuItems.map((item) =>
+                  item.key === "confirmations"
+                    ? {
+                        ...item,
+                        label: (
+                          <span>
+                            确认
+                            {pendingConfirmationCount > 0 ? (
+                              <Badge
+                                count={pendingConfirmationCount}
+                                size="small"
+                                style={{ marginInlineStart: 8 }}
+                              />
+                            ) : null}
+                          </span>
+                        ),
+                      }
+                    : item,
+                )}
                 style={{
                   background: "transparent",
                   borderBottom: "none",
@@ -423,10 +443,20 @@ export function App() {
                 defaultModelProfileId={selectedNovel?.default_model_profile_id ?? null}
                 novelId={novelId}
                 onOpenAgentConfig={() => navigateSection("agent-config")}
+                onPendingConfirmationCountChange={setPendingConfirmationCount}
                 onDefaultModelProfileChange={(profileId) => {
                   setNovels((current) =>
                     current.map((novel) =>
                       novel.id === novelId ? { ...novel, default_model_profile_id: profileId } : novel,
+                    ),
+                  );
+                }}
+                onNovelUpdated={(updated) => {
+                  setNovels((current) =>
+                    current.map((novel) =>
+                      novel.id === updated.id
+                        ? { ...novel, title: updated.title, description: updated.description }
+                        : novel,
                     ),
                   );
                 }}

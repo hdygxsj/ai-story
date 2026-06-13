@@ -4,8 +4,9 @@ import { CloseOutlined, PushpinOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Flex, Space, Tag, Typography } from "antd";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import type { AgentConfirmation, AgentToolCallRecord, ContextDetail, WorkspaceDiff } from "../../api/agent";
+import type { AgentToolCallRecord, ContextDetail, WorkspaceDiff } from "../../api/agent";
 import { streamAgentMessage } from "../../api/agent";
+import type { Confirmation } from "../../api/confirmations";
 import type { Conversation } from "../../api/conversations";
 import {
   createConversation,
@@ -14,6 +15,7 @@ import {
   listConversations,
   updateConversation,
 } from "../../api/conversations";
+import type { Novel } from "../../api/novels";
 import type { WorkspaceNode } from "../../api/workspace";
 import { AgentToolTrace } from "./AgentToolTrace";
 import { AgentMarkdown } from "./AgentMarkdown";
@@ -32,9 +34,11 @@ type AgentPanelProps = {
   onClearSelectedText?: () => void;
   onDismissWorkspaceDiff?: () => void;
   onRunCompleted?: () => void | Promise<void>;
+  onNovelUpdated?: (novel: Pick<Novel, "id" | "title" | "description">) => void;
   onResolveConfirmation?: (confirmationId: string, action: "approve" | "reject") => Promise<void>;
   onUndoWorkspaceDiff?: () => void;
   onWorkspaceOrganized?: (nodes: WorkspaceNode[], diff?: WorkspaceDiff | null) => void;
+  pendingConfirmations?: Confirmation[];
   rewriteRequest?: { id: number; text: string } | null;
   selectedText?: string | null;
   workspaceDiff?: WorkspaceDiff | null;
@@ -76,9 +80,11 @@ export function AgentPanel({
   onClearSelectedText,
   onDismissWorkspaceDiff,
   onRunCompleted,
+  onNovelUpdated,
   onResolveConfirmation,
   onUndoWorkspaceDiff,
   onWorkspaceOrganized,
+  pendingConfirmations = [],
   rewriteRequest,
   selectedText,
   workspaceDiff,
@@ -87,7 +93,6 @@ export function AgentPanel({
   const [messages, setMessages] = useState<ChatMessage[]>(welcomeMessages);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
-  const [pendingConfirmation, setPendingConfirmation] = useState<AgentConfirmation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [contextDetail, setContextDetail] = useState<ContextDetail | null>(null);
@@ -132,7 +137,6 @@ export function AgentPanel({
     setMessage("");
     setError(null);
     setContextDetail(null);
-    setPendingConfirmation(null);
 
     void (async () => {
       try {
@@ -243,23 +247,27 @@ export function AgentPanel({
           if (payload.workspace_nodes) {
             onWorkspaceOrganized?.(payload.workspace_nodes, payload.workspace_diff);
           }
+          if (payload.novel_updated) {
+            onNovelUpdated?.(payload.novel_updated);
+          }
           if (payload.conversation_id) {
             setActiveConversationId(payload.conversation_id);
           }
           setContextDetail(payload.context_detail ?? null);
-          setPendingConfirmation(payload.confirmation ?? null);
           const finalMessage = payload.confirmation
             ? `${payload.message} 正文写入方案已生成，请在下方确认后应用到编辑器。`
             : payload.message;
           finalizeAssistantMessage(assistantId, finalMessage, payload.tool_calls);
-          setStreaming(false);
-          activeAssistantIdRef.current = null;
-          try {
-            void Promise.resolve(onRunCompleted?.()).catch(() => undefined);
-          } catch {
-            // The completed Agent response remains usable if a background refresh fails.
-          }
-          void refreshConversations().catch(() => undefined);
+          void (async () => {
+            try {
+              await onRunCompleted?.();
+            } catch {
+              // The completed Agent response remains usable if a background refresh fails.
+            }
+            setStreaming(false);
+            activeAssistantIdRef.current = null;
+            void refreshConversations().catch(() => undefined);
+          })();
         },
         onError: (caught) => {
           setError(caught.message);
@@ -336,7 +344,7 @@ export function AgentPanel({
       extra={
         streaming ? (
           <Tag color="processing">生成中</Tag>
-        ) : pendingConfirmation ? (
+        ) : pendingConfirmations.length > 0 ? (
           <Tag color="gold">等待写入确认</Tag>
         ) : (
           <Tag color="green">就绪</Tag>
@@ -420,8 +428,9 @@ export function AgentPanel({
           />
         </div>
         {error ? <Alert message={error} showIcon style={{ flexShrink: 0 }} type="error" /> : null}
-        {pendingConfirmation ? (
+        {pendingConfirmations.map((confirmation) => (
           <div
+            key={confirmation.id}
             aria-label="Agent 正文写入确认"
             data-testid="agent-write-confirmation"
             style={{
@@ -435,12 +444,12 @@ export function AgentPanel({
             <Flex align="center" justify="space-between" gap={8} wrap="wrap">
               <Space direction="vertical" size={4} style={{ flex: 1, minWidth: 0 }}>
                 <Typography.Text strong>正文写入待确认</Typography.Text>
-                <Typography.Text type="secondary">{pendingConfirmation.action_type}</Typography.Text>
+                <Typography.Text type="secondary">{confirmation.action_type}</Typography.Text>
                 <Typography.Paragraph
                   ellipsis={{ rows: 4, expandable: true, symbol: "展开" }}
                   style={{ marginBottom: 0, whiteSpace: "pre-wrap" }}
                 >
-                  {confirmationPreview(pendingConfirmation.payload)}
+                  {confirmationPreview(confirmation.payload)}
                 </Typography.Paragraph>
               </Space>
               <Space wrap>
@@ -449,9 +458,9 @@ export function AgentPanel({
                   size="small"
                   type="primary"
                   onClick={() =>
-                    void onResolveConfirmation?.(pendingConfirmation.id, "approve")
-                      .then(() => setPendingConfirmation(null))
-                      .catch((caught: Error) => setError(caught.message))
+                    void onResolveConfirmation?.(confirmation.id, "approve").catch((caught: Error) =>
+                      setError(caught.message),
+                    )
                   }
                 >
                   写入正文
@@ -460,9 +469,9 @@ export function AgentPanel({
                   disabled={streaming || !onResolveConfirmation}
                   size="small"
                   onClick={() =>
-                    void onResolveConfirmation?.(pendingConfirmation.id, "reject")
-                      .then(() => setPendingConfirmation(null))
-                      .catch((caught: Error) => setError(caught.message))
+                    void onResolveConfirmation?.(confirmation.id, "reject").catch((caught: Error) =>
+                      setError(caught.message),
+                    )
                   }
                 >
                   拒绝
@@ -470,7 +479,7 @@ export function AgentPanel({
               </Space>
             </Flex>
           </div>
-        ) : null}
+        ))}
         {workspaceDiff ? (
           <div
             aria-label="Agent 目录变更"

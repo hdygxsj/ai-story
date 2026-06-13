@@ -1,3 +1,4 @@
+import type { Novel } from "./novels";
 import { API_BASE, apiRequest } from "./http";
 import type { WorkspaceNode } from "./workspace";
 
@@ -37,6 +38,7 @@ export type AgentMessageResponse = {
   confirmation: AgentConfirmation | null;
   workspace_diff?: WorkspaceDiff | null;
   workspace_nodes?: WorkspaceNode[] | null;
+  novel_updated?: Pick<Novel, "id" | "title" | "description"> | null;
   tool_calls?: AgentToolCallRecord[];
 };
 

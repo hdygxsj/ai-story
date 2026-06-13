@@ -1081,6 +1081,14 @@ describe("WorkspacePage", () => {
   it("shows inline confirmation to write generated body into the current document", async () => {
     const user = userEvent.setup();
     let approved = false;
+    let confirmationCreated = false;
+    const pendingConfirmation = {
+      id: "confirmation-write",
+      action_type: "document_update",
+      status: "pending",
+      payload: { content: "Agent 已写入正文" },
+      document_id: "doc-1",
+    };
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const conversationResponse = conversationMockResponse(url);
@@ -1121,9 +1129,12 @@ describe("WorkspacePage", () => {
         );
       }
       if (url.endsWith("/novels/novel-1/confirmations")) {
-        return Promise.resolve(jsonResponse([]));
+        return Promise.resolve(
+          jsonResponse(confirmationCreated && !approved ? [pendingConfirmation] : []),
+        );
       }
       if (url.endsWith("/novels/novel-1/agent/messages/stream")) {
+        confirmationCreated = true;
         return Promise.resolve(
           sseResponse([
             { type: "delta", content: "已生成正文更新方案。" },
@@ -1132,12 +1143,7 @@ describe("WorkspacePage", () => {
               message: "已生成正文更新方案。",
               context_status: [],
               conversation_id: "conv-write-body",
-              confirmation: {
-                id: "confirmation-write",
-                action_type: "document_update",
-                status: "pending",
-                payload: { content: "Agent 已写入正文" },
-              },
+              confirmation: pendingConfirmation,
               workspace_nodes: null,
             },
           ]),
@@ -1157,6 +1163,58 @@ describe("WorkspacePage", () => {
     expect(await screen.findByTestId("agent-write-confirmation")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "写入正文" }));
     expect(await screen.findByText("Agent 已写入正文")).toBeInTheDocument();
+  });
+
+  it("shows pending confirmations in the agent panel after workspace load", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      const conversationResponse = conversationMockResponse(url);
+      if (conversationResponse) {
+        return Promise.resolve(conversationResponse);
+      }
+      if (url.endsWith("/novels/novel-1/nodes")) {
+        return Promise.resolve(
+          jsonResponse([
+            { id: "node-1", title: "第一章", node_type: "chapter", parent_id: null, document_id: "doc-1", position: 0 },
+          ]),
+        );
+      }
+      if (url.endsWith("/documents/doc-1/versions")) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith("/documents/doc-1")) {
+        return Promise.resolve(
+          jsonResponse({
+            id: "doc-1",
+            content: {
+              type: "doc",
+              content: [{ type: "paragraph", content: [{ type: "text", text: "旧正文" }] }],
+            },
+          }),
+        );
+      }
+      if (url.endsWith("/novels/novel-1/confirmations")) {
+        return Promise.resolve(
+          jsonResponse([
+            {
+              id: "confirmation-pending",
+              action_type: "document_update",
+              status: "pending",
+              payload: { content: "等待确认的新正文" },
+              document_id: "doc-1",
+            },
+          ]),
+        );
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
+
+    expect(await screen.findByTestId("agent-write-confirmation")).toBeInTheDocument();
+    expect(screen.getByText("等待确认的新正文")).toBeInTheDocument();
+    expect(screen.getByText("等待写入确认")).toBeInTheDocument();
   });
 
   it("shows tool call records in the Agent dialog", async () => {

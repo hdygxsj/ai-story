@@ -102,6 +102,7 @@ async def stream_agent_events(
             "proposed_payload": result.get("proposed_payload"),
             "workspace_diff": result.get("workspace_diff"),
             "workspace_nodes": result.get("workspace_nodes"),
+            "novel_updated": result.get("novel_updated"),
             "tool_calls": result.get("tool_calls") or [],
         }
     )

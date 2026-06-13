@@ -2,7 +2,7 @@ import { Alert, Button, Card, Empty, Flex, Form, Input, List, Modal, Space, Typo
 import { useEffect, useState } from "react";
 
 import type { Novel } from "../../api/novels";
-import { createNovel, importNovel, listNovels } from "../../api/novels";
+import { createNovel, importNovel, listNovels, updateNovel } from "../../api/novels";
 
 type NovelListProps = {
   token: string;
@@ -18,6 +18,10 @@ export function NovelList({ token, novels = [], onNovelsChange, onSelectNovel }:
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renamingNovel, setRenamingNovel] = useState<Novel | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [renameForm] = Form.useForm<{ title: string }>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -80,6 +84,30 @@ export function NovelList({ token, novels = [], onNovelsChange, onSelectNovel }:
     }
   }
 
+  function openRenameModal(novel: Novel) {
+    setRenamingNovel(novel);
+    renameForm.setFieldsValue({ title: novel.title });
+    setRenameOpen(true);
+  }
+
+  async function handleRename(values: { title: string }) {
+    if (!renamingNovel) {
+      return;
+    }
+    setRenaming(true);
+    try {
+      const updated = await updateNovel(token, renamingNovel.id, { title: values.title });
+      const nextNovels = localNovels.map((novel) => (novel.id === updated.id ? updated : novel));
+      setLocalNovels(nextNovels);
+      onNovelsChange?.(nextNovels);
+      setRenameOpen(false);
+      setRenamingNovel(null);
+      renameForm.resetFields();
+    } finally {
+      setRenaming(false);
+    }
+  }
+
   return (
     <Card
       style={{
@@ -111,7 +139,16 @@ export function NovelList({ token, novels = [], onNovelsChange, onSelectNovel }:
             dataSource={localNovels}
             loading={loading}
             renderItem={(novel) => (
-              <List.Item actions={[<Button onClick={() => onSelectNovel(novel.id)}>打开</Button>]}>
+              <List.Item
+                actions={[
+                  <Button key="rename" onClick={() => openRenameModal(novel)}>
+                    重命名
+                  </Button>,
+                  <Button key="open" onClick={() => onSelectNovel(novel.id)}>
+                    打开
+                  </Button>,
+                ]}
+              >
                 <List.Item.Meta description={novel.description || "暂无简介"} title={novel.title} />
               </List.Item>
             )}
@@ -134,6 +171,24 @@ export function NovelList({ token, novels = [], onNovelsChange, onSelectNovel }:
           </Form.Item>
           <Form.Item label="导入正文" name="content" rules={[{ required: true, message: "请粘贴正文内容" }]}>
             <Input.TextArea aria-label="导入正文" autoSize={{ minRows: 8, maxRows: 14 }} placeholder="第一章&#10;正文内容..." />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        confirmLoading={renaming}
+        okText="保存"
+        onCancel={() => {
+          setRenameOpen(false);
+          setRenamingNovel(null);
+          renameForm.resetFields();
+        }}
+        onOk={() => renameForm.submit()}
+        open={renameOpen}
+        title="重命名小说"
+      >
+        <Form form={renameForm} layout="vertical" onFinish={handleRename}>
+          <Form.Item label="小说标题" name="title" rules={[{ required: true, message: "请输入小说标题" }]}>
+            <Input aria-label="重命名小说标题" placeholder="小说标题" />
           </Form.Item>
         </Form>
       </Modal>

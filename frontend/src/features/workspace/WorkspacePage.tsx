@@ -48,7 +48,9 @@ type WorkspacePageProps = {
   activeSection?: WorkspaceSection;
   defaultModelProfileId?: string | null;
   onDefaultModelProfileChange?: (profileId: string | null) => void;
+  onNovelUpdated?: (novel: Pick<import("../../api/novels").Novel, "id" | "title" | "description">) => void;
   onOpenAgentConfig?: () => void;
+  onPendingConfirmationCountChange?: (count: number) => void;
   token: string;
   novelId: string;
 };
@@ -250,7 +252,9 @@ export function WorkspacePage({
   activeSection = "workspace",
   defaultModelProfileId = null,
   onDefaultModelProfileChange,
+  onNovelUpdated,
   onOpenAgentConfig,
+  onPendingConfirmationCountChange,
   token,
   novelId,
 }: WorkspacePageProps) {
@@ -351,6 +355,10 @@ export function WorkspacePage({
   useEffect(() => {
     setDocumentId(getStoredDocumentId(novelId));
   }, [novelId]);
+
+  useEffect(() => {
+    onPendingConfirmationCountChange?.(confirmationCount);
+  }, [confirmationCount, onPendingConfirmationCountChange]);
 
   useEffect(() => {
     let cancelled = false;
@@ -977,12 +985,14 @@ export function WorkspacePage({
       token={token}
       novelId={novelId}
       documentId={documentId}
+      pendingConfirmations={confirmations.filter((item) => item.status === "pending")}
       onClearSelectedText={() => setSelectedText(null)}
       onDismissWorkspaceDiff={() => setWorkspaceDiff(null)}
       onRunCompleted={async () => {
         await refreshCreativeCollections();
         await refreshReviewQueues();
       }}
+      onNovelUpdated={onNovelUpdated}
       onResolveConfirmation={(confirmationId, action) => resolveConfirmation(confirmationId, action)}
       onUndoWorkspaceDiff={() => void handleUndoWorkspaceDiff()}
       onWorkspaceOrganized={(updatedNodes, diff) => {

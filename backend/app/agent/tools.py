@@ -20,6 +20,12 @@ class SearchRagArgs(BaseModel):
     limit: int = Field(default=8, ge=1, le=20)
 
 
+class UpdateNovelArgs(BaseModel):
+    novel_id: str = Field(description="Novel UUID")
+    title: str | None = Field(default=None, description="New novel title")
+    description: str | None = Field(default=None, description="New novel description")
+
+
 class ListWorkspaceNodesArgs(BaseModel):
     novel_id: str = Field(description="Novel UUID")
 
@@ -213,14 +219,47 @@ def classify_agent_intent(message: str, selected_text: str | None) -> str:
     lowered = message.lower()
     if selected_text and ("rewrite" in lowered or "改写" in lowered or "重写" in lowered):
         return "rewrite_selection"
+
+    material_keywords = (
+        "素材",
+        "材料",
+        "资产",
+        "角色",
+        "世界观",
+        "时间线",
+        "人物关系",
+        "关系网",
+        "material",
+        "asset",
+    )
+    workspace_keywords = (
+        "文件夹",
+        "folder",
+        "目录",
+        "章节",
+        "chapter",
+        "正文",
+        "草稿",
+        "draft",
+        "workspace",
+        "工作台",
+    )
     delete_keywords = ("删", "删除", "移除", "去掉", "清理", "清除", "delete", "remove", "trash", "clear")
-    workspace_keywords = ("文件夹", "folder", "目录", "章节", "chapter", "正文", "草稿", "draft", "workspace")
-    if any(keyword in lowered for keyword in delete_keywords) and any(
-        keyword in lowered for keyword in workspace_keywords
+    organize_keywords = ("整理", "归类", "organize")
+
+    if any(keyword in message for keyword in material_keywords):
+        return "chat"
+
+    if any(keyword in message for keyword in delete_keywords) and any(
+        keyword in message for keyword in workspace_keywords
     ):
         return "cleanup_workspace"
-    if any(keyword in lowered for keyword in ["整理", "目录", "章节", "草稿", "文件夹", "folder", "chapter", "draft"]):
+
+    if any(keyword in message for keyword in organize_keywords) and any(
+        keyword in message for keyword in workspace_keywords
+    ):
         return "organize_workspace"
+
     if "remember" in lowered or "记住" in lowered:
         return "draft_key_memory"
     return "chat"
@@ -250,6 +289,16 @@ def search_memory(novel_id: str, query: str, limit: int = 8) -> dict[str, Any]:
 def search_rag(novel_id: str, query: str, limit: int = 8) -> dict[str, Any]:
     """Search vector-indexed RAG chunks."""
     return {"novel_id": novel_id, "query": query, "limit": limit, "results": []}
+
+
+@tool("update_novel", args_schema=UpdateNovelArgs)
+def update_novel_tool(
+    novel_id: str,
+    title: str | None = None,
+    description: str | None = None,
+) -> dict[str, Any]:
+    """Rename a novel or update its description."""
+    return {"novel_id": novel_id, "title": title, "description": description}
 
 
 @tool("list_workspace_nodes", args_schema=ListWorkspaceNodesArgs)
@@ -520,6 +569,7 @@ def get_agent_tools() -> list[BaseTool]:
         read_document,
         search_memory,
         search_rag,
+        update_novel_tool,
         list_workspace_nodes_tool,
         create_workspace_node_tool,
         create_chapter_with_content_tool,

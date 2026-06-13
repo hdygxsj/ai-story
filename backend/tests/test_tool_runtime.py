@@ -280,3 +280,30 @@ async def test_save_key_memory_fails_closed_without_authenticated_scope(
     assert result["status"] == "error"
     assert "authenticated" in result["message"].lower()
     assert list(await session.scalars(select(MemoryItem))) == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_update_novel_renames_title(session: AsyncSession) -> None:
+    owner = User(email="rename-agent@example.com", username="rename-agent", password_hash="hash")
+    session.add(owner)
+    await session.flush()
+    novel = Novel(owner_id=owner.id, title="旧书名")
+    session.add(novel)
+    await session.commit()
+
+    tools = {
+        tool.name: tool
+        for tool in build_runtime_tools(
+            session,
+            model_profile=None,
+            owner_id=owner.id,
+            novel_id=novel.id,
+        )
+    }
+    result = await tools["update_novel"].ainvoke({"novel_id": str(novel.id), "title": "新书名"})
+
+    assert result["status"] == "ok"
+    assert result["novel_updated"]["title"] == "新书名"
+    refreshed = await session.scalar(select(Novel).where(Novel.id == novel.id))
+    assert refreshed is not None
+    assert refreshed.title == "新书名"

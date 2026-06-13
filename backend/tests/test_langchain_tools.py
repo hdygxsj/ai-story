@@ -53,6 +53,7 @@ def test_agent_tool_registry_exposes_structured_langchain_tools() -> None:
         "propose_version_restore",
         "restore_workspace_node",
         "update_workspace_node",
+        "update_novel",
         "trash_workspace_node",
         "organize_workspace_tree",
         "cleanup_workspace_folders",
@@ -251,6 +252,19 @@ def test_agent_classifies_cleanup_chapters_as_workspace_cleanup() -> None:
 
 def test_agent_classifies_delete_written_followup_as_workspace_cleanup() -> None:
     assert classify_agent_intent("有正文的也删除", None) == "cleanup_workspace"
+
+
+def test_agent_classifies_material_organize_as_chat() -> None:
+    assert classify_agent_intent("整理一下素材", None) == "chat"
+    assert classify_agent_intent("你整理一下角色资产", None) == "chat"
+
+
+def test_agent_classifies_vague_organize_as_chat() -> None:
+    assert classify_agent_intent("你整理一下", None) == "chat"
+
+
+def test_agent_classifies_workspace_organize_shortcut() -> None:
+    assert classify_agent_intent("帮我整理章节和草稿目录", None) == "organize_workspace"
 
 
 def test_agent_removes_incomplete_tool_call_history() -> None:

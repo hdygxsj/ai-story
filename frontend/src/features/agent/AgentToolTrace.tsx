@@ -33,6 +33,7 @@ const TOOL_LABELS: Record<string, string> = {
   search_rag: "检索上下文",
   trash_workspace_node: "移入回收站",
   update_character_state: "更新角色状态",
+  update_novel: "重命名小说",
   update_workspace_node: "更新节点",
 };
 
@@ -84,7 +85,7 @@ export function AgentToolTrace({ toolCalls }: AgentToolTraceProps) {
     <div className="agent-tool-trace" data-testid="agent-tool-trace">
       <Collapse
         bordered={false}
-        defaultActiveKey={toolCalls.some((item) => item.status === "running") ? ["tools"] : []}
+        defaultActiveKey={["tools"]}
         items={[
           {
             key: "tools",

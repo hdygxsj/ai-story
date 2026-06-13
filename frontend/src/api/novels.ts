@@ -27,7 +27,11 @@ export function importNovel(token: string, payload: { title: string; content: st
   });
 }
 
-export function updateNovel(token: string, novelId: string, payload: Partial<Pick<Novel, "default_model_profile_id">>) {
+export function updateNovel(
+  token: string,
+  novelId: string,
+  payload: Partial<Pick<Novel, "title" | "description" | "default_model_profile_id">>,
+) {
   return apiRequest<Novel>(`/novels/${novelId}`, {
     method: "PATCH",
     token,
