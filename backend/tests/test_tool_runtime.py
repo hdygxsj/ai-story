@@ -47,7 +47,7 @@ async def test_invoke_agent_graph_builds_tools_with_authenticated_scope(
     monkeypatch.setattr("app.agent.runtime.build_runtime_tools", fake_build_runtime_tools)
     monkeypatch.setattr(
         "app.agent.runtime.build_agent_graph",
-        lambda *, tools, checkpointer: FakeGraph(),
+        lambda *, tools, checkpointer, model_profile, context_pack: FakeGraph(),
     )
 
     state = {"novel_id": uuid4(), "message": "Remember this."}

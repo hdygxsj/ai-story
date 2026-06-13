@@ -3,12 +3,9 @@ from collections.abc import AsyncIterator
 from typing import Any
 from uuid import UUID
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.graph import _build_agent_system_prompt, _message_text
 from app.agent.runtime import invoke_agent_graph
-from app.agent.model_runtime import build_chat_model
 from app.agent.tools import classify_agent_intent
 from app.models import ModelProfile, Novel
 from app.services.context_assembly import assemble_context
@@ -92,20 +89,24 @@ async def stream_agent_events(
         return
 
     try:
-        model = build_chat_model(model_profile, purpose="chat")
-        llm_messages = [
-            SystemMessage(content=_build_agent_system_prompt(pack)),
-            *assembled.history_messages,
-            HumanMessage(content=message),
-        ]
-        chunks: list[str] = []
-        async for chunk in model.astream(llm_messages):
-            text = _message_text(getattr(chunk, "content", chunk))
-            if not text:
-                continue
-            chunks.append(text)
-            yield _sse({"type": "delta", "content": text})
-        response = "".join(chunks).strip() or "模型未返回内容，请稍后重试。"
+        result = await invoke_agent_graph(
+            session,
+            state={
+                "novel_id": novel.id,
+                "document_id": document_id,
+                "message": message,
+                "model_profile": model_profile,
+                "selected_text": selected_text,
+                "messages": assembled.history_messages,
+                "context_pack": pack,
+            },
+            model_profile=model_profile,
+            owner_id=novel.owner_id,
+            novel_id=novel.id,
+            conversation_id=conversation_id,
+        )
+        response = str(result.get("response", "")) or "模型未返回内容，请稍后重试。"
+        yield _sse({"type": "delta", "content": response})
         yield _sse(
             {
                 "type": "done",
@@ -113,7 +114,7 @@ async def stream_agent_events(
                 "context_status": assembled.status_messages,
                 "context_detail": assembled.context_detail.model_dump(mode="json"),
                 "confirmation": None,
-                "proposed_payload": None,
+                "proposed_payload": result.get("proposed_payload"),
                 "workspace_diff": None,
                 "workspace_nodes": None,
             }

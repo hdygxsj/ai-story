@@ -17,15 +17,18 @@ def auth_headers(client: TestClient) -> dict[str, str]:
 
 def test_stream_response_includes_context_detail(monkeypatch) -> None:
     class FakeChatModel:
-        async def astream(self, messages):
+        def bind_tools(self, tools):
+            return self
+
+        def invoke(self, messages):
             from langchain_core.messages import AIMessage
 
-            yield AIMessage(content="我建议从场景氛围入手。")
+            return AIMessage(content="我建议从场景氛围入手。")
 
     async def fake_search_rag(*args, **kwargs):
         return []
 
-    monkeypatch.setattr("app.agent.chat_stream.build_chat_model", lambda profile, purpose="chat": FakeChatModel())
+    monkeypatch.setattr("app.agent.graph.build_chat_model", lambda profile, purpose="chat": FakeChatModel())
     monkeypatch.setattr("app.services.context_assembly.search_rag_chunks", fake_search_rag)
 
     client = TestClient(app)

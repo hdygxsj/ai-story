@@ -325,12 +325,15 @@ def test_model_profile_route_encrypts_api_key_before_storage() -> None:
 
 def test_agent_streaming_endpoint_returns_incremental_response(monkeypatch) -> None:
     class FakeChatModel:
-        async def astream(self, messages):
+        def bind_tools(self, tools):
+            return self
+
+        def invoke(self, messages):
             from langchain_core.messages import AIMessage
 
-            yield AIMessage(content="我可以帮你继续写下去。")
+            return AIMessage(content="我可以帮你继续写下去。")
 
-    monkeypatch.setattr("app.agent.chat_stream.build_chat_model", lambda profile, purpose="chat": FakeChatModel())
+    monkeypatch.setattr("app.agent.graph.build_chat_model", lambda profile, purpose="chat": FakeChatModel())
 
     client = TestClient(app)
     headers = auth_headers(client)

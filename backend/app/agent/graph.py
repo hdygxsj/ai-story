@@ -25,6 +25,11 @@ def _build_agent_system_prompt(pack: ContextPack) -> str:
     lines = [
         "你是 AI 小说工坊的共创 Agent，帮助用户规划故事、改写段落、记录记忆和检索上下文。",
         "请使用与用户相同的语言回复，给出具体、可执行的建议。",
+        (
+            "当对话中出现会影响后续创作的持久事实、约束、偏好、角色状态或剧情信息时，"
+            "调用 save_key_memory 直接保存，无需用户审批。不要保存临时信息或重复内容。"
+        ),
+        "文档和工作区的破坏性写入仍须遵循现有确认流程。",
     ]
     for item in pack.items:
         if item.source == "user_instruction":
@@ -48,8 +53,14 @@ def _message_text(content: Any) -> str:
     return str(content).strip()
 
 
-def _invoke_chat_model(state: AgentState, pack: ContextPack) -> dict[str, Any]:
-    model_profile = state.get("model_profile")
+def _invoke_chat_model(
+    state: AgentState,
+    pack: ContextPack,
+    *,
+    tools: list,
+    model_profile=None,
+) -> dict[str, Any]:
+    model_profile = model_profile or state.get("model_profile")
     if model_profile is None:
         return {
             "response": "请先在 Agent 配置中为当前小说绑定并保存可用的对话模型。",
@@ -58,13 +69,15 @@ def _invoke_chat_model(state: AgentState, pack: ContextPack) -> dict[str, Any]:
         }
 
     try:
-        model = build_chat_model(model_profile, purpose="chat")
-        ai_message = model.invoke(
-            [
-                SystemMessage(content=_build_agent_system_prompt(pack)),
-                HumanMessage(content=state["message"]),
-            ]
-        )
+        model = build_chat_model(model_profile, purpose="chat").bind_tools(tools)
+        messages = list(state.get("messages", []))
+        if (
+            not messages
+            or not isinstance(messages[-1], HumanMessage)
+            or _message_text(messages[-1].content) != state["message"]
+        ):
+            messages.append(HumanMessage(content=state["message"]))
+        ai_message = model.invoke([SystemMessage(content=_build_agent_system_prompt(pack)), *messages])
     except Exception as exc:
         return {
             "response": f"对话模型调用失败：{exc}",
@@ -72,16 +85,24 @@ def _invoke_chat_model(state: AgentState, pack: ContextPack) -> dict[str, Any]:
             "proposed_payload": None,
         }
 
+    if ai_message.tool_calls:
+        return {
+            "messages": [*messages, ai_message],
+            "context_status": pack.status_messages,
+            "proposed_payload": None,
+        }
+
     response = _message_text(ai_message.content)
     return {
+        "messages": [*messages, ai_message],
         "response": response or "模型未返回内容，请稍后重试。",
         "context_status": pack.status_messages,
         "proposed_payload": None,
     }
 
 
-def agent_node(state: AgentState) -> dict[str, Any]:
-    pack = build_context_pack(
+def _default_context_pack(state: AgentState) -> ContextPack:
+    return build_context_pack(
         user_instruction=state["message"],
         current_document_text="",
         selected_text=state.get("selected_text"),
@@ -91,6 +112,10 @@ def agent_node(state: AgentState) -> dict[str, Any]:
         rag_results=[],
         budget=ContextBudget(max_tokens=8000, response_tokens=1000),
     )
+
+
+def _agent_node(state: AgentState, *, tools: list, model_profile, context_pack) -> dict[str, Any]:
+    pack = context_pack or _default_context_pack(state)
     intent = classify_agent_intent(state["message"], state.get("selected_text"))
     if intent == "rewrite_selection" and state.get("selected_text") and state.get("document_id"):
         messages = list(state.get("messages", []))
@@ -115,9 +140,22 @@ def agent_node(state: AgentState) -> dict[str, Any]:
         return {"messages": messages, "context_status": pack.status_messages}
 
     return {
-        "messages": [*state.get("messages", []), HumanMessage(content=state["message"])],
-        **_invoke_chat_model(state, pack),
+        **_invoke_chat_model(
+            state,
+            pack,
+            tools=tools,
+            model_profile=model_profile,
+        ),
     }
+
+
+def agent_node(state: AgentState) -> dict[str, Any]:
+    return _agent_node(
+        state,
+        tools=get_agent_tools(),
+        model_profile=state.get("model_profile"),
+        context_pack=None,
+    )
 
 
 def _parse_tool_content(content: Any) -> dict[str, Any]:
@@ -138,17 +176,11 @@ def finalize_node(state: AgentState) -> dict[str, Any]:
 
     tool_messages = [message for message in state.get("messages", []) if isinstance(message, ToolMessage)]
     if not tool_messages:
-        pack = build_context_pack(
-            user_instruction=state["message"],
-            current_document_text="",
-            selected_text=state.get("selected_text"),
-            key_memories=[],
-            structured_memories=[],
-            neighboring_chapters=[],
-            rag_results=[],
-            budget=ContextBudget(max_tokens=8000, response_tokens=1000),
+        return _invoke_chat_model(
+            state,
+            _default_context_pack(state),
+            tools=get_agent_tools(),
         )
-        return _invoke_chat_model(state, pack)
 
     tool_result = _parse_tool_content(tool_messages[-1].content)
     if tool_result.get("action_type") == "rewrite_selection":
@@ -168,17 +200,33 @@ def finalize_node(state: AgentState) -> dict[str, Any]:
     }
 
 
+def _route_after_agent(state: AgentState):
+    if state.get("response"):
+        return END
+    return tools_condition(state)
+
+
 def build_agent_graph(
     tools: list | None = None,
     checkpointer=None,
+    model_profile=None,
+    context_pack: ContextPack | None = None,
 ):
     tool_list = tools or get_agent_tools()
     graph = StateGraph(AgentState)
-    graph.add_node("agent", agent_node)
+    graph.add_node(
+        "agent",
+        lambda state: _agent_node(
+            state,
+            tools=tool_list,
+            model_profile=model_profile,
+            context_pack=context_pack,
+        ),
+    )
     graph.add_node("tools", ToolNode(tool_list))
     graph.add_node("finalize", finalize_node)
     graph.set_entry_point("agent")
-    graph.add_conditional_edges("agent", tools_condition, {"tools": "tools", END: "finalize"})
+    graph.add_conditional_edges("agent", _route_after_agent, {"tools": "tools", END: "finalize"})
     graph.add_edge("tools", "finalize")
     graph.add_edge("finalize", END)
     return graph.compile(checkpointer=checkpointer)
