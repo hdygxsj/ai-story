@@ -1,0 +1,82 @@
+.agent-panel-card.ant-card {
+  overflow: hidden;
+}
+
+.agent-panel-card .ant-card-head {
+  min-height: 48px;
+  padding: 0 14px;
+}
+
+.agent-panel-card .ant-card-head-title {
+  min-width: 0;
+  padding: 8px 0;
+}
+
+.agent-panel-card .ant-card-body {
+  padding: 10px 12px 12px !important;
+}
+
+.agent-panel-toolbar {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-panel-header {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+}
+
+.agent-panel-toolbar-row {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.agent-panel-toolbar-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-panel-toolbar-select .ant-select-selector {
+  border-radius: 10px !important;
+}
+
+.agent-panel-chat {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.agent-panel-messages {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 2px 4px;
+}
+
+.agent-panel-messages .ant-bubble-list {
+  gap: 10px;
+}
+
+.agent-panel-messages .ant-bubble-content {
+  font-size: 13px;
+  line-height: 1.65;
+  max-width: 100%;
+  word-break: break-word;
+}
+
+.agent-panel-input .ant-sender {
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+.agent-panel-input .ant-sender-content {
+  padding: 8px 10px;
+}

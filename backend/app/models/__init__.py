@@ -1,4 +1,11 @@
 from app.models.confirmation import PendingConfirmation
+from app.models.conversation import (
+    ContextPack,
+    ContextSnapshot,
+    Conversation,
+    Message,
+    NovelContextSettings,
+)
 from app.models.document import Document, DocumentVersion
 from app.models.memory import MemoryItem, MemoryReviewItem
 from app.models.materials import CharacterState, CreativeAsset, RelationshipEdge, TimelineEvent
@@ -9,13 +16,18 @@ from app.models.user import User
 from app.models.workspace import WorkspaceNode
 
 __all__ = [
+    "ContextPack",
+    "ContextSnapshot",
+    "Conversation",
     "Document",
     "DocumentVersion",
     "CharacterState",
     "CreativeAsset",
     "MemoryItem",
     "MemoryReviewItem",
+    "Message",
     "ModelProfile",
+    "NovelContextSettings",
     "Novel",
     "PendingConfirmation",
     "RagChunk",

@@ -30,7 +30,10 @@ export function DocumentEditor({
   saving = false,
 }: DocumentEditorProps) {
   const applyingExternalContent = useRef(false);
+  const editorShellRef = useRef<HTMLDivElement>(null);
   const [chapterTitleValue, setChapterTitleValue] = useState(chapterTitle ?? "");
+  const [pendingSelection, setPendingSelection] = useState("");
+  const [selectionToolbarPosition, setSelectionToolbarPosition] = useState<{ left: number; top: number } | null>(null);
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -104,9 +107,28 @@ export function DocumentEditor({
   });
 
   function handleUseSelection() {
-    const selection = window.getSelection()?.toString().trim();
-    const nextSelectedText = selection || "";
-    onSelectText?.(nextSelectedText);
+    const selection = window.getSelection();
+    const nextSelectedText = selection?.toString().trim() ?? "";
+    if (!nextSelectedText || !selection?.rangeCount || !editorShellRef.current) {
+      setPendingSelection("");
+      setSelectionToolbarPosition(null);
+      return;
+    }
+    const rangeRect = selection.getRangeAt(0).getBoundingClientRect();
+    setPendingSelection(nextSelectedText);
+    setSelectionToolbarPosition({
+      left: Math.max(12, Math.min(rangeRect.left, window.innerWidth - 120)),
+      top: Math.max(12, Math.min(rangeRect.bottom + 8, window.innerHeight - 48)),
+    });
+  }
+
+  function handleQuoteSelection() {
+    if (!pendingSelection) {
+      return;
+    }
+    onSelectText?.(pendingSelection);
+    setPendingSelection("");
+    setSelectionToolbarPosition(null);
   }
 
   function handleSave() {
@@ -149,7 +171,7 @@ export function DocumentEditor({
               value={chapterTitleValue}
               variant="borderless"
             />
-            <Typography.Text type="secondary">选中文本后会自动进入右侧 Agent 引用区</Typography.Text>
+            <Typography.Text type="secondary">选中文字后可从浮动工具条引用到 Agent</Typography.Text>
           </div>
         }
         extra={
@@ -176,11 +198,33 @@ export function DocumentEditor({
         styles={{ body: { flex: 1, minHeight: 0, overflow: "auto", padding: 14 } }}
       >
         <div
+          ref={editorShellRef}
           onKeyUpCapture={handleUseSelection}
           onMouseUpCapture={handleUseSelection}
           style={{ position: "relative" }}
         >
           <EditorContent editor={editor} />
+          {pendingSelection && selectionToolbarPosition ? (
+            <Space
+              aria-label="选中文本操作"
+              size={4}
+              style={{
+                background: "#ffffff",
+                border: "1px solid rgba(15,23,42,0.10)",
+                borderRadius: 10,
+                boxShadow: "0 10px 30px rgba(15,23,42,0.14)",
+                left: selectionToolbarPosition.left,
+                padding: 4,
+                position: "fixed",
+                top: selectionToolbarPosition.top,
+                zIndex: 10,
+              }}
+            >
+              <Button onMouseDown={(event) => event.preventDefault()} onClick={handleQuoteSelection} size="small" type="text">
+                引用
+              </Button>
+            </Space>
+          ) : null}
         </div>
       </Card>
     </section>

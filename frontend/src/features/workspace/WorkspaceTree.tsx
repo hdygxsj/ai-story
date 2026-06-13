@@ -1,4 +1,4 @@
-import { FileTextOutlined, FolderOutlined, PlusOutlined, UndoOutlined } from "@ant-design/icons";
+import { CaretRightOutlined, FileTextOutlined, FolderOutlined, LeftOutlined, PlusOutlined, UndoOutlined } from "@ant-design/icons";
 import { Button, Dropdown, Input, Modal, Space, Tree, Typography } from "antd";
 import type { MenuProps } from "antd";
 import { useMemo, useState } from "react";
@@ -8,6 +8,7 @@ type WorkspaceTreeProps = {
   nodes?: WorkspaceNode[];
   onCreateChapter?: (parentId?: string | null) => void;
   onCreateFolder?: (parentId?: string | null) => void;
+  onCollapse?: () => void;
   onMoveNode?: (nodeId: string, parentId: string | null, position: number) => void;
   onReorderNodes?: (changes: WorkspaceNodePositionChange[]) => void;
   onRenameNode?: (nodeId: string, title: string) => void;
@@ -127,6 +128,7 @@ export function WorkspaceTree({
   nodes = placeholderNodes,
   onCreateChapter,
   onCreateFolder,
+  onCollapse,
   onMoveNode,
   onReorderNodes,
   onExportNode,
@@ -137,6 +139,7 @@ export function WorkspaceTree({
 }: WorkspaceTreeProps) {
   const [renamingNode, setRenamingNode] = useState<WorkspaceNode | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
+  const [recycleBinExpanded, setRecycleBinExpanded] = useState(true);
   const renamingNodeLabel = renamingNode?.node_type === "folder" ? "文件夹" : "章节";
   const activeNodes = useMemo(() => nodes.filter((node) => node.status !== "trashed"), [nodes]);
   const trashedNodes = useMemo(() => nodes.filter((node) => node.status === "trashed"), [nodes]);
@@ -257,18 +260,26 @@ export function WorkspaceTree({
           border: "1px solid rgba(15,23,42,0.06)",
           borderRadius: 18,
           boxShadow: "0 18px 50px rgba(15,23,42,0.06)",
+          display: "flex",
+          flexDirection: "column",
           height: "100%",
           minWidth: 0,
-          overflow: "auto",
+          overflow: "hidden",
           padding: 14,
         }}
       >
-        <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-          <div>
-            <Typography.Title level={2} style={{ marginBottom: 0 }}>
-              章节
-            </Typography.Title>
-            <Typography.Text type="secondary">章节、草稿和笔记</Typography.Text>
+        <div style={{ flex: "1 1 auto", minHeight: 0, overflow: "auto" }}>
+          <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
+          <div style={{ alignItems: "flex-start", display: "flex", justifyContent: "space-between", gap: 8 }}>
+            <div>
+              <Typography.Title level={2} style={{ marginBottom: 0 }}>
+                章节
+              </Typography.Title>
+              <Typography.Text type="secondary">章节、草稿和笔记</Typography.Text>
+            </div>
+            {onCollapse ? (
+              <Button aria-label="收起章节" icon={<LeftOutlined />} onClick={onCollapse} size="small" type="text" />
+            ) : null}
           </div>
           <Dropdown menu={createContextMenu(null)} trigger={["click"]}>
             <Button icon={<PlusOutlined />} size="small" type="primary">
@@ -309,33 +320,65 @@ export function WorkspaceTree({
               }
             }}
           />
+          </Space>
+        </div>
           {trashedNodes.length > 0 ? (
             <div
               aria-label="回收站"
               style={{
                 borderTop: "1px solid rgba(15,23,42,0.08)",
+                flex: "0 1 auto",
                 marginTop: 8,
+                maxHeight: "40%",
+                overflow: "auto",
                 paddingTop: 10,
               }}
             >
-              <Typography.Text strong>回收站</Typography.Text>
-              <Space direction="vertical" size={4} style={{ marginTop: 8, width: "100%" }}>
-                {trashedNodes.map((node) => (
-                  <Button
-                    aria-label={`恢复 ${node.title}`}
-                    icon={<UndoOutlined />}
-                    key={node.id}
-                    onClick={() => onRestoreNode?.(node.id)}
-                    size="small"
-                    type="text"
-                  >
-                    {node.title}
-                  </Button>
-                ))}
-              </Space>
+              <button
+                aria-expanded={recycleBinExpanded}
+                aria-label={recycleBinExpanded ? "收起回收站" : "展开回收站"}
+                onClick={() => setRecycleBinExpanded((current) => !current)}
+                style={{
+                  alignItems: "center",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  display: "flex",
+                  gap: 6,
+                  padding: 0,
+                  width: "100%",
+                }}
+                type="button"
+              >
+                <CaretRightOutlined
+                  style={{
+                    color: "#64748b",
+                    fontSize: 12,
+                    transform: recycleBinExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                    transition: "transform 0.2s ease",
+                  }}
+                />
+                <Typography.Text strong>回收站</Typography.Text>
+                <Typography.Text type="secondary">({trashedNodes.length})</Typography.Text>
+              </button>
+              {recycleBinExpanded ? (
+                <Space direction="vertical" size={4} style={{ marginTop: 8, width: "100%" }}>
+                  {trashedNodes.map((node) => (
+                    <Button
+                      aria-label={`恢复 ${node.title}`}
+                      icon={<UndoOutlined />}
+                      key={node.id}
+                      onClick={() => onRestoreNode?.(node.id)}
+                      size="small"
+                      type="text"
+                    >
+                      {node.title}
+                    </Button>
+                  ))}
+                </Space>
+              ) : null}
             </div>
           ) : null}
-        </Space>
       </section>
       </Dropdown>
       <Modal

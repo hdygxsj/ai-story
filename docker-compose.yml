@@ -46,6 +46,7 @@ services:
       context: ./backend
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://ai_story:ai_story@postgres:5432/ai_story}
+      AGENT_CHECKPOINT_BACKEND: ${AGENT_CHECKPOINT_BACKEND:-postgres}
       JWT_SECRET: ${JWT_SECRET:-local-development-secret}
       MILVUS_URI: ${MILVUS_URI:-http://milvus:19530}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
@@ -62,6 +63,8 @@ services:
       context: ./frontend
       args:
         VITE_API_BASE: ${VITE_API_BASE:-http://localhost:8000}
+        VITE_OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+        VITE_OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
     ports:
       - "${WEB_PORT:-5173}:80"
     depends_on:

@@ -36,6 +36,7 @@ def build_context_pack(
     structured_memories: list[str],
     neighboring_chapters: list[str],
     rag_results: list[str],
+    conversation_histories: list[str] | None = None,
     budget: ContextBudget,
 ) -> ContextPack:
     candidates: list[ContextItem] = [
@@ -62,6 +63,11 @@ def build_context_pack(
         for text in neighboring_chapters
     )
     candidates.extend(ContextItem("rag_result", text, 500, estimate_tokens(text)) for text in rag_results)
+    if conversation_histories:
+        joined = "\n".join(conversation_histories)
+        candidates.append(
+            ContextItem("conversation_history", joined, 450, estimate_tokens(joined)),
+        )
 
     available_tokens = max(0, budget.max_tokens - budget.response_tokens)
     selected: list[ContextItem] = []
@@ -72,11 +78,11 @@ def build_context_pack(
             used_tokens += item.estimated_tokens
 
     usage_ratio = used_tokens / budget.max_tokens if budget.max_tokens else 1
-    status_messages = [f"Context usage is about {round(usage_ratio * 100)}%."]
+    status_messages = [f"上下文占用约 {round(usage_ratio * 100)}%。"]
     if any(item.source == "neighboring_chapter" for item in selected):
-        status_messages.append("Included neighboring chapter context.")
+        status_messages.append("已包含相邻章节上下文。")
     if usage_ratio >= 0.7:
-        status_messages.append("Context compression may happen soon.")
+        status_messages.append("上下文接近上限，可能即将压缩。")
 
     return ContextPack(
         items=selected,
