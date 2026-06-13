@@ -7,9 +7,14 @@ import { AgentPanel } from "../agent/AgentPanel";
 import { DocumentEditor } from "../editor/DocumentEditor";
 import { MaterialsPanel } from "./MaterialsPanel";
 import { WorkspaceTree } from "./WorkspaceTree";
+import { ApiError } from "../../api/http";
 import type { WorkspaceDiff } from "../../api/agent";
 import type { Confirmation } from "../../api/confirmations";
 import { approveConfirmation, listConfirmations, rejectConfirmation } from "../../api/confirmations";
+import { ConfirmationActionCard } from "../confirmations/ConfirmationActionCard";
+import {
+  pendingConfirmations as filterPendingConfirmations,
+} from "../confirmations/confirmationPresentation";
 import type { DocumentBody, DocumentRecord, DocumentVersion } from "../../api/documents";
 import { getDocument, listDocumentVersions, updateDocument } from "../../api/documents";
 import type { MemoryItem } from "../../api/memory";
@@ -528,10 +533,17 @@ export function WorkspacePage({
 
   async function resolveConfirmation(confirmationId: string, action: "approve" | "reject") {
     let resolved: Confirmation | null = null;
-    if (action === "approve") {
-      resolved = await approveConfirmation(token, confirmationId);
-    } else {
-      resolved = await rejectConfirmation(token, confirmationId);
+    try {
+      if (action === "approve") {
+        resolved = await approveConfirmation(token, confirmationId);
+      } else {
+        resolved = await rejectConfirmation(token, confirmationId);
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        await refreshReviewQueues();
+      }
+      throw error;
     }
     await refreshReviewQueues();
     const changedDocumentId = resolved.document_id ?? documentId;
@@ -944,7 +956,37 @@ export function WorkspacePage({
         boxShadow: "0 12px 34px rgba(255,122,24,0.08)",
       }}
     >
-      <div style={{ alignItems: "center", display: "grid", gap: 10, gridTemplateColumns: "1.2fr repeat(4, minmax(72px, 1fr))" }}>
+      <div
+        style={{
+          alignItems: "center",
+          display: "grid",
+          gap: 10,
+          gridTemplateColumns: treePanelCollapsed
+            ? "auto 1.2fr repeat(4, minmax(72px, 1fr))"
+            : "1.2fr repeat(4, minmax(72px, 1fr))",
+        }}
+      >
+        {treePanelCollapsed ? (
+          <Button
+            aria-label="展开章节"
+            icon={<RightOutlined style={{ fontSize: 10 }} />}
+            onClick={() => setTreeCollapsed(false)}
+            size="small"
+            type="text"
+            style={{
+              background: "rgba(255,255,255,0.92)",
+              border: "1px solid rgba(255,122,24,0.16)",
+              borderRadius: 7,
+              boxShadow: "0 2px 6px rgba(255,122,24,0.08)",
+              color: "#ea580c",
+              flexShrink: 0,
+              height: 22,
+              minWidth: 22,
+              padding: 0,
+              width: 22,
+            }}
+          />
+        ) : null}
         <div>
           <Typography.Text strong>作品概览</Typography.Text>
           <Typography.Text style={{ color: "#f97316", display: "block", fontSize: 12 }}>今日也要稳定更新</Typography.Text>
@@ -1076,15 +1118,6 @@ export function WorkspacePage({
               position: "relative",
             }}
           >
-            {treePanelCollapsed ? (
-              <Button
-                aria-label="展开章节"
-                icon={<RightOutlined />}
-                onClick={() => setTreeCollapsed(false)}
-                size="small"
-                style={{ left: 8, position: "absolute", top: 8, zIndex: 3 }}
-              />
-            ) : null}
             {workspaceStats}
             <div style={{ minHeight: 0, minWidth: 0 }}>{centerContent}</div>
           </div>
@@ -1410,6 +1443,8 @@ export function WorkspacePage({
     </Card>
   );
 
+  const pendingReviewConfirmations = filterPendingConfirmations(confirmations);
+
   const confirmationsContent = (
     <Card style={{ border: "none", boxShadow: "0 18px 45px rgba(15,23,42,0.08)" }}>
       <Typography.Title level={3}>确认</Typography.Title>
@@ -1418,28 +1453,28 @@ export function WorkspacePage({
         <Tag color="gold">{confirmationCount} 条待确认</Tag>
         <Tag>{versions.length} 个已保存版本</Tag>
       </Space>
-      <List
-        dataSource={confirmations}
-        locale={{ emptyText: "没有待确认操作" }}
-        renderItem={(confirmation) => (
-          <List.Item
-            actions={[
-              <Button size="small" onClick={() => void resolveConfirmation(confirmation.id, "approve")}>
-                通过
-              </Button>,
-              <Button danger size="small" onClick={() => void resolveConfirmation(confirmation.id, "reject")}>
-                拒绝
-              </Button>,
-            ]}
-          >
-            <List.Item.Meta
-              description={String(confirmation.payload.replacement_text ?? confirmation.payload.content ?? "")}
-              title={confirmation.action_type}
+      {pendingReviewConfirmations.length === 0 ? (
+        <Empty description="没有待确认操作" style={{ marginTop: 16 }} />
+      ) : (
+        <Space direction="vertical" size={12} style={{ marginTop: 16, width: "100%" }}>
+          {pendingReviewConfirmations.map((confirmation) => (
+            <ConfirmationActionCard
+              key={confirmation.id}
+              confirmation={confirmation}
+              onApprove={(confirmationId) =>
+                void resolveConfirmation(confirmationId, "approve").catch((error: Error) =>
+                  message.error(error.message),
+                )
+              }
+              onReject={(confirmationId) =>
+                void resolveConfirmation(confirmationId, "reject").catch((error: Error) =>
+                  message.error(error.message),
+                )
+              }
             />
-          </List.Item>
-        )}
-        style={{ marginTop: 16 }}
-      />
+          ))}
+        </Space>
+      )}
     </Card>
   );
 

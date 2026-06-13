@@ -7,9 +7,12 @@ from sqlalchemy import select
 from app.models import Document, DocumentVersion, Novel, User, WorkspaceNode
 from app.services.document_actions import (
     approve_document_confirmation,
+    build_confirmation_responses,
+    confirmation_diff_texts,
     create_document_update_proposal,
     create_selection_replace_proposal,
     create_version_restore_proposal,
+    expire_stale_pending_confirmations,
     list_owned_document_versions,
 )
 from app.services.rag import extract_text_from_prosemirror
@@ -111,6 +114,47 @@ async def test_stale_document_confirmation_is_rejected(session) -> None:
         await approve_document_confirmation(session, owner_id=user.id, confirmation=confirmation)
 
     assert caught.value.status_code == 409
+    await session.refresh(confirmation)
+    assert confirmation.status == "rejected"
+    await session.refresh(confirmation)
+    assert confirmation.status == "rejected"
+
+
+async def test_confirmation_diff_texts_for_selection_replace(session) -> None:
+    user, novel, document = await create_owned_document(session, text="甲在屋里。乙在门外。")
+    confirmation = await create_selection_replace_proposal(
+        session,
+        owner_id=user.id,
+        novel_id=novel.id,
+        document_id=document.id,
+        selected_text="乙在门外。",
+        replacement_text="乙在门外等候。",
+    )
+
+    before_text, after_text = confirmation_diff_texts(confirmation, {document.id: document}, {})
+
+    assert before_text == "甲在屋里。乙在门外。"
+    assert after_text == "甲在屋里。乙在门外等候。"
+
+
+async def test_expire_stale_pending_confirmations_marks_them_rejected(session) -> None:
+    user, novel, document = await create_owned_document(session)
+    confirmation = await create_document_update_proposal(
+        session,
+        owner_id=user.id,
+        novel_id=novel.id,
+        document_id=document.id,
+        content="Agent 正文",
+    )
+    document.content = document_body("用户刚刚修改的正文")
+    from datetime import UTC, datetime, timedelta
+
+    document.updated_at = datetime.now(UTC) + timedelta(seconds=1)
+    await session.commit()
+
+    await expire_stale_pending_confirmations(session, [confirmation])
+
+    assert confirmation.status == "rejected"
 
 
 async def test_version_restore_proposal_requires_owned_document(session, monkeypatch) -> None:

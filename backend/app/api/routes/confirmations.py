@@ -10,7 +10,7 @@ from app.db.session import get_session
 from app.models import Document, DocumentVersion, PendingConfirmation, User
 from app.schemas.confirmation import ConfirmationResponse
 from app.services.novels import get_owned_novel
-from app.services.document_actions import approve_document_confirmation
+from app.services.document_actions import approve_document_confirmation, build_confirmation_responses, expire_stale_pending_confirmations
 from app.services.rag import extract_text_from_prosemirror, index_text
 
 router = APIRouter(tags=["confirmations"])
@@ -21,14 +21,21 @@ async def list_confirmations(
     novel_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> list[PendingConfirmation]:
+) -> list[ConfirmationResponse]:
     await get_owned_novel(session, current_user, novel_id)
-    confirmations = await session.scalars(
+    confirmations = list(
+        await session.scalars(
         select(PendingConfirmation)
-        .where(PendingConfirmation.novel_id == novel_id)
+        .where(
+            PendingConfirmation.novel_id == novel_id,
+            PendingConfirmation.status == "pending",
+        )
         .order_by(PendingConfirmation.created_at, PendingConfirmation.id)
+        )
     )
-    return list(confirmations)
+    await expire_stale_pending_confirmations(session, confirmations)
+    active_confirmations = [confirmation for confirmation in confirmations if confirmation.status == "pending"]
+    return await build_confirmation_responses(session, active_confirmations)
 
 
 @router.post("/confirmations/{confirmation_id}/approve", response_model=ConfirmationResponse)
@@ -88,13 +95,10 @@ async def approve_confirmation(
         confirmation.status = "approved"
         await session.commit()
         await session.refresh(confirmation)
-    return {
-        "id": confirmation.id,
-        "action_type": confirmation.action_type,
-        "status": confirmation.status,
-        "payload": confirmation.payload,
-        "document_id": document_id,
-    }
+    responses = await build_confirmation_responses(session, [confirmation])
+    response = responses[0]
+    response["document_id"] = document_id
+    return response
 
 
 @router.post("/confirmations/{confirmation_id}/reject", response_model=ConfirmationResponse)
@@ -102,7 +106,7 @@ async def reject_confirmation(
     confirmation_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> PendingConfirmation:
+) -> ConfirmationResponse:
     confirmation = await session.scalar(
         select(PendingConfirmation).where(PendingConfirmation.id == confirmation_id)
     )
@@ -115,4 +119,5 @@ async def reject_confirmation(
     confirmation.status = "rejected"
     await session.commit()
     await session.refresh(confirmation)
-    return confirmation
+    responses = await build_confirmation_responses(session, [confirmation])
+    return responses[0]

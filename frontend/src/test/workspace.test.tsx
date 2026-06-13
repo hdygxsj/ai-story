@@ -409,7 +409,7 @@ describe("WorkspacePage", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorkspacePage activeSection="confirmations" token="test-token" novelId="novel-1" />);
-    await user.click((await screen.findByText("通 过")).closest("button") as HTMLButtonElement);
+    await user.click(await screen.findByRole("button", { name: "写入正文" }));
 
     await waitFor(() => expect(versionCalls).toBeGreaterThan(1));
     expect(await screen.findByText("2 个已保存版本")).toBeInTheDocument();
@@ -1088,6 +1088,8 @@ describe("WorkspacePage", () => {
       status: "pending",
       payload: { content: "Agent 已写入正文" },
       document_id: "doc-1",
+      before_text: "旧正文",
+      after_text: "Agent 已写入正文",
     };
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -1161,6 +1163,8 @@ describe("WorkspacePage", () => {
     );
 
     expect(await screen.findByTestId("agent-write-confirmation")).toBeInTheDocument();
+    expect(await screen.findByTestId("confirmation-diff-view")).toBeInTheDocument();
+    expect(screen.getByTestId("confirmation-diff-modify")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "写入正文" }));
     expect(await screen.findByText("Agent 已写入正文")).toBeInTheDocument();
   });
@@ -1202,6 +1206,8 @@ describe("WorkspacePage", () => {
               status: "pending",
               payload: { content: "等待确认的新正文" },
               document_id: "doc-1",
+              before_text: "旧正文",
+              after_text: "等待确认的新正文",
             },
           ]),
         );
@@ -1215,6 +1221,47 @@ describe("WorkspacePage", () => {
     expect(await screen.findByTestId("agent-write-confirmation")).toBeInTheDocument();
     expect(screen.getByText("等待确认的新正文")).toBeInTheDocument();
     expect(screen.getByText("等待写入确认")).toBeInTheDocument();
+  });
+
+  it("does not show stale confirmations after the API auto-expires them", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      const conversationResponse = conversationMockResponse(url);
+      if (conversationResponse) {
+        return Promise.resolve(conversationResponse);
+      }
+      if (url.endsWith("/novels/novel-1/nodes")) {
+        return Promise.resolve(
+          jsonResponse([
+            { id: "node-1", title: "第一章", node_type: "chapter", parent_id: null, document_id: "doc-1", position: 0 },
+          ]),
+        );
+      }
+      if (url.endsWith("/documents/doc-1/versions")) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith("/documents/doc-1")) {
+        return Promise.resolve(
+          jsonResponse({
+            id: "doc-1",
+            content: {
+              type: "doc",
+              content: [{ type: "paragraph", content: [{ type: "text", text: "旧正文" }] }],
+            },
+          }),
+        );
+      }
+      if (url.endsWith("/novels/novel-1/confirmations")) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
+
+    await screen.findByText("旧正文");
+    expect(screen.queryByTestId("agent-write-confirmation")).not.toBeInTheDocument();
   });
 
   it("shows tool call records in the Agent dialog", async () => {

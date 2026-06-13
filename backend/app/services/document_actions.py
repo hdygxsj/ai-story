@@ -47,6 +47,195 @@ def _proposal_payload(document: Document, **values: Any) -> dict[str, Any]:
     }
 
 
+def extract_document_plain_text(content: dict[str, Any]) -> str:
+    paragraphs: list[str] = []
+
+    def collect_text(node: Any) -> str:
+        if isinstance(node, dict):
+            text = node.get("text")
+            parts = [text] if isinstance(text, str) else []
+            for child in node.get("content", []):
+                parts.append(collect_text(child))
+            return "".join(parts)
+        if isinstance(node, list):
+            return "".join(collect_text(child) for child in node)
+        return ""
+
+    for block in content.get("content", []):
+        paragraph = collect_text(block).strip()
+        if paragraph:
+            paragraphs.append(paragraph)
+    if paragraphs:
+        return "\n\n".join(paragraphs)
+    return extract_text_from_prosemirror(content)
+
+
+def confirmation_diff_texts(
+    confirmation: PendingConfirmation,
+    documents_by_id: dict[UUID, Document],
+    versions_by_id: dict[UUID, DocumentVersion],
+) -> tuple[str | None, str | None]:
+    payload = confirmation.payload
+    document_id_raw = payload.get("document_id")
+    document = documents_by_id.get(UUID(str(document_id_raw))) if document_id_raw else None
+
+    if confirmation.action_type == "document_update":
+        before_text = extract_document_plain_text(document.content) if document else None
+        content = payload.get("content")
+        after_text = str(content) if isinstance(content, str) else None
+        return before_text, after_text
+
+    if confirmation.action_type in {"selection_replace", "rewrite_selection"}:
+        selected_text = payload.get("selected_text")
+        replacement_text = payload.get("replacement_text")
+        if not isinstance(selected_text, str) or not isinstance(replacement_text, str):
+            return None, None
+        if document is None:
+            return selected_text, replacement_text
+        before_text = extract_document_plain_text(document.content)
+        if selected_text not in before_text:
+            return selected_text, replacement_text
+        after_text = before_text.replace(selected_text, replacement_text, 1)
+        return before_text, after_text
+
+    if confirmation.action_type == "version_restore":
+        version_id_raw = payload.get("version_id")
+        if document is None or not version_id_raw:
+            return None, None
+        version = versions_by_id.get(UUID(str(version_id_raw)))
+        if version is None:
+            return extract_document_plain_text(document.content), None
+        before_text = extract_document_plain_text(document.content)
+        after_text = extract_document_plain_text(version.content)
+        return before_text, after_text
+
+    return None, None
+
+
+def confirmation_is_stale(
+    confirmation: PendingConfirmation,
+    documents_by_id: dict[UUID, Document],
+) -> bool:
+    if confirmation.status != "pending":
+        return False
+    expected = confirmation.payload.get("expected_updated_at")
+    document_id_raw = confirmation.payload.get("document_id")
+    if not expected or not document_id_raw:
+        return False
+    document = documents_by_id.get(UUID(str(document_id_raw)))
+    if document is None:
+        return True
+    return _timestamp_token(document.updated_at) != expected
+
+
+def reject_pending_confirmations_for_document(
+    confirmations: list[PendingConfirmation],
+    *,
+    document_id: UUID,
+    exclude_confirmation_id: UUID | None = None,
+) -> bool:
+    document_id_str = str(document_id)
+    changed = False
+    for confirmation in confirmations:
+        if confirmation.status != "pending":
+            continue
+        if exclude_confirmation_id is not None and confirmation.id == exclude_confirmation_id:
+            continue
+        if str(confirmation.payload.get("document_id", "")) != document_id_str:
+            continue
+        if not confirmation.payload.get("expected_updated_at"):
+            continue
+        confirmation.status = "rejected"
+        changed = True
+    return changed
+
+
+async def expire_stale_pending_confirmations(
+    session: AsyncSession,
+    confirmations: list[PendingConfirmation],
+) -> None:
+    document_ids = {
+        UUID(str(confirmation.payload["document_id"]))
+        for confirmation in confirmations
+        if confirmation.status == "pending"
+        and confirmation.payload.get("document_id")
+        and confirmation.payload.get("expected_updated_at")
+    }
+    documents_by_id: dict[UUID, Document] = {}
+    if document_ids:
+        documents = await session.scalars(select(Document).where(Document.id.in_(document_ids)))
+        documents_by_id = {document.id: document for document in documents}
+
+    changed = False
+    for confirmation in confirmations:
+        if confirmation.status == "pending" and confirmation_is_stale(confirmation, documents_by_id):
+            confirmation.status = "rejected"
+            changed = True
+    if changed:
+        await session.commit()
+
+
+async def expire_pending_confirmations_for_document(
+    session: AsyncSession,
+    *,
+    novel_id: UUID,
+    document_id: UUID,
+) -> None:
+    confirmations = list(
+        await session.scalars(
+            select(PendingConfirmation).where(
+                PendingConfirmation.novel_id == novel_id,
+                PendingConfirmation.status == "pending",
+            )
+        )
+    )
+    if reject_pending_confirmations_for_document(confirmations, document_id=document_id):
+        await session.commit()
+
+
+async def build_confirmation_responses(
+    session: AsyncSession,
+    confirmations: list[PendingConfirmation],
+) -> list[dict[str, Any]]:
+    document_ids = {
+        UUID(str(confirmation.payload["document_id"]))
+        for confirmation in confirmations
+        if confirmation.payload.get("document_id")
+    }
+    documents_by_id: dict[UUID, Document] = {}
+    if document_ids:
+        documents = await session.scalars(select(Document).where(Document.id.in_(document_ids)))
+        documents_by_id = {document.id: document for document in documents}
+
+    version_ids = {
+        UUID(str(confirmation.payload["version_id"]))
+        for confirmation in confirmations
+        if confirmation.action_type == "version_restore" and confirmation.payload.get("version_id")
+    }
+    versions_by_id: dict[UUID, DocumentVersion] = {}
+    if version_ids:
+        versions = await session.scalars(select(DocumentVersion).where(DocumentVersion.id.in_(version_ids)))
+        versions_by_id = {version.id: version for version in versions}
+
+    responses: list[dict[str, Any]] = []
+    for confirmation in confirmations:
+        document_id = confirmation.payload.get("document_id")
+        before_text, after_text = confirmation_diff_texts(confirmation, documents_by_id, versions_by_id)
+        responses.append(
+            {
+                "id": confirmation.id,
+                "action_type": confirmation.action_type,
+                "status": confirmation.status,
+                "payload": confirmation.payload,
+                "document_id": UUID(str(document_id)) if document_id else None,
+                "is_stale": False,
+                "before_text": before_text,
+                "after_text": after_text,
+            }
+        )
+    return responses
+
+
 async def _create_proposal(
     session: AsyncSession,
     *,
@@ -211,6 +400,8 @@ async def approve_document_confirmation(
         document_id=UUID(confirmation.payload["document_id"]),
     )
     if _timestamp_token(document.updated_at) != confirmation.payload.get("expected_updated_at"):
+        confirmation.status = "rejected"
+        await session.commit()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Document changed after this proposal was created",
@@ -245,5 +436,18 @@ async def approve_document_confirmation(
         text=extract_text_from_prosemirror(document.content),
     )
     confirmation.status = "approved"
+    pending = list(
+        await session.scalars(
+            select(PendingConfirmation).where(
+                PendingConfirmation.novel_id == confirmation.novel_id,
+                PendingConfirmation.status == "pending",
+            )
+        )
+    )
+    reject_pending_confirmations_for_document(
+        pending,
+        document_id=document.id,
+        exclude_confirmation_id=confirmation.id,
+    )
     await session.commit()
     return {"document_id": str(document.id), "confirmation_id": str(confirmation.id)}

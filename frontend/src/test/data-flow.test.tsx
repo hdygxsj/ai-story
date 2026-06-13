@@ -178,6 +178,8 @@ describe("frontend data flow", () => {
                 action_type: "rewrite_selection",
                 status: "pending",
                 payload: { replacement_text: "A sharper rewrite." },
+                before_text: "A calm rewrite.",
+                after_text: "A sharper rewrite.",
               },
             ]),
           );
@@ -256,7 +258,7 @@ describe("frontend data flow", () => {
     expect(screen.getByRole("heading", { name: "章节" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "共创 Agent" })).toBeInTheDocument();
     rerender(<WorkspacePage activeSection="confirmations" token="token" novelId="novel-1" />);
-    expect(await screen.findByText("rewrite_selection")).toBeInTheDocument();
+    expect(await screen.findByText("段落改写")).toBeInTheDocument();
     rerender(<WorkspacePage activeSection="materials" token="token" novelId="novel-1" />);
     expect(await screen.findByRole("heading", { name: "素材" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /创作资产/ })).toBeInTheDocument();

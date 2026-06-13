@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db.session import get_session
-from app.models import Document, DocumentVersion, ModelProfile, Novel, User, WorkspaceNode
+from app.models import Document, DocumentVersion, ModelProfile, Novel, PendingConfirmation, User, WorkspaceNode
 from app.schemas.document import DocumentResponse, DocumentUpdate, DocumentVersionResponse
 from app.schemas.novel import NovelCreate, NovelImport, NovelResponse, NovelUpdate
 from app.schemas.workspace import (
@@ -20,6 +20,7 @@ from app.schemas.workspace import (
     WorkspaceNodeUpdate,
 )
 from app.services.novels import get_owned_novel
+from app.services.document_actions import reject_pending_confirmations_for_document
 from app.services.rag import extract_text_from_prosemirror, get_embedding_model_profile, index_text
 
 router = APIRouter(tags=["novels"])
@@ -535,6 +536,15 @@ async def update_document(
     version = DocumentVersion(document_id=document.id, source="user", content=document.content)
     session.add(version)
     document.content = payload.content
+    pending = list(
+        await session.scalars(
+            select(PendingConfirmation).where(
+                PendingConfirmation.novel_id == novel.id,
+                PendingConfirmation.status == "pending",
+            )
+        )
+    )
+    reject_pending_confirmations_for_document(pending, document_id=document.id)
     await index_text(
         session,
         novel_id=document.novel_id,

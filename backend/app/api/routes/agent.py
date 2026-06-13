@@ -21,6 +21,7 @@ from app.schemas.confirmation import ConfirmationResponse
 from app.schemas.workspace import WorkspaceNodeResponse
 from app.services.context_assembly import assemble_context
 from app.services.conversations import append_message, resolve_conversation_for_message
+from app.services.document_actions import build_confirmation_responses
 from app.services.memory import create_memory_item
 from app.services.novels import get_owned_novel
 from app.services.workspace_actions import cleanup_workspace_folders, load_workspace_nodes, organize_workspace_tree
@@ -294,9 +295,8 @@ async def stream_agent_message(
                     session.add(confirmation)
                     await session.commit()
                     await session.refresh(confirmation)
-                    event_payload["confirmation"] = ConfirmationResponse.model_validate(confirmation).model_dump(
-                        mode="json"
-                    )
+                    built = await build_confirmation_responses(session, [confirmation])
+                    event_payload["confirmation"] = built[0]
                     event_payload.pop("proposed_payload", None)
                 elif event_payload.get("confirmation_id"):
                     confirmation = await session.scalar(
@@ -306,9 +306,8 @@ async def stream_agent_message(
                         )
                     )
                     if confirmation is not None:
-                        event_payload["confirmation"] = ConfirmationResponse.model_validate(
-                            confirmation
-                        ).model_dump(mode="json")
+                        built = await build_confirmation_responses(session, [confirmation])
+                        event_payload["confirmation"] = built[0]
                     event_payload.pop("confirmation_id", None)
                 yield _sse(event_payload)
                 continue

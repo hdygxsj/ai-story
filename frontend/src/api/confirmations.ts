@@ -6,6 +6,9 @@ export type Confirmation = {
   status: string;
   payload: Record<string, unknown>;
   document_id?: string | null;
+  is_stale?: boolean;
+  before_text?: string | null;
+  after_text?: string | null;
 };
 
 export function listConfirmations(token: string, novelId: string) {

@@ -19,6 +19,8 @@ import type { Novel } from "../../api/novels";
 import type { WorkspaceNode } from "../../api/workspace";
 import { AgentToolTrace } from "./AgentToolTrace";
 import { AgentMarkdown } from "./AgentMarkdown";
+import { ConfirmationActionCard } from "../confirmations/ConfirmationActionCard";
+import { pendingConfirmations as filterPendingConfirmations } from "../confirmations/confirmationPresentation";
 import { ContextSettingsDrawer } from "./ContextSettingsDrawer";
 import { ContextStatusBar } from "./ContextStatusBar";
 import { ConversationSidebar } from "./ConversationSidebar";
@@ -59,16 +61,6 @@ function createMessageId(role: ChatMessage["role"]) {
 
 function welcomeMessages(): ChatMessage[] {
   return [{ id: createMessageId("assistant"), role: "assistant", content: WELCOME_MESSAGE }];
-}
-
-function confirmationPreview(payload: Record<string, unknown>): string {
-  if (typeof payload.content === "string") {
-    return payload.content;
-  }
-  if (typeof payload.replacement_text === "string") {
-    return payload.replacement_text;
-  }
-  return "";
 }
 
 export function AgentPanel({
@@ -333,6 +325,8 @@ export function AgentPanel({
     void sendMessage("请改写我刚刚选中的这段文字，保持上下文风格并提升表达质量。", rewriteRequest.text);
   }, [rewriteRequest?.id]);
 
+  const activePendingConfirmations = filterPendingConfirmations(pendingConfirmations);
+
   return (
     <Card
       className="agent-panel-card"
@@ -344,7 +338,7 @@ export function AgentPanel({
       extra={
         streaming ? (
           <Tag color="processing">生成中</Tag>
-        ) : pendingConfirmations.length > 0 ? (
+        ) : activePendingConfirmations.length > 0 ? (
           <Tag color="gold">等待写入确认</Tag>
         ) : (
           <Tag color="green">就绪</Tag>
@@ -428,57 +422,22 @@ export function AgentPanel({
           />
         </div>
         {error ? <Alert message={error} showIcon style={{ flexShrink: 0 }} type="error" /> : null}
-        {pendingConfirmations.map((confirmation) => (
-          <div
+        {activePendingConfirmations.map((confirmation) => (
+          <ConfirmationActionCard
             key={confirmation.id}
-            aria-label="Agent 正文写入确认"
-            data-testid="agent-write-confirmation"
-            style={{
-              background: "#f0fdf4",
-              border: "1px solid rgba(34,197,94,0.28)",
-              borderRadius: 16,
-              flexShrink: 0,
-              padding: 12,
-            }}
-          >
-            <Flex align="center" justify="space-between" gap={8} wrap="wrap">
-              <Space direction="vertical" size={4} style={{ flex: 1, minWidth: 0 }}>
-                <Typography.Text strong>正文写入待确认</Typography.Text>
-                <Typography.Text type="secondary">{confirmation.action_type}</Typography.Text>
-                <Typography.Paragraph
-                  ellipsis={{ rows: 4, expandable: true, symbol: "展开" }}
-                  style={{ marginBottom: 0, whiteSpace: "pre-wrap" }}
-                >
-                  {confirmationPreview(confirmation.payload)}
-                </Typography.Paragraph>
-              </Space>
-              <Space wrap>
-                <Button
-                  disabled={streaming || !onResolveConfirmation}
-                  size="small"
-                  type="primary"
-                  onClick={() =>
-                    void onResolveConfirmation?.(confirmation.id, "approve").catch((caught: Error) =>
-                      setError(caught.message),
-                    )
-                  }
-                >
-                  写入正文
-                </Button>
-                <Button
-                  disabled={streaming || !onResolveConfirmation}
-                  size="small"
-                  onClick={() =>
-                    void onResolveConfirmation?.(confirmation.id, "reject").catch((caught: Error) =>
-                      setError(caught.message),
-                    )
-                  }
-                >
-                  拒绝
-                </Button>
-              </Space>
-            </Flex>
-          </div>
+            confirmation={confirmation}
+            disabled={streaming || !onResolveConfirmation}
+            onApprove={(confirmationId) =>
+              void onResolveConfirmation?.(confirmationId, "approve").catch((caught: Error) =>
+                setError(caught.message),
+              )
+            }
+            onReject={(confirmationId) =>
+              void onResolveConfirmation?.(confirmationId, "reject").catch((caught: Error) =>
+                setError(caught.message),
+              )
+            }
+          />
         ))}
         {workspaceDiff ? (
           <div

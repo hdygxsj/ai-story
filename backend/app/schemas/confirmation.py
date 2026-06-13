@@ -10,5 +10,8 @@ class ConfirmationResponse(BaseModel):
     status: str
     payload: dict[str, Any]
     document_id: UUID | None = None
+    is_stale: bool = False
+    before_text: str | None = None
+    after_text: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
