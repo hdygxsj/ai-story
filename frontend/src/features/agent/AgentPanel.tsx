@@ -401,9 +401,14 @@ export function AgentPanel({
               role: item.role === "assistant" ? "ai" : "user",
               content:
                 item.role === "assistant" ? (
-                  <AgentMarkdown
-                    content={item.content || (streaming && item.id === activeAssistantIdRef.current ? "..." : "")}
-                  />
+                  <>
+                    {item.toolCalls && item.toolCalls.length > 0 ? (
+                      <AgentToolTrace toolCalls={item.toolCalls} />
+                    ) : null}
+                    <AgentMarkdown
+                      content={item.content || (streaming && item.id === activeAssistantIdRef.current ? "..." : "")}
+                    />
+                  </>
                 ) : (
                   item.content
                 ),
