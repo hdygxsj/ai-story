@@ -61,6 +61,26 @@ Release 模式首次运行会将内置 stack 复制到：
 
 用户数据（Postgres / Milvus / Ollama 卷）仍由 Docker 管理，与命令行 `docker compose` 启动时相同。
 
+## 系统托盘与退出行为
+
+- 启动后会在系统托盘显示 **AI Story** 图标
+- 左键点击托盘图标：打开/聚焦主窗口
+- 托盘菜单：**打开**、**停止服务**、**退出时停止容器**（可勾选）、**退出**
+- 关闭主窗口时会缩到托盘，不会退出应用
+- 启动页底部也可勾选「退出应用时停止 Docker 容器」；设置会保存到本地
+
+## CI 构建（Windows 安装包）
+
+GitHub Actions 工作流 [`.github/workflows/desktop-windows.yml`](../.github/workflows/desktop-windows.yml) 会在 `desktop/` 或 stack 相关文件变更时构建 Windows NSIS 安装包。
+
+手动触发：
+
+```bash
+gh workflow run desktop-windows.yml
+```
+
+构建完成后在 Actions Artifacts 中下载 `ai-story-windows-nsis`。
+
 ## 常用命令
 
 ```bash

@@ -11,6 +11,10 @@ interface SetupProgressEvent {
   status: SetupStatus;
 }
 
+interface AppSettings {
+  stopContainersOnExit: boolean;
+}
+
 interface StepItem {
   id: string;
   label: string;
@@ -38,6 +42,18 @@ function App() {
   const [statuses, setStatuses] = useState<Record<string, SetupStatus>>({});
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [stopOnExit, setStopOnExit] = useState(false);
+  const [settingsLoading, setSettingsLoading] = useState(true);
+
+  useEffect(() => {
+    void invoke<AppSettings>("get_app_settings")
+      .then((settings) => {
+        setStopOnExit(settings.stopContainersOnExit);
+      })
+      .finally(() => {
+        setSettingsLoading(false);
+      });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,6 +120,16 @@ function App() {
     }
   }
 
+  async function handleStopOnExitChange(checked: boolean) {
+    setStopOnExit(checked);
+    try {
+      const settings = await invoke<AppSettings>("set_stop_containers_on_exit", { enabled: checked });
+      setStopOnExit(settings.stopContainersOnExit);
+    } catch (settingsError) {
+      setError(String(settingsError));
+    }
+  }
+
   return (
     <main className="setup-shell">
       <header className="setup-header">
@@ -148,7 +174,16 @@ function App() {
       ) : null}
 
       <footer className="setup-footer">
-        <p>需要 Docker。应用会自动检测并尝试安装 Docker Desktop。</p>
+        <label className="setup-option">
+          <input
+            type="checkbox"
+            checked={stopOnExit}
+            disabled={settingsLoading}
+            onChange={(event) => void handleStopOnExitChange(event.target.checked)}
+          />
+          <span>退出应用时停止 Docker 容器</span>
+        </label>
+        <p>关闭窗口后应用会缩到系统托盘。需要 Docker，首次运行会自动检测并尝试安装。</p>
       </footer>
     </main>
   );

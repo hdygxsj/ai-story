@@ -98,7 +98,7 @@ npm run tauri:dev      # 开发
 npm run tauri:build    # 构建安装包
 ```
 
-桌面版仍会启动 Docker Compose 栈；首次运行会自动检测并尝试安装 Docker Desktop。
+桌面版仍会启动 Docker Compose 栈；首次运行会自动检测并尝试安装 Docker Desktop。支持系统托盘、可选退出时停止容器，Windows 安装包由 GitHub Actions 构建。
 
 ## 数据库初始化
 
