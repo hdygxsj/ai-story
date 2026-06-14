@@ -7,7 +7,7 @@ from langchain_core.runnables import RunnableLambda
 from langgraph.graph import END, StateGraph
 
 from app.agent.atomic_ops import ATOMIC_OPS_GUIDANCE
-from app.agent.context import ContextPack
+from app.agent.context import ContextPack, estimate_tokens
 from app.agent.model_runtime import build_chat_model
 from app.agent.state import AgentState
 from app.agent.tools import get_agent_tools
@@ -29,9 +29,14 @@ _CURRENT_REQUEST_GUIDANCE = (
     "根据当前需求自主规划并组合原子工具；不要套用固定业务流程。"
     "涉及外部状态变更时，只有工具成功返回后才能声称已经完成。"
 )
-_MAX_TOOL_ROUNDS = 8
 _REPEATED_TOOL_CALL_RESPONSE = "检测到重复工具调用，已停止继续执行；上一次工具调用结果已保留。"
-_TOOL_ROUND_LIMIT_RESPONSE = "工具调用轮次已达到上限，已停止继续执行；已完成的工具结果已保留。"
+_CONTEXT_COMPRESSION_GUIDANCE = (
+    "本轮工具调用历史因上下文接近上限已自动压缩；"
+    "请把仍需保留的关键事实写入 save_key_memory，然后继续当前任务。"
+)
+_MIN_FULL_TOOL_ROUNDS = 3
+_TOOL_RESULT_TRUNCATE_TOKENS = 120
+_RESPONSE_TOKEN_RESERVE = 4096
 
 
 def _default_system_prompt(state: AgentState) -> str:
@@ -141,8 +146,93 @@ def _last_tool_call_batch(messages: list[Any]) -> list[dict[str, Any]]:
     return []
 
 
-def _completed_tool_rounds(messages: list[Any]) -> int:
-    return sum(1 for message in messages if isinstance(message, AIMessage) and message.tool_calls)
+def _estimate_messages_tokens(messages: list[Any]) -> int:
+    total = 0
+    for message in messages:
+        if isinstance(message, (SystemMessage, HumanMessage, AIMessage)):
+            content = _message_text(message.content)
+            if isinstance(message, AIMessage) and message.tool_calls:
+                content += json.dumps(message.tool_calls, ensure_ascii=False, sort_keys=True, default=str)
+            total += estimate_tokens(content)
+        elif isinstance(message, ToolMessage):
+            total += estimate_tokens(str(message.content))
+    return total
+
+
+def _truncate_tool_content(content: str, max_tokens: int) -> str:
+    max_chars = max(4, max_tokens * 4)
+    if len(content) <= max_chars:
+        return content
+    return content[: max_chars - 1].rstrip() + "…"
+
+
+def _compress_tool_round_history(
+    messages: list[Any],
+    *,
+    max_tokens: int,
+    response_tokens: int = _RESPONSE_TOKEN_RESERVE,
+) -> tuple[list[Any], bool]:
+    available = max(8000, max_tokens - response_tokens)
+    threshold = int(available * 0.85)
+    if _estimate_messages_tokens(messages) <= threshold:
+        return messages, False
+
+    result = list(messages)
+    tool_message_indices = [index for index, message in enumerate(result) if isinstance(message, ToolMessage)]
+    if not tool_message_indices:
+        return messages, False
+
+    protected = set(tool_message_indices[-_MIN_FULL_TOOL_ROUNDS:])
+    compressed = False
+    for index in tool_message_indices:
+        if index in protected:
+            continue
+        message = result[index]
+        original = str(message.content)
+        shortened = _truncate_tool_content(original, _TOOL_RESULT_TRUNCATE_TOKENS)
+        if shortened != original:
+            result[index] = ToolMessage(
+                content=shortened,
+                name=message.name,
+                tool_call_id=message.tool_call_id,
+            )
+            compressed = True
+
+    while _estimate_messages_tokens(result) > threshold:
+        last_protected = max(protected) if protected else -1
+        found = False
+        for index in tool_message_indices:
+            if index >= last_protected:
+                continue
+            message = result[index]
+            content = str(message.content)
+            if len(content) <= 50:
+                continue
+            result[index] = ToolMessage(
+                content=_truncate_tool_content(content, max(30, _TOOL_RESULT_TRUNCATE_TOKENS // 2)),
+                name=message.name,
+                tool_call_id=message.tool_call_id,
+            )
+            compressed = True
+            found = True
+        if not found:
+            break
+
+    return result, compressed
+
+
+def _inject_context_compression_guidance(messages: list[Any]) -> list[Any]:
+    if not messages or not isinstance(messages[0], SystemMessage):
+        return [SystemMessage(content=_CONTEXT_COMPRESSION_GUIDANCE), *messages]
+    system = messages[0]
+    guidance = _CONTEXT_COMPRESSION_GUIDANCE
+    content = _message_text(system.content)
+    if guidance in content:
+        return messages
+    return [
+        SystemMessage(content=f"{content}\n\n{guidance}".strip()),
+        *messages[1:],
+    ]
 
 
 def _remove_incomplete_tool_call_history(messages: list[Any]) -> list[Any]:
@@ -243,9 +333,6 @@ def build_agent_graph(
             )
             return messages, None, "rewrite"
 
-        if _completed_tool_rounds(prior) >= _MAX_TOOL_ROUNDS:
-            return prior, None, "tool_limit"
-
         model_profile = bound_model_profile
         tool_messages = [message for message in prior if isinstance(message, ToolMessage)]
         if model_profile is None:
@@ -257,7 +344,18 @@ def build_agent_graph(
         if _CURRENT_REQUEST_GUIDANCE not in system_prompt:
             system_prompt = f"{system_prompt}\n\n{_CURRENT_REQUEST_GUIDANCE}"
         if not prior:
-            prior = [SystemMessage(content=system_prompt), HumanMessage(content=state["message"])]
+            prior = [
+                SystemMessage(content=system_prompt),
+                *list(state.get("history_messages", [])),
+                HumanMessage(content=state["message"]),
+            ]
+
+        prior, compressed = _compress_tool_round_history(
+            prior,
+            max_tokens=model_profile.context_window or 128000,
+        )
+        if compressed:
+            prior = _inject_context_compression_guidance(prior)
 
         model = build_chat_model(model_profile, purpose="chat").bind_tools(tool_list)
         return prior, model, None
@@ -284,8 +382,6 @@ def build_agent_graph(
             return {"messages": prior}
         if shortcut == "done":
             return {}
-        if shortcut == "tool_limit":
-            return {"response": _TOOL_ROUND_LIMIT_RESPONSE}
         if shortcut == "missing_model":
             return {"messages": prior, "response": "请先在 Agent 配置中为当前小说绑定并保存可用的对话模型。"}
         ai_message = model.invoke(prior)
@@ -297,8 +393,6 @@ def build_agent_graph(
             return {"messages": prior}
         if shortcut == "done":
             return {}
-        if shortcut == "tool_limit":
-            return {"response": _TOOL_ROUND_LIMIT_RESPONSE}
         if shortcut == "missing_model":
             return {"messages": prior, "response": "请先在 Agent 配置中为当前小说绑定并保存可用的对话模型。"}
 

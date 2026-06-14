@@ -28,3 +28,24 @@ export function confirmationActionLabel(actionType: string): string {
 export function pendingConfirmations(items: Confirmation[]): Confirmation[] {
   return items.filter((item) => item.status === "pending");
 }
+
+const DOCUMENT_WRITE_ACTION_TYPES = new Set([
+  "document_update",
+  "selection_replace",
+  "rewrite_selection",
+  "version_restore",
+]);
+
+export function isDocumentWriteConfirmation(confirmation: Confirmation): boolean {
+  return DOCUMENT_WRITE_ACTION_TYPES.has(confirmation.action_type);
+}
+
+export function pendingDocumentWriteConfirmations(items: Confirmation[]): Confirmation[] {
+  return pendingConfirmations(items).filter(isDocumentWriteConfirmation);
+}
+
+export function pendingDocumentWriteConfirmationIds(items: Confirmation[]): string[] {
+  return pendingDocumentWriteConfirmations(items)
+    .map((item) => item.document_id)
+    .filter((documentId): documentId is string => Boolean(documentId));
+}

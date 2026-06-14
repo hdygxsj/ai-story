@@ -1,3 +1,4 @@
+import asyncio
 import math
 import re
 from typing import Any
@@ -10,6 +11,7 @@ from app.agent.model_runtime import embed_with_model_profile
 from app.models import ModelProfile, Novel, RagChunk, WorkspaceNode
 
 EMBEDDING_DIMENSIONS = 64
+EMBEDDING_TIMEOUT_SECONDS = 5
 
 
 def extract_text_from_prosemirror(content: dict[str, Any]) -> str:
@@ -39,9 +41,15 @@ def embed_text_hash(text: str) -> list[float]:
 
 
 async def embed_text(text: str, model_profile: ModelProfile | None = None) -> list[float]:
-    if model_profile is not None:
-        return await embed_with_model_profile(model_profile, text)
-    return embed_text_hash(text)
+    if model_profile is None:
+        return embed_text_hash(text)
+    try:
+        return await asyncio.wait_for(
+            embed_with_model_profile(model_profile, text),
+            timeout=EMBEDDING_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        return embed_text_hash(text)
 
 
 async def get_embedding_model_profile(session: AsyncSession, novel: Novel) -> ModelProfile | None:

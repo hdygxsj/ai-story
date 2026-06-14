@@ -1,17 +1,20 @@
 import Placeholder from "@tiptap/extension-placeholder";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { Button, Card, Input, Space, Typography } from "antd";
+import { Button, Card, Input, Space, Spin, Typography } from "antd";
 import { useEffect, useRef, useState } from "react";
 
 import type { DocumentBody } from "../../api/documents";
 
+const EMPTY_DOCUMENT: DocumentBody = { type: "doc", content: [] };
+
 type DocumentEditorProps = {
   chapterTitle?: string | null;
   content?: DocumentBody | null;
-  initialText?: string;
+  loading?: boolean;
   onChange?: (content: DocumentBody) => void;
   onRenameChapter?: (title: string) => void;
+  onOpenVersionHistory?: () => void;
   onSelectText?: (text: string) => void;
   onSave?: (content: DocumentBody) => void;
   saveStatus?: "dirty" | "saved" | "saving";
@@ -21,9 +24,10 @@ type DocumentEditorProps = {
 export function DocumentEditor({
   chapterTitle,
   content,
-  initialText = "在这里撰写或粘贴章节正文。",
+  loading = false,
   onChange,
   onRenameChapter,
+  onOpenVersionHistory,
   onSelectText,
   onSave,
   saveStatus = "saved",
@@ -41,9 +45,10 @@ export function DocumentEditor({
         placeholder: "开始写这一章...",
       }),
     ],
-    content: content ?? `<p>${initialText}</p>`,
+    content: content ?? EMPTY_DOCUMENT,
+    editable: !loading,
     onUpdate: ({ editor: updatedEditor }) => {
-      if (applyingExternalContent.current) {
+      if (applyingExternalContent.current || loading) {
         return;
       }
       onChange?.(updatedEditor.getJSON() as DocumentBody);
@@ -75,12 +80,24 @@ export function DocumentEditor({
     if (!editor) {
       return;
     }
+    const nextContent = content ?? EMPTY_DOCUMENT;
+    const currentContent = editor.getJSON();
+    if (JSON.stringify(currentContent) === JSON.stringify(nextContent)) {
+      return;
+    }
     applyingExternalContent.current = true;
-    editor.commands.setContent(content ?? `<p>${initialText}</p>`);
+    editor.commands.setContent(nextContent);
     queueMicrotask(() => {
       applyingExternalContent.current = false;
     });
-  }, [content, editor, initialText]);
+  }, [content, editor]);
+
+  useEffect(() => {
+    if (!editor) {
+      return;
+    }
+    editor.setEditable(!loading);
+  }, [editor, loading]);
 
   useEffect(() => {
     document.addEventListener("mouseup", handleUseSelection);
@@ -158,6 +175,7 @@ export function DocumentEditor({
           <div>
             <Input
               aria-label="章节名称"
+              disabled={loading}
               onBlur={commitChapterTitle}
               onChange={(event) => setChapterTitleValue(event.target.value)}
               onPressEnter={(event) => event.currentTarget.blur()}
@@ -179,8 +197,10 @@ export function DocumentEditor({
             <Typography.Text type={saveStatus === "dirty" ? "warning" : "success"}>
               {saveStatus === "dirty" ? "未保存" : saveStatus === "saving" ? "保存中..." : "已保存"}
             </Typography.Text>
-            <Button>版本历史</Button>
-            <Button loading={saving} onClick={handleSave} title="快捷键：Cmd/Ctrl + S" type="primary">
+            <Button disabled={loading} onClick={onOpenVersionHistory}>
+              版本历史
+            </Button>
+            <Button disabled={loading} loading={saving} onClick={handleSave} title="快捷键：Cmd/Ctrl + S" type="primary">
               保存 Cmd/Ctrl+S
             </Button>
           </Space>
@@ -204,7 +224,25 @@ export function DocumentEditor({
           style={{ height: "100%", minHeight: 240, position: "relative" }}
         >
           <EditorContent editor={editor} />
-          {pendingSelection && selectionToolbarPosition ? (
+          {loading ? (
+            <div
+              aria-busy="true"
+              aria-label="正文加载中"
+              data-testid="document-editor-loading"
+              style={{
+                alignItems: "center",
+                background: "rgba(255,255,255,0.72)",
+                display: "flex",
+                inset: 0,
+                justifyContent: "center",
+                position: "absolute",
+                zIndex: 5,
+              }}
+            >
+              <Spin size="large" />
+            </div>
+          ) : null}
+          {!loading && pendingSelection && selectionToolbarPosition ? (
             <Space
               aria-label="选中文本操作"
               size={4}

@@ -12,7 +12,7 @@ from app.models import ModelProfile
 
 
 def graph_invoke_config(conversation_id: UUID | None) -> dict[str, Any]:
-    config: dict[str, Any] = {"recursion_limit": 25}
+    config: dict[str, Any] = {"recursion_limit": 150}
     if conversation_id is not None:
         config["configurable"] = {"thread_id": f"{conversation_id}:{uuid4()}"}
     return config

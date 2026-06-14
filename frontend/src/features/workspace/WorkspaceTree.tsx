@@ -1,5 +1,5 @@
 import { CaretRightOutlined, FileTextOutlined, FolderOutlined, LeftOutlined, PlusOutlined, UndoOutlined } from "@ant-design/icons";
-import { Button, Dropdown, Input, Modal, Space, Tree, Typography } from "antd";
+import { Button, Dropdown, Input, Modal, Space, Tag, Tree, Typography } from "antd";
 import type { MenuProps } from "antd";
 import type { Key } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -17,6 +17,7 @@ type WorkspaceTreeProps = {
   onRestoreNode?: (nodeId: string) => void;
   onSelectDocument?: (documentId: string) => void;
   onTrashNode?: (nodeId: string) => void;
+  pendingWriteDocumentIds?: string[];
   selectedDocumentId?: string | null;
 };
 
@@ -284,6 +285,7 @@ export function WorkspaceTree({
   onRestoreNode,
   onSelectDocument,
   onTrashNode,
+  pendingWriteDocumentIds = [],
   selectedDocumentId = null,
 }: WorkspaceTreeProps) {
   const [renamingNode, setRenamingNode] = useState<WorkspaceNode | null>(null);
@@ -300,6 +302,10 @@ export function WorkspaceTree({
   const lastClickedNodeKeyRef = useRef(lastClickedNodeKey);
   lastClickedNodeKeyRef.current = lastClickedNodeKey;
   const renamingNodeLabel = renamingNode?.node_type === "folder" ? "文件夹" : "章节";
+  const pendingWriteDocumentIdSet = useMemo(
+    () => new Set(pendingWriteDocumentIds),
+    [pendingWriteDocumentIds],
+  );
   const activeNodes = useMemo(() => nodes.filter((node) => node.status !== "trashed"), [nodes]);
   const trashedNodes = useMemo(() => nodes.filter((node) => node.status === "trashed"), [nodes]);
   const childrenByParent = useMemo(() => {
@@ -383,6 +389,7 @@ export function WorkspaceTree({
               title={node.title}
               style={{
                 display: "inline-block",
+                flex: 1,
                 minWidth: 0,
                 overflow: "hidden",
                 textOverflow: "ellipsis",
@@ -391,6 +398,15 @@ export function WorkspaceTree({
             >
               {node.title}
             </span>
+            {node.document_id && pendingWriteDocumentIdSet.has(node.document_id) ? (
+              <Tag
+                color="gold"
+                data-testid={`workspace-node-pending-write-${node.id}`}
+                style={{ flexShrink: 0, fontSize: 10, lineHeight: "16px", margin: 0, paddingInline: 4 }}
+              >
+                待写入
+              </Tag>
+            ) : null}
           </span>
         </Dropdown>
       ),

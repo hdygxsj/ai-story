@@ -56,6 +56,13 @@ export function updateModelProfile(token: string, profileId: string, payload: Mo
   });
 }
 
+export function deleteModelProfile(token: string, profileId: string) {
+  return apiRequest<void>(`/model-profiles/${profileId}`, {
+    method: "DELETE",
+    token,
+  });
+}
+
 export type ModelProfilePurpose = "chat" | "writing" | "summary" | "embedding";
 
 export type ModelProfileConnectivityResult = {

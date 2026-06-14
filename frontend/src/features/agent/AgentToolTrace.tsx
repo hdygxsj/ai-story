@@ -1,5 +1,5 @@
 import { CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, ToolOutlined } from "@ant-design/icons";
-import { Collapse, Space, Tag, Typography } from "antd";
+import { Collapse, Space, Typography } from "antd";
 
 export type AgentToolCallRecord = {
   id: string;
@@ -8,6 +8,15 @@ export type AgentToolCallRecord = {
   args?: Record<string, unknown>;
   summary?: string | null;
 };
+
+export const DOCUMENT_WRITE_TOOLS = new Set([
+  "create_chapter_with_content",
+  "propose_document_update",
+  "propose_rewrite",
+  "propose_selection_replace",
+  "propose_version_restore",
+  "write_document_content",
+]);
 
 const TOOL_LABELS: Record<string, string> = {
   cleanup_workspace_folders: "清理目录",
@@ -43,35 +52,76 @@ function toolLabel(name: string) {
   return TOOL_LABELS[name] ?? name;
 }
 
-function statusTag(status: AgentToolCallRecord["status"]) {
+function statusIndicator(status: AgentToolCallRecord["status"]) {
   if (status === "running") {
     return (
-      <Tag color="processing" icon={<LoadingOutlined spin />}>
+      <span className="agent-tool-call-card-status is-running">
+        <LoadingOutlined spin />
         执行中
-      </Tag>
+      </span>
     );
   }
   if (status === "error") {
     return (
-      <Tag color="error" icon={<CloseCircleOutlined />}>
+      <span className="agent-tool-call-card-status is-error">
+        <CloseCircleOutlined />
         失败
-      </Tag>
+      </span>
     );
   }
   return (
-    <Tag color="success" icon={<CheckCircleOutlined />}>
+    <span className="agent-tool-call-card-status is-ok">
+      <CheckCircleOutlined />
       完成
-    </Tag>
+    </span>
   );
 }
 
-function formatArgs(args: Record<string, unknown> | undefined) {
-  if (!args || Object.keys(args).length === 0) {
+function compactDetail(toolCall: AgentToolCallRecord): string | null {
+  const summary = toolCall.summary?.trim();
+  if (summary && summary !== "执行成功") {
+    return summary;
+  }
+
+  const args = toolCall.args;
+  if (!args) {
     return null;
   }
-  return Object.entries(args)
-    .map(([key, value]) => `${key}: ${String(value)}`)
-    .join("\n");
+
+  if (typeof args.title === "string" && args.title.trim()) {
+    return args.title.trim();
+  }
+  if (typeof args.name === "string" && args.name.trim()) {
+    return args.name.trim();
+  }
+  if (typeof args.content === "string" && args.content.trim()) {
+    const content = args.content.trim();
+    return content.length > 72 ? `${content.slice(0, 72)}…` : content;
+  }
+  if (typeof args.query === "string" && args.query.trim()) {
+    return args.query.trim();
+  }
+
+  return null;
+}
+
+type AgentToolCallCardProps = {
+  toolCall: AgentToolCallRecord;
+};
+
+export function AgentToolCallCard({ toolCall }: AgentToolCallCardProps) {
+  const detail = compactDetail(toolCall);
+
+  return (
+    <div className="agent-tool-call-card" data-testid="agent-tool-call-card">
+      <div className="agent-tool-call-card-header" data-testid={`agent-tool-${toolCall.id}`}>
+        <ToolOutlined className="agent-tool-call-card-icon" />
+        <span className="agent-tool-call-card-title">{toolLabel(toolCall.tool)}</span>
+        {statusIndicator(toolCall.status)}
+      </div>
+      {detail ? <div className="agent-tool-call-card-detail">{detail}</div> : null}
+    </div>
+  );
 }
 
 type AgentToolTraceProps = {
@@ -81,6 +131,10 @@ type AgentToolTraceProps = {
 export function AgentToolTrace({ toolCalls }: AgentToolTraceProps) {
   if (toolCalls.length === 0) {
     return null;
+  }
+
+  if (toolCalls.length === 1) {
+    return <AgentToolCallCard toolCall={toolCalls[0]} />;
   }
 
   return (
@@ -98,32 +152,10 @@ export function AgentToolTrace({ toolCalls }: AgentToolTraceProps) {
               </Space>
             ),
             children: (
-              <Space direction="vertical" size={8} style={{ width: "100%" }}>
-                {toolCalls.map((item) => {
-                  const argsText = formatArgs(item.args);
-                  return (
-                    <div className="agent-tool-trace-item" data-testid={`agent-tool-${item.id}`} key={item.id}>
-                      <Space align="start" style={{ justifyContent: "space-between", width: "100%" }}>
-                        <Typography.Text strong>{toolLabel(item.tool)}</Typography.Text>
-                        {statusTag(item.status)}
-                      </Space>
-                      {item.summary ? (
-                        <Typography.Paragraph style={{ marginBottom: argsText ? 4 : 0, whiteSpace: "pre-wrap" }} type="secondary">
-                          {item.summary}
-                        </Typography.Paragraph>
-                      ) : null}
-                      {argsText ? (
-                        <Typography.Paragraph
-                          code
-                          style={{ fontSize: 12, marginBottom: 0, whiteSpace: "pre-wrap" }}
-                          type="secondary"
-                        >
-                          {argsText}
-                        </Typography.Paragraph>
-                      ) : null}
-                    </div>
-                  );
-                })}
+              <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                {toolCalls.map((item) => (
+                  <AgentToolCallCard key={item.id} toolCall={item} />
+                ))}
               </Space>
             ),
           },

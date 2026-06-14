@@ -20,7 +20,10 @@ from app.schemas.workspace import (
     WorkspaceNodeUpdate,
 )
 from app.services.novels import get_owned_novel
-from app.services.document_actions import reject_pending_confirmations_for_document
+from app.services.document_actions import (
+    reject_pending_confirmations_for_document,
+    restore_owned_document_version,
+)
 from app.services.rag import extract_text_from_prosemirror, get_embedding_model_profile, index_text
 
 router = APIRouter(tags=["novels"])
@@ -571,6 +574,27 @@ async def list_document_versions(
     versions = await session.scalars(
         select(DocumentVersion)
         .where(DocumentVersion.document_id == document.id)
-        .order_by(DocumentVersion.created_at, DocumentVersion.id)
+        .order_by(DocumentVersion.created_at.desc(), DocumentVersion.id.desc())
     )
     return list(versions)
+
+
+@router.post("/documents/{document_id}/versions/{version_id}/restore", response_model=DocumentResponse)
+async def restore_document_version(
+    document_id: UUID,
+    version_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> Document:
+    document = await session.scalar(select(Document).where(Document.id == document_id))
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    novel = await get_owned_novel(session, current_user, document.novel_id)
+    return await restore_owned_document_version(
+        session,
+        owner_id=current_user.id,
+        novel_id=novel.id,
+        document_id=document.id,
+        version_id=version_id,
+        model_profile=await get_embedding_model_profile(session, novel),
+    )

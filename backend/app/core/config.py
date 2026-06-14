@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "AI Story"
     environment: str = "local"
-    database_url: str = "postgresql+asyncpg://ai_story:ai_story@localhost:5432/ai_story"
+    database_url: str = "postgresql+asyncpg://ai_story:ai_story@localhost:5433/ai_story"
     jwt_secret: str = "local-development-secret"
     access_token_minutes: int = 1440
     cors_origins: list[str] = [

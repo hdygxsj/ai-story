@@ -3,7 +3,12 @@ from uuid import UUID, uuid4
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, tool
 
-from app.agent.graph import _build_agent_system_prompt, _remove_incomplete_tool_call_history, build_agent_graph
+from app.agent.graph import (
+    _build_agent_system_prompt,
+    _compress_tool_round_history,
+    _remove_incomplete_tool_call_history,
+    build_agent_graph,
+)
 from app.agent.tool_runtime import build_runtime_tools
 from app.agent.tools import get_agent_tools
 from app.core.crypto import encrypt_api_key
@@ -626,7 +631,7 @@ async def test_agent_graph_stops_repeated_identical_tool_calls(monkeypatch) -> N
     assert "重复" in result["response"]
 
 
-async def test_agent_graph_stops_after_maximum_tool_rounds(monkeypatch) -> None:
+async def test_agent_graph_continues_beyond_previous_tool_round_cap(monkeypatch) -> None:
     calls = 0
 
     @tool("read_document")
@@ -642,6 +647,8 @@ async def test_agent_graph_stops_after_maximum_tool_rounds(monkeypatch) -> None:
 
         def invoke(self, messages):
             step = 1 + sum(isinstance(message, ToolMessage) for message in messages)
+            if step > 12:
+                return AIMessage(content="全部读取完成。")
             return AIMessage(
                 content="",
                 tool_calls=[{"name": "read_document", "args": {"step": step}, "id": f"call-{step}"}],
@@ -653,8 +660,47 @@ async def test_agent_graph_stops_after_maximum_tool_rounds(monkeypatch) -> None:
 
     result = await graph.ainvoke({"novel_id": uuid4(), "message": "持续读取"})
 
-    assert calls == 8
-    assert "轮次" in result["response"]
+    assert calls == 12
+    assert "轮次" not in result["response"]
+    assert "全部读取完成" in result["response"]
+
+
+def test_agent_graph_compresses_old_tool_results_when_context_is_large() -> None:
+    messages = [
+        SystemMessage(content="系统提示"),
+        HumanMessage(content="请连续读取多个文档"),
+    ]
+    for step in range(20):
+        messages.append(
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "read_document", "args": {"step": step}, "id": f"call-{step}"}],
+            )
+        )
+        messages.append(
+            ToolMessage(
+                content="x" * 8000,
+                name="read_document",
+                tool_call_id=f"call-{step}",
+            )
+        )
+
+    compressed, did_compress = _compress_tool_round_history(messages, max_tokens=12000)
+
+    assert did_compress is True
+    assert _estimate_messages_tokens(compressed) < _estimate_messages_tokens(messages)
+    assert str(compressed[-1].content).endswith("x")
+    assert "…" in str(compressed[3].content)
+
+
+def _estimate_messages_tokens(messages: list) -> int:
+    from app.agent.context import estimate_tokens
+
+    total = 0
+    for message in messages:
+        content = message.content if isinstance(message.content, str) else str(message.content)
+        total += estimate_tokens(content)
+    return total
 
 
 async def test_agent_graph_prioritizes_current_request_over_prior_planning(monkeypatch) -> None:

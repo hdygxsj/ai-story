@@ -31,3 +31,10 @@ export function updateDocument(token: string, documentId: string, content: Docum
 export function listDocumentVersions(token: string, documentId: string) {
   return apiRequest<DocumentVersion[]>(`/documents/${documentId}/versions`, { token });
 }
+
+export function restoreDocumentVersion(token: string, documentId: string, versionId: string) {
+  return apiRequest<DocumentRecord>(`/documents/${documentId}/versions/${versionId}/restore`, {
+    method: "POST",
+    token,
+  });
+}

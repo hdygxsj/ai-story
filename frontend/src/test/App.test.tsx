@@ -28,7 +28,7 @@ describe("App", () => {
   it("renders the Chinese product shell", () => {
     render(<App />);
 
-    expect(screen.getByRole("heading", { name: "AI小说工坊" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "执笔" })).toBeInTheDocument();
     expect(screen.getByText("人机共创小说工作台")).toBeInTheDocument();
     expect(screen.queryByText("番茄风格创作空间")).not.toBeInTheDocument();
   });

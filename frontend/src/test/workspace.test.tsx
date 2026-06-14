@@ -21,6 +21,13 @@ function conversationMockResponse(url: string) {
   return null;
 }
 
+async function waitForDocumentEditorReady() {
+  await waitFor(() => {
+    expect(screen.getByLabelText("章节名称")).not.toBeDisabled();
+    expect(screen.queryByTestId("document-editor-loading")).not.toBeInTheDocument();
+  });
+}
+
 function sseResponse(events: unknown[]) {
   const encoder = new TextEncoder();
   const payload = events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
@@ -134,6 +141,9 @@ describe("WorkspacePage", () => {
             ]),
           );
         }
+        if (url.endsWith("/documents/doc-2/versions")) {
+          return Promise.resolve(jsonResponse([]));
+        }
         if (url.endsWith("/documents/doc-2")) {
           return Promise.resolve(
             jsonResponse({
@@ -155,6 +165,7 @@ describe("WorkspacePage", () => {
 
     render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
 
+    await waitForDocumentEditorReady();
     expect(await screen.findByLabelText("章节名称")).toHaveValue("第二章");
     expect(await screen.findByText("第二章内容")).toBeInTheDocument();
   });
@@ -288,6 +299,9 @@ describe("WorkspacePage", () => {
           jsonResponse({ id: "node-1", title: "第一章 新标题", node_type: "chapter", parent_id: null, document_id: "doc-1", position: 0 }),
         );
       }
+      if (url.endsWith("/documents/doc-1/versions")) {
+        return Promise.resolve(jsonResponse([]));
+      }
       if (url.endsWith("/documents/doc-1")) {
         return Promise.resolve(jsonResponse({ id: "doc-1", content: { type: "doc", content: [] } }));
       }
@@ -297,6 +311,7 @@ describe("WorkspacePage", () => {
 
     render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
 
+    await waitForDocumentEditorReady();
     const titleInput = await screen.findByLabelText("章节名称");
     await user.clear(titleInput);
     await user.type(titleInput, "第一章 新标题{Enter}");
@@ -351,6 +366,72 @@ describe("WorkspacePage", () => {
     await waitFor(() => {
       const saveCall = fetchMock.mock.calls.find(([url, init]) => String(url).endsWith("/documents/doc-1") && init?.method === "PATCH");
       expect(saveCall).toBeTruthy();
+    });
+  });
+
+  it("opens version history and restores a saved version", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/novels/novel-1/nodes")) {
+        return Promise.resolve(
+          jsonResponse([
+            { id: "node-1", title: "第一章", node_type: "chapter", parent_id: null, document_id: "doc-1", position: 0 },
+          ]),
+        );
+      }
+      if (url.endsWith("/documents/doc-1/versions/version-1/restore") && init?.method === "POST") {
+        return Promise.resolve(
+          jsonResponse({
+            id: "doc-1",
+            content: {
+              type: "doc",
+              content: [{ type: "paragraph", content: [{ type: "text", text: "历史正文内容" }] }],
+            },
+          }),
+        );
+      }
+      if (url.endsWith("/documents/doc-1/versions")) {
+        return Promise.resolve(
+          jsonResponse([
+            {
+              id: "version-1",
+              document_id: "doc-1",
+              source: "user",
+              created_at: "2026-06-14T10:00:00.000Z",
+              content: {
+                type: "doc",
+                content: [{ type: "paragraph", content: [{ type: "text", text: "历史正文内容" }] }],
+              },
+            },
+          ]),
+        );
+      }
+      if (url.endsWith("/documents/doc-1")) {
+        return Promise.resolve(
+          jsonResponse({
+            id: "doc-1",
+            content: {
+              type: "doc",
+              content: [{ type: "paragraph", content: [{ type: "text", text: "当前正文内容" }] }],
+            },
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
+    await screen.findByText("当前正文内容");
+    await user.click(screen.getByRole("button", { name: "版本历史" }));
+    expect(await screen.findByText("历史正文内容")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "恢复" }));
+    await waitFor(() => {
+      const restoreCall = fetchMock.mock.calls.find(
+        ([url, init]) => String(url).endsWith("/documents/doc-1/versions/version-1/restore") && init?.method === "POST",
+      );
+      expect(restoreCall).toBeTruthy();
     });
   });
 
@@ -446,6 +527,7 @@ describe("WorkspacePage", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
+    await waitForDocumentEditorReady();
     const titleInput = await screen.findByLabelText("章节名称");
     await user.clear(titleInput);
     await user.type(titleInput, "第一章 即时保存");
@@ -827,6 +909,84 @@ describe("WorkspacePage", () => {
     });
   });
 
+  it("switches and deletes model profiles from the configured list", async () => {
+    const user = userEvent.setup();
+    const profiles = [
+      {
+        id: "profile-a",
+        name: "默认 OpenAI",
+        provider_kind: "openai",
+        chat_model: "gpt-4o",
+        writing_model: "gpt-4o",
+        summary_model: "gpt-4o-mini",
+        embedding_provider_kind: "ollama",
+        embedding_model: "nomic-embed-text",
+      },
+      {
+        id: "profile-b",
+        name: "DeepSeek",
+        provider_kind: "openai-compatible",
+        chat_model: "deepseek-v4-pro",
+        writing_model: "deepseek-v4-pro",
+        summary_model: "deepseek-v4-pro",
+        embedding_provider_kind: "ollama",
+        embedding_model: "nomic-embed-text",
+      },
+    ];
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/model-profiles/profile-a") && init?.method === "DELETE") {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      if (url.endsWith("/model-profiles")) {
+        return Promise.resolve(jsonResponse(profiles));
+      }
+      if (url.endsWith("/novels/novel-1") && init?.method === "PATCH") {
+        return Promise.resolve(
+          jsonResponse({
+            default_model_profile_id: JSON.parse(String(init.body)).default_model_profile_id ?? null,
+            description: "",
+            id: "novel-1",
+            title: "Novel",
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <WorkspacePage
+        activeSection="agent-config"
+        defaultModelProfileId="profile-b"
+        onDefaultModelProfileChange={vi.fn()}
+        token="test-token"
+        novelId="novel-1"
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "设为当前" }));
+    await waitFor(() => {
+      const switchCall = fetchMock.mock.calls.find(
+        ([url, init]) => String(url).endsWith("/novels/novel-1") && init?.method === "PATCH",
+      );
+      expect(switchCall).toBeTruthy();
+      expect(String(switchCall?.[1]?.body)).toContain("\"default_model_profile_id\":\"profile-a\"");
+    });
+
+    await user.click(screen.getAllByRole("button", { name: "删除" })[0]);
+    const popconfirm = await screen.findByText("确定删除「默认 OpenAI」吗？");
+    const popover = popconfirm.closest(".ant-popover") as HTMLElement;
+    await user.click(within(popover).getByRole("button", { name: /^删/ }));
+
+    await waitFor(() => {
+      const deleteCall = fetchMock.mock.calls.find(
+        ([url, init]) => String(url).endsWith("/model-profiles/profile-a") && init?.method === "DELETE",
+      );
+      expect(deleteCall).toBeTruthy();
+    });
+  });
+
   it("shows selected editor text as an Agent quote card and sends it for rewrite", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
@@ -1170,7 +1330,7 @@ describe("WorkspacePage", () => {
     expect(await screen.findByText("Agent 已写入正文")).toBeInTheDocument();
   });
 
-  it("shows pending confirmations in the agent panel after workspace load", async () => {
+  it("shows pending confirmations in the chapter editor after workspace load", async () => {
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
       const conversationResponse = conversationMockResponse(url);
@@ -1221,7 +1381,8 @@ describe("WorkspacePage", () => {
 
     expect(await screen.findByTestId("agent-write-confirmation")).toBeInTheDocument();
     expect(screen.getByText("等待确认的新正文")).toBeInTheDocument();
-    expect(screen.getByText("等待写入确认")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-node-pending-write-node-1")).toBeInTheDocument();
+    expect(screen.queryByText("等待写入确认")).not.toBeInTheDocument();
   });
 
   it("does not show stale confirmations after the API auto-expires them", async () => {
@@ -1335,7 +1496,7 @@ describe("WorkspacePage", () => {
       "写完第一章{Enter}",
     );
 
-    expect(await screen.findByTestId("agent-tool-trace")).toBeInTheDocument();
+    expect(await screen.findByTestId("agent-tool-call-card")).toBeInTheDocument();
     expect(screen.getByText("写入章节")).toBeInTheDocument();
     expect(screen.getByText("已将《第一章》写入工作台。")).toBeInTheDocument();
   });

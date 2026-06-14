@@ -448,3 +448,80 @@ def test_test_connectivity_skips_embedding_when_not_configured(monkeypatch) -> N
         "message": "未配置，已跳过",
         "model": "未配置",
     }
+
+
+def test_delete_model_profile() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client, email="delete@example.com", username="deleteuser")
+    created = client.post(
+        "/model-profiles",
+        headers=headers,
+        json={
+            "name": "To delete",
+            "provider_kind": "openai",
+            "api_key": "sk-test",
+            "chat_model": "gpt-4o",
+            "writing_model": "gpt-4o",
+            "summary_model": "gpt-4o-mini",
+            "embedding_model": "text-embedding-3-small",
+        },
+    ).json()
+
+    response = client.delete(f"/model-profiles/{created['id']}", headers=headers)
+
+    assert response.status_code == 204
+    assert client.get("/model-profiles", headers=headers).json() == []
+
+
+def test_delete_model_profile_clears_novel_default() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client, email="delete-novel@example.com", username="deletenoveluser")
+    novel = client.post("/novels", headers=headers, json={"title": "Delete Profile Book"}).json()
+    profile = client.post(
+        "/model-profiles",
+        headers=headers,
+        json={
+            "name": "Linked profile",
+            "provider_kind": "openai",
+            "api_key": "sk-test",
+            "chat_model": "gpt-4o",
+            "writing_model": "gpt-4o",
+            "summary_model": "gpt-4o-mini",
+            "embedding_model": "text-embedding-3-small",
+        },
+    ).json()
+    client.patch(
+        f"/novels/{novel['id']}",
+        headers=headers,
+        json={"default_model_profile_id": profile["id"]},
+    )
+
+    response = client.delete(f"/model-profiles/{profile['id']}", headers=headers)
+
+    assert response.status_code == 204
+    updated_novel = client.get("/novels", headers=headers).json()[0]
+    assert updated_novel["default_model_profile_id"] is None
+
+
+def test_delete_model_profile_is_scoped_to_current_user() -> None:
+    client = TestClient(app)
+    owner_headers = auth_headers(client, email="owner@example.com", username="owneruser")
+    other_headers = auth_headers(client, email="other@example.com", username="otheruser")
+    created = client.post(
+        "/model-profiles",
+        headers=owner_headers,
+        json={
+            "name": "Private profile",
+            "provider_kind": "openai",
+            "api_key": "sk-test",
+            "chat_model": "gpt-4o",
+            "writing_model": "gpt-4o",
+            "summary_model": "gpt-4o-mini",
+            "embedding_model": "text-embedding-3-small",
+        },
+    ).json()
+
+    response = client.delete(f"/model-profiles/{created['id']}", headers=other_headers)
+
+    assert response.status_code == 404
+    assert len(client.get("/model-profiles", headers=owner_headers).json()) == 1

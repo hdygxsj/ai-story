@@ -261,7 +261,7 @@ export function App() {
               />
               <div style={{ minWidth: 0 }}>
                 <Typography.Title level={1} style={{ color: "#111827", fontSize: 16, lineHeight: 1.2, margin: 0 }}>
-                  AI小说工坊
+                  执笔
                 </Typography.Title>
                 <Typography.Text ellipsis style={{ color: "#6b7280", display: "block", fontSize: 12, maxWidth: 180 }}>
                   人机共创小说工作台

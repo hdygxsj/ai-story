@@ -11,6 +11,7 @@ class AgentState(TypedDict, total=False):
     document_id: UUID | None
     message: str
     selected_text: str | None
+    history_messages: list[Any]
     system_prompt: str | None
     messages: Annotated[list[Any], add_messages]
     model_profile: ModelProfile | None

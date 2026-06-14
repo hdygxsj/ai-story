@@ -7,6 +7,7 @@ export type AgentConfirmation = {
   action_type: string;
   status: string;
   payload: Record<string, unknown>;
+  document_id?: string | null;
 };
 
 export type ContextDetailItem = {

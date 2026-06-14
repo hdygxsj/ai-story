@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { AgentPanel } from "../agent/AgentPanel";
 import { DocumentEditor } from "../editor/DocumentEditor";
+import { DocumentVersionHistory } from "../editor/DocumentVersionHistory";
 import { MaterialsPanel } from "./MaterialsPanel";
 import { WorkspaceTree } from "./WorkspaceTree";
 import { ApiError } from "../../api/http";
@@ -14,9 +15,11 @@ import { approveConfirmation, listConfirmations, rejectConfirmation } from "../.
 import { ConfirmationActionCard } from "../confirmations/ConfirmationActionCard";
 import {
   pendingConfirmations as filterPendingConfirmations,
+  pendingDocumentWriteConfirmations,
+  pendingDocumentWriteConfirmationIds,
 } from "../confirmations/confirmationPresentation";
 import type { DocumentBody, DocumentRecord, DocumentVersion } from "../../api/documents";
-import { getDocument, listDocumentVersions, updateDocument } from "../../api/documents";
+import { getDocument, listDocumentVersions, restoreDocumentVersion, updateDocument } from "../../api/documents";
 import type { MemoryItem } from "../../api/memory";
 import { deleteMemoryItem, listMemoryItems } from "../../api/memory";
 import type { CharacterState, CreativeAsset, MaterialChange, RelationshipEdge, TimelineEvent } from "../../api/materials";
@@ -33,6 +36,7 @@ import type { ModelProfile } from "../../api/modelProfiles";
 import type { ModelProfileConnectivityResult, ModelProfilePurpose } from "../../api/modelProfiles";
 import {
   createModelProfile,
+  deleteModelProfile,
   listModelProfiles,
   testModelProfileConnectivity,
   updateModelProfile,
@@ -268,6 +272,8 @@ export function WorkspacePage({
   const [nodes, setNodes] = useState<WorkspaceNode[]>([]);
   const [documentId, setDocumentId] = useState<string | null>(() => getStoredDocumentId(novelId));
   const [document, setDocument] = useState<DocumentRecord | null>(null);
+  const [documentLoading, setDocumentLoading] = useState(false);
+  const [agentDocumentWriteLocked, setAgentDocumentWriteLocked] = useState(false);
   const [draftsByDocumentId, setDraftsByDocumentId] = useState<Record<string, DocumentBody>>({});
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
   const [selectedText, setSelectedText] = useState<string | null>(null);
@@ -283,6 +289,8 @@ export function WorkspacePage({
   const [materialChanges, setMaterialChanges] = useState<MaterialChange[]>([]);
   const [workspaceDiff, setWorkspaceDiff] = useState<WorkspaceDiff | null>(null);
   const [saving, setSaving] = useState(false);
+  const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
+  const [restoringVersionId, setRestoringVersionId] = useState<string | null>(null);
   const [modelProfileSaving, setModelProfileSaving] = useState(false);
   const [connectivityTestingTab, setConnectivityTestingTab] = useState<ModelConfigTab | null>(null);
   const [connectivityResultsByTab, setConnectivityResultsByTab] = useState<
@@ -451,10 +459,14 @@ export function WorkspacePage({
 
   useEffect(() => {
     if (!documentId) {
+      setDocument(null);
+      setVersions([]);
+      setDocumentLoading(false);
       return;
     }
 
     let cancelled = false;
+    setDocumentLoading(true);
 
     async function loadDocument() {
       try {
@@ -471,6 +483,10 @@ export function WorkspacePage({
           setDocument(null);
           setVersions([]);
         }
+      } finally {
+        if (!cancelled) {
+          setDocumentLoading(false);
+        }
       }
     }
 
@@ -483,6 +499,7 @@ export function WorkspacePage({
 
   async function handleSaveDocument(content: DocumentBody) {
     if (!documentId) {
+      message.warning("请先选择要保存的章节。");
       return;
     }
     setSaving(true);
@@ -496,6 +513,10 @@ export function WorkspacePage({
         delete next[documentId];
         return next;
       });
+      message.success("章节已保存");
+    } catch (error) {
+      const detail = error instanceof ApiError ? error.message : "保存章节失败";
+      message.error(detail);
     } finally {
       setSaving(false);
     }
@@ -506,6 +527,31 @@ export function WorkspacePage({
       return;
     }
     setDraftsByDocumentId((current) => ({ ...current, [documentId]: content }));
+  }
+
+  async function handleRestoreDocumentVersion(versionId: string) {
+    if (!documentId) {
+      return;
+    }
+    setRestoringVersionId(versionId);
+    try {
+      const restored = await restoreDocumentVersion(token, documentId, versionId);
+      const loadedVersions = await listDocumentVersions(token, documentId);
+      setDocument(restored);
+      setVersions(loadedVersions);
+      setDraftsByDocumentId((current) => {
+        const next = { ...current };
+        delete next[documentId];
+        return next;
+      });
+      setVersionHistoryOpen(false);
+      message.success("已恢复到此版本");
+    } catch (error) {
+      const detail = error instanceof ApiError ? error.message : "恢复版本失败";
+      message.error(detail);
+    } finally {
+      setRestoringVersionId(null);
+    }
   }
 
   async function refreshReviewQueues() {
@@ -764,6 +810,28 @@ export function WorkspacePage({
     modelProfileForm.setFieldsValue(profileToFormValues(profile));
   }
 
+  async function handleSwitchModelProfile(profile: ModelProfile) {
+    if (defaultModelProfileId === profile.id) {
+      return;
+    }
+    await handleSelectDefaultModelProfile(profile.id);
+    handleEditModelProfile(profile);
+    message.success(`已切换为「${profile.name}」`);
+  }
+
+  async function handleDeleteModelProfile(profile: ModelProfile) {
+    await deleteModelProfile(token, profile.id);
+    setModelProfiles((current) => current.filter((item) => item.id !== profile.id));
+    setModelProfileCount((current) => Math.max(0, current - 1));
+    if (defaultModelProfileId === profile.id) {
+      await handleSelectDefaultModelProfile(null);
+    }
+    if (editingProfileId === profile.id) {
+      handleStartNewModelProfile();
+    }
+    message.success("模型配置已删除");
+  }
+
   async function handleSelectActiveModelProfile(profileId: string | null) {
     await handleSelectDefaultModelProfile(profileId);
     if (!profileId) {
@@ -949,6 +1017,12 @@ export function WorkspacePage({
   const currentWordCount = extractDocumentText(editorContent).length;
   const currentChapterNode = nodes.find((node) => node.document_id === documentId) ?? null;
   const currentChapterTitle = currentChapterNode?.title ?? null;
+  const pendingWriteConfirmations = pendingDocumentWriteConfirmations(confirmations);
+  const pendingWriteDocumentIds = pendingDocumentWriteConfirmationIds(confirmations);
+  const currentChapterConfirmations = pendingWriteConfirmations.filter(
+    (confirmation) => confirmation.document_id === documentId,
+  );
+  const editorLoading = documentLoading || agentDocumentWriteLocked;
 
   const workspaceStats = (
     <Card
@@ -1020,6 +1094,7 @@ export function WorkspacePage({
       onRenameNode={(nodeId, title) => void handleUpdateWorkspaceNode(nodeId, { title })}
       onRestoreNode={(nodeId) => void handleWorkspaceNodeStatus(nodeId, "draft")}
       onSelectDocument={handleSelectDocument}
+      pendingWriteDocumentIds={pendingWriteDocumentIds}
       selectedDocumentId={documentId}
       onTrashNode={(nodeId) => void handleWorkspaceNodeStatus(nodeId, "trashed")}
     />
@@ -1032,7 +1107,6 @@ export function WorkspacePage({
       token={token}
       novelId={novelId}
       documentId={documentId}
-      pendingConfirmations={confirmations.filter((item) => item.status === "pending")}
       onClearSelectedText={() => setSelectedText(null)}
       onDismissWorkspaceDiff={() => setWorkspaceDiff(null)}
       onRunCompleted={async () => {
@@ -1040,7 +1114,12 @@ export function WorkspacePage({
         await refreshReviewQueues();
       }}
       onNovelUpdated={onNovelUpdated}
-      onResolveConfirmation={(confirmationId, action) => resolveConfirmation(confirmationId, action)}
+      onDocumentWriteLockChange={setAgentDocumentWriteLocked}
+      onWriteConfirmationCreated={(confirmation) => {
+        if (confirmation.document_id) {
+          selectDocument(confirmation.document_id);
+        }
+      }}
       onUndoWorkspaceDiff={() => void handleUndoWorkspaceDiff()}
       onWorkspaceOrganized={(updatedNodes, diff) => {
         const previousIds = new Set(nodes.map((node) => node.id));
@@ -1150,20 +1229,58 @@ export function WorkspacePage({
   }
 
   const workspaceCenterContent = (
-    <DocumentEditor
-      chapterTitle={currentChapterTitle}
-      content={editorContent}
-      onChange={handleDocumentDraftChange}
-      onRenameChapter={(title) => {
-        if (currentChapterNode) {
-          void handleUpdateWorkspaceNode(currentChapterNode.id, { title });
-        }
-      }}
-      onSave={handleSaveDocument}
-      onSelectText={setSelectedText}
-      saveStatus={saving ? "saving" : hasUnsavedDraft ? "dirty" : "saved"}
-      saving={saving}
-    />
+    <>
+      <div
+        data-testid="workspace-chapter-panel"
+        style={{ display: "flex", flexDirection: "column", gap: 10, height: "100%", minHeight: 0, minWidth: 0 }}
+      >
+        {currentChapterConfirmations.length > 0 ? (
+          <Space direction="vertical" size={8} style={{ flexShrink: 0, width: "100%" }}>
+            {currentChapterConfirmations.map((confirmation) => (
+              <ConfirmationActionCard
+                key={confirmation.id}
+                confirmation={confirmation}
+                onApprove={(confirmationId) =>
+                  void resolveConfirmation(confirmationId, "approve").catch((error: Error) =>
+                    message.error(error.message),
+                  )
+                }
+                onReject={(confirmationId) =>
+                  void resolveConfirmation(confirmationId, "reject").catch((error: Error) =>
+                    message.error(error.message),
+                  )
+                }
+              />
+            ))}
+          </Space>
+        ) : null}
+        <div style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
+          <DocumentEditor
+            chapterTitle={currentChapterTitle}
+            content={editorContent}
+            loading={editorLoading}
+            onChange={handleDocumentDraftChange}
+            onOpenVersionHistory={() => setVersionHistoryOpen(true)}
+            onRenameChapter={(title) => {
+              if (currentChapterNode) {
+                void handleUpdateWorkspaceNode(currentChapterNode.id, { title });
+              }
+            }}
+            onSave={handleSaveDocument}
+            onSelectText={setSelectedText}
+            saveStatus={saving ? "saving" : hasUnsavedDraft ? "dirty" : "saved"}
+            saving={saving}
+          />
+        </div>
+      </div>
+      <DocumentVersionHistory
+        onClose={() => setVersionHistoryOpen(false)}
+        onRestore={(versionId) => void handleRestoreDocumentVersion(versionId)}
+        open={versionHistoryOpen}
+        restoringVersionId={restoringVersionId}
+        versions={versions}
+      />
+    </>
   );
 
   const agentConfigActionBar = (
@@ -1369,11 +1486,31 @@ export function WorkspacePage({
           return (
             <List.Item
               actions={[
-                defaultModelProfileId === profile.id ? <Tag color="green">当前使用</Tag> : null,
+                defaultModelProfileId === profile.id ? (
+                  <Tag key="active" color="green">
+                    当前使用
+                  </Tag>
+                ) : (
+                  <Button key="switch" onClick={() => void handleSwitchModelProfile(profile)} size="small" type="link">
+                    设为当前
+                  </Button>
+                ),
                 <Button key="edit" onClick={() => handleEditModelProfile(profile)} size="small" type="link">
                   编辑
                 </Button>,
-              ].filter(Boolean)}
+                <Popconfirm
+                  cancelText="取消"
+                  key="delete"
+                  okText="删除"
+                  okType="danger"
+                  onConfirm={() => void handleDeleteModelProfile(profile)}
+                  title={`确定删除「${profile.name}」吗？`}
+                >
+                  <Button danger size="small" type="link">
+                    删除
+                  </Button>
+                </Popconfirm>,
+              ]}
             >
               <List.Item.Meta
                 description={

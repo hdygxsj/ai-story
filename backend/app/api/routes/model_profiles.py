@@ -148,6 +148,25 @@ async def update_model_profile(
     return model_profile
 
 
+@router.delete("/{profile_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_model_profile(
+    profile_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    model_profile = await session.scalar(
+        select(ModelProfile).where(
+            ModelProfile.id == profile_id,
+            ModelProfile.owner_id == current_user.id,
+        )
+    )
+    if model_profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model profile not found")
+
+    await session.delete(model_profile)
+    await session.commit()
+
+
 @router.post("/test-connectivity", response_model=ModelProfileConnectivityResponse)
 async def test_model_profile_connectivity(
     payload: ModelProfileTestRequest,

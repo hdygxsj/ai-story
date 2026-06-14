@@ -7,6 +7,7 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.graph import _build_agent_system_prompt
+from app.agent.context import ContextPack
 from app.agent.prompts import append_agent_runtime_guidance
 from app.agent.runtime import stream_agent_graph
 from app.models import ModelProfile, Novel
@@ -56,8 +57,14 @@ async def stream_agent_events(
         )
         return
 
+    system_pack = ContextPack(
+        items=[item for item in pack.items if item.source != "conversation_history"],
+        estimated_tokens=pack.estimated_tokens,
+        usage_ratio=pack.usage_ratio,
+        status_messages=pack.status_messages,
+    )
     system_prompt = append_agent_runtime_guidance(
-        _build_agent_system_prompt(pack),
+        _build_agent_system_prompt(system_pack),
         novel_id=novel.id,
         document_id=document_id,
     )
@@ -71,6 +78,7 @@ async def stream_agent_events(
             "document_id": document_id,
             "message": message,
             "selected_text": selected_text,
+            "history_messages": assembled.history_messages,
             "system_prompt": system_prompt,
         },
         model_profile=model_profile,

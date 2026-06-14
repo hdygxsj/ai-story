@@ -4,9 +4,8 @@ import { CloseOutlined, PushpinOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Flex, Space, Tag, Typography } from "antd";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import type { AgentToolCallRecord, ContextDetail, WorkspaceDiff } from "../../api/agent";
+import type { AgentConfirmation, AgentToolCallRecord, ContextDetail, WorkspaceDiff } from "../../api/agent";
 import { streamAgentMessage } from "../../api/agent";
-import type { Confirmation } from "../../api/confirmations";
 import type { Conversation } from "../../api/conversations";
 import {
   createConversation,
@@ -17,10 +16,14 @@ import {
 } from "../../api/conversations";
 import type { Novel } from "../../api/novels";
 import type { WorkspaceNode } from "../../api/workspace";
-import { AgentToolTrace } from "./AgentToolTrace";
+import { AgentToolCallCard, DOCUMENT_WRITE_TOOLS } from "./AgentToolTrace";
 import { AgentMarkdown } from "./AgentMarkdown";
-import { ConfirmationActionCard } from "../confirmations/ConfirmationActionCard";
-import { pendingConfirmations as filterPendingConfirmations } from "../confirmations/confirmationPresentation";
+import {
+  type ChatMessage,
+  createMessageId,
+  expandStoredConversationMessages,
+  removeEmptyAssistantMessages,
+} from "./agentMessages";
 import { ContextSettingsDrawer } from "./ContextSettingsDrawer";
 import { ContextStatusBar } from "./ContextStatusBar";
 import { ConversationSidebar } from "./ConversationSidebar";
@@ -37,27 +40,16 @@ type AgentPanelProps = {
   onDismissWorkspaceDiff?: () => void;
   onRunCompleted?: () => void | Promise<void>;
   onNovelUpdated?: (novel: Pick<Novel, "id" | "title" | "description">) => void;
-  onResolveConfirmation?: (confirmationId: string, action: "approve" | "reject") => Promise<void>;
+  onDocumentWriteLockChange?: (locked: boolean) => void;
   onUndoWorkspaceDiff?: () => void;
   onWorkspaceOrganized?: (nodes: WorkspaceNode[], diff?: WorkspaceDiff | null) => void;
-  pendingConfirmations?: Confirmation[];
+  onWriteConfirmationCreated?: (confirmation: AgentConfirmation) => void;
   rewriteRequest?: { id: number; text: string } | null;
   selectedText?: string | null;
   workspaceDiff?: WorkspaceDiff | null;
 };
 
-type ChatMessage = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  toolCalls?: AgentToolCallRecord[];
-};
-
 const WELCOME_MESSAGE = "告诉我你想创建、改写、记录或检索什么。";
-
-function createMessageId(role: ChatMessage["role"]) {
-  return `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
 
 function welcomeMessages(): ChatMessage[] {
   return [{ id: createMessageId("assistant"), role: "assistant", content: WELCOME_MESSAGE }];
@@ -73,10 +65,10 @@ export function AgentPanel({
   onDismissWorkspaceDiff,
   onRunCompleted,
   onNovelUpdated,
-  onResolveConfirmation,
+  onDocumentWriteLockChange,
   onUndoWorkspaceDiff,
   onWorkspaceOrganized,
-  pendingConfirmations = [],
+  onWriteConfirmationCreated,
   rewriteRequest,
   selectedText,
   workspaceDiff,
@@ -89,7 +81,7 @@ export function AgentPanel({
   const [streaming, setStreaming] = useState(false);
   const [contextDetail, setContextDetail] = useState<ContextDetail | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const activeAssistantIdRef = useRef<string | null>(null);
+  const activeTextIdRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
 
@@ -114,14 +106,7 @@ export function AgentPanel({
         setMessages(welcomeMessages());
         return;
       }
-      setMessages(
-        stored.map((item) => ({
-          id: item.id,
-          role: item.role === "user" ? "user" : "assistant",
-          content: item.content,
-          toolCalls: item.metadata?.tool_calls,
-        })),
-      );
+      setMessages(expandStoredConversationMessages(stored));
     },
     [novelId, token],
   );
@@ -160,6 +145,35 @@ export function AgentPanel({
     return () => cancelAnimationFrame(frame);
   }, [activeConversationId, messages, scrollMessagesToBottom]);
 
+  const documentWriteLocked =
+    streaming &&
+    messages.some(
+      (item) =>
+        item.role === "tool" &&
+        item.toolCall?.status === "running" &&
+        DOCUMENT_WRITE_TOOLS.has(item.toolCall.tool),
+    );
+
+  useEffect(() => {
+    onDocumentWriteLockChange?.(documentWriteLocked);
+  }, [documentWriteLocked, onDocumentWriteLockChange]);
+
+  useEffect(() => {
+    return () => {
+      onDocumentWriteLockChange?.(false);
+    };
+  }, [onDocumentWriteLockChange]);
+
+  function ensureActiveTextBubble() {
+    if (activeTextIdRef.current) {
+      return activeTextIdRef.current;
+    }
+    const nextId = createMessageId("assistant");
+    activeTextIdRef.current = nextId;
+    setMessages((current) => [...current, { id: nextId, role: "assistant", content: "" }]);
+    return nextId;
+  }
+
   function appendAssistantContent(assistantId: string, delta: string) {
     setMessages((current) =>
       current.map((item) =>
@@ -168,58 +182,82 @@ export function AgentPanel({
     );
   }
 
-  function finalizeAssistantMessage(
-    assistantId: string,
-    content: string,
-    toolCalls?: AgentToolCallRecord[],
-  ) {
+  function finalizeAssistantMessage(assistantId: string, content: string) {
     setMessages((current) =>
-      current.map((item) =>
-        item.id === assistantId
-          ? {
-              ...item,
-              content,
-              toolCalls: toolCalls ?? item.toolCalls,
-            }
-          : item,
-      ),
+      current.map((item) => (item.id === assistantId ? { ...item, content } : item)),
     );
   }
 
-  function upsertToolCall(assistantId: string, record: AgentToolCallRecord) {
-    setMessages((current) =>
-      current.map((item) => {
-        if (item.id !== assistantId) {
-          return item;
-        }
-        const existing = item.toolCalls ?? [];
-        const index = existing.findIndex((toolCall) => toolCall.id === record.id);
-        if (index === -1) {
-          return { ...item, toolCalls: [...existing, record] };
-        }
-        const next = [...existing];
-        next[index] = record;
-        return { ...item, toolCalls: next };
-      }),
-    );
+  function closeActiveTextSegment() {
+    const activeId = activeTextIdRef.current;
+    if (!activeId) {
+      return;
+    }
+    activeTextIdRef.current = null;
+    setMessages((current) => removeEmptyAssistantMessages(current, activeId));
+  }
+
+  function upsertToolCallMessage(record: AgentToolCallRecord) {
+    if (record.status === "running") {
+      closeActiveTextSegment();
+    }
+
+    setMessages((current) => {
+      const existingIndex = current.findIndex(
+        (item) => item.role === "tool" && item.toolCall?.id === record.id,
+      );
+      if (existingIndex === -1) {
+        return [
+          ...current,
+          {
+            id: createMessageId("tool"),
+            role: "tool",
+            content: "",
+            toolCall: record,
+          },
+        ];
+      }
+      return current.map((item, index) =>
+        index === existingIndex ? { ...item, toolCall: record } : item,
+      );
+    });
+  }
+
+  function appendAssistantDelta(delta: string) {
+    const assistantId = ensureActiveTextBubble();
+    appendAssistantContent(assistantId, delta);
+  }
+
+  function finalizeActiveTextMessage(content: string) {
+    if (activeTextIdRef.current) {
+      finalizeAssistantMessage(activeTextIdRef.current, content);
+      activeTextIdRef.current = null;
+      return;
+    }
+    if (!content.trim()) {
+      return;
+    }
+    setMessages((current) => [...current, { id: createMessageId("assistant"), role: "assistant", content }]);
   }
 
   function handleCancelStream() {
     abortControllerRef.current?.abort();
   }
 
-  function finalizeCancelledAssistantMessage(assistantId: string) {
-    setMessages((current) =>
-      current.map((item) => {
-        if (item.id !== assistantId) {
-          return item;
-        }
-        if (item.content.trim()) {
-          return item;
-        }
-        return { ...item, content: "（已停止生成）" };
-      }),
-    );
+  function finalizeCancelledAssistantMessage() {
+    closeActiveTextSegment();
+    setMessages((current) => {
+      const lastAssistant = [...current].reverse().find((item) => item.role === "assistant");
+      if (lastAssistant?.content.trim()) {
+        return current;
+      }
+      if (lastAssistant) {
+        return current.map((item) =>
+          item.id === lastAssistant.id ? { ...item, content: "（已停止生成）" } : item,
+        );
+      }
+      return [...current, { id: createMessageId("assistant"), role: "assistant", content: "（已停止生成）" }];
+    });
   }
 
   async function sendMessage(value: string, overrideSelectedText?: string | null) {
@@ -231,13 +269,14 @@ export function AgentPanel({
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
+    activeTextIdRef.current = null;
 
-    const assistantId = createMessageId("assistant");
-    activeAssistantIdRef.current = assistantId;
+    const placeholderId = createMessageId("assistant");
+    activeTextIdRef.current = placeholderId;
     setMessages((current) => [
       ...current.filter((item) => item.content !== WELCOME_MESSAGE || item.role !== "assistant"),
       { id: createMessageId("user"), role: "user", content: value },
-      { id: assistantId, role: "assistant", content: "", toolCalls: [] },
+      { id: placeholderId, role: "assistant", content: "" },
     ]);
     setMessage("");
 
@@ -252,10 +291,10 @@ export function AgentPanel({
       },
       {
         onDelta: (content) => {
-          appendAssistantContent(assistantId, content);
+          appendAssistantDelta(content);
         },
         onToolCall: (record) => {
-          upsertToolCall(assistantId, record);
+          upsertToolCallMessage(record);
         },
         onDone: (payload) => {
           if (payload.workspace_nodes) {
@@ -268,10 +307,13 @@ export function AgentPanel({
             setActiveConversationId(payload.conversation_id);
           }
           setContextDetail(payload.context_detail ?? null);
+          if (payload.confirmation) {
+            onWriteConfirmationCreated?.(payload.confirmation);
+          }
           const finalMessage = payload.confirmation
-            ? `${payload.message} 正文写入方案已生成，请在下方确认后应用到编辑器。`
+            ? `${payload.message} 正文写入方案已生成，请在对应章节的编辑器中确认。`
             : payload.message;
-          finalizeAssistantMessage(assistantId, finalMessage, payload.tool_calls);
+          finalizeActiveTextMessage(finalMessage);
           void (async () => {
             try {
               await onRunCompleted?.();
@@ -279,22 +321,22 @@ export function AgentPanel({
               // The completed Agent response remains usable if a background refresh fails.
             }
             setStreaming(false);
-            activeAssistantIdRef.current = null;
+            activeTextIdRef.current = null;
             abortControllerRef.current = null;
             void refreshConversations().catch(() => undefined);
           })();
         },
         onError: (caught) => {
           setError(caught.message);
-          finalizeAssistantMessage(assistantId, caught.message);
+          finalizeActiveTextMessage(caught.message);
           setStreaming(false);
-          activeAssistantIdRef.current = null;
+          activeTextIdRef.current = null;
           abortControllerRef.current = null;
         },
         onCancelled: () => {
-          finalizeCancelledAssistantMessage(assistantId);
+          finalizeCancelledAssistantMessage();
           setStreaming(false);
-          activeAssistantIdRef.current = null;
+          activeTextIdRef.current = null;
           abortControllerRef.current = null;
         },
       },
@@ -356,8 +398,6 @@ export function AgentPanel({
     void sendMessage("请改写我刚刚选中的这段文字，保持上下文风格并提升表达质量。", rewriteRequest.text);
   }, [rewriteRequest?.id]);
 
-  const activePendingConfirmations = filterPendingConfirmations(pendingConfirmations);
-
   return (
     <Card
       className="agent-panel-card"
@@ -388,8 +428,6 @@ export function AgentPanel({
       extra={
         streaming ? (
           <Tag color="processing">生成中</Tag>
-        ) : activePendingConfirmations.length > 0 ? (
-          <Tag color="gold">等待写入确认</Tag>
         ) : (
           <Tag color="green">就绪</Tag>
         )
@@ -434,17 +472,17 @@ export function AgentPanel({
             autoScroll
             items={messages.map((item) => ({
               key: item.id,
-              role: item.role === "assistant" ? "ai" : "user",
+              role: item.role === "user" ? "user" : "ai",
               content:
-                item.role === "assistant" ? (
-                  <>
-                    {item.toolCalls && item.toolCalls.length > 0 ? (
-                      <AgentToolTrace toolCalls={item.toolCalls} />
-                    ) : null}
-                    <AgentMarkdown
-                      content={item.content || (streaming && item.id === activeAssistantIdRef.current ? "..." : "")}
-                    />
-                  </>
+                item.role === "tool" && item.toolCall ? (
+                  <AgentToolCallCard toolCall={item.toolCall} />
+                ) : item.role === "assistant" ? (
+                  <AgentMarkdown
+                    content={
+                      item.content ||
+                      (streaming && item.id === activeTextIdRef.current ? "..." : "")
+                    }
+                  />
                 ) : (
                   item.content
                 ),
@@ -456,23 +494,6 @@ export function AgentPanel({
           />
         </div>
         {error ? <Alert message={error} showIcon style={{ flexShrink: 0 }} type="error" /> : null}
-        {activePendingConfirmations.map((confirmation) => (
-          <ConfirmationActionCard
-            key={confirmation.id}
-            confirmation={confirmation}
-            disabled={streaming || !onResolveConfirmation}
-            onApprove={(confirmationId) =>
-              void onResolveConfirmation?.(confirmationId, "approve").catch((caught: Error) =>
-                setError(caught.message),
-              )
-            }
-            onReject={(confirmationId) =>
-              void onResolveConfirmation?.(confirmationId, "reject").catch((caught: Error) =>
-                setError(caught.message),
-              )
-            }
-          />
-        ))}
         {workspaceDiff ? (
           <div
             aria-label="Agent 目录变更"

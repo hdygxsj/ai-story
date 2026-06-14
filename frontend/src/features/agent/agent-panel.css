@@ -174,6 +174,21 @@
   gap: 10px;
 }
 
+.agent-panel-messages .ant-bubble:has(.agent-tool-call-card) {
+  max-width: 78%;
+}
+
+.agent-panel-messages .ant-bubble:has(.agent-tool-call-card) .ant-bubble-content {
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+  min-height: 0;
+  padding: 2px 6px;
+}
+
+.agent-panel-messages .ant-bubble:has(.agent-tool-call-card) + .ant-bubble:has(.agent-tool-call-card) {
+  margin-top: -6px;
+}
+
 .agent-panel-messages .ant-bubble-content {
   font-size: 13px;
   line-height: 1.65;
@@ -191,7 +206,71 @@
 }
 
 .agent-tool-trace {
-  margin-bottom: 8px;
+  margin-bottom: 0;
+}
+
+.agent-tool-call-card {
+  font-size: 11px;
+  line-height: 1.2;
+  min-width: 0;
+}
+
+.agent-tool-call-card-header {
+  align-items: center;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+}
+
+.agent-tool-call-card-icon {
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.agent-tool-call-card-title {
+  color: #475569;
+  flex: 1;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-tool-call-card-status {
+  align-items: center;
+  display: inline-flex;
+  flex-shrink: 0;
+  font-size: 10px;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.agent-tool-call-card-status.is-ok {
+  color: #16a34a;
+}
+
+.agent-tool-call-card-status.is-running {
+  color: #2563eb;
+}
+
+.agent-tool-call-card-status.is-error {
+  color: #dc2626;
+}
+
+.agent-tool-call-card-status .anticon {
+  font-size: 10px;
+}
+
+.agent-tool-call-card-detail {
+  color: #64748b;
+  font-size: 10px;
+  margin-top: 2px;
+  white-space: pre-wrap;
+}
+
+.agent-tool-call-card .agent-tool-trace-item {
+  margin-top: 0;
 }
 
 .agent-tool-trace .ant-collapse {

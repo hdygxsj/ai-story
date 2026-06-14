@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -21,5 +22,6 @@ class DocumentVersionResponse(BaseModel):
     document_id: UUID
     source: str
     content: dict[str, Any]
+    created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

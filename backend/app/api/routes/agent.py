@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.chat_stream import _sse, stream_agent_events
+from app.agent.context import ContextPack
 from app.agent.stream_errors import format_agent_stream_error
 from app.agent.graph import _build_agent_system_prompt
 from app.agent.prompts import append_agent_runtime_guidance
@@ -85,8 +86,14 @@ async def send_agent_message(
         user_message=payload.message,
         model_profile=model_profile,
     )
+    system_pack = ContextPack(
+        items=[item for item in assembled.pack.items if item.source != "conversation_history"],
+        estimated_tokens=assembled.pack.estimated_tokens,
+        usage_ratio=assembled.pack.usage_ratio,
+        status_messages=assembled.pack.status_messages,
+    )
     system_prompt = append_agent_runtime_guidance(
-        _build_agent_system_prompt(assembled.pack),
+        _build_agent_system_prompt(system_pack),
         novel_id=novel.id,
         document_id=payload.document_id,
     )
@@ -98,6 +105,7 @@ async def send_agent_message(
             "document_id": payload.document_id,
             "message": payload.message,
             "selected_text": payload.selected_text,
+            "history_messages": assembled.history_messages,
             "system_prompt": system_prompt,
         },
         model_profile=model_profile,

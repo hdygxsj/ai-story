@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.chapter_body import is_outline_or_meta_content
-from app.models import Document, DocumentVersion, Novel, PendingConfirmation
+from app.models import Document, DocumentVersion, ModelProfile, Novel, PendingConfirmation
 from app.services.rag import extract_text_from_prosemirror, index_text
 from app.services.workspace_actions import text_document
 
@@ -328,6 +328,53 @@ async def list_owned_document_versions(
             .order_by(DocumentVersion.created_at.desc(), DocumentVersion.id.desc())
         )
     )
+
+
+async def restore_owned_document_version(
+    session: AsyncSession,
+    *,
+    owner_id: UUID,
+    novel_id: UUID,
+    document_id: UUID,
+    version_id: UUID,
+    model_profile: ModelProfile | None = None,
+) -> Document:
+    document = await get_owned_document(
+        session, owner_id=owner_id, novel_id=novel_id, document_id=document_id
+    )
+    version = await session.scalar(
+        select(DocumentVersion).where(
+            DocumentVersion.id == version_id,
+            DocumentVersion.document_id == document.id,
+        )
+    )
+    if version is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document version not found")
+
+    session.add(
+        DocumentVersion(document_id=document.id, source="user", content=deepcopy(document.content))
+    )
+    document.content = deepcopy(version.content)
+    pending = list(
+        await session.scalars(
+            select(PendingConfirmation).where(
+                PendingConfirmation.novel_id == novel_id,
+                PendingConfirmation.status == "pending",
+            )
+        )
+    )
+    reject_pending_confirmations_for_document(pending, document_id=document.id)
+    await index_text(
+        session,
+        novel_id=document.novel_id,
+        source_type="document",
+        source_id=str(document.id),
+        text=extract_text_from_prosemirror(document.content),
+        model_profile=model_profile,
+    )
+    await session.commit()
+    await session.refresh(document)
+    return document
 
 
 async def create_version_restore_proposal(
