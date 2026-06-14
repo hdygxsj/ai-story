@@ -275,6 +275,34 @@ describe("frontend data flow", () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledWith("http://localhost:8000/documents/doc-1", expect.anything()));
   });
 
+  it("switches to workspace when selecting a chapter from another section", async () => {
+    const user = userEvent.setup();
+    const onActiveSectionChange = vi.fn();
+
+    const { rerender } = render(
+      <WorkspacePage
+        activeSection="memory"
+        onActiveSectionChange={onActiveSectionChange}
+        token="token"
+        novelId="novel-1"
+      />,
+    );
+
+    expect(await screen.findByText("Core vow")).toBeInTheDocument();
+    await user.click(await screen.findByText("Chapter From API"));
+
+    expect(onActiveSectionChange).toHaveBeenCalledWith("workspace");
+    rerender(
+      <WorkspacePage
+        activeSection="workspace"
+        onActiveSectionChange={onActiveSectionChange}
+        token="token"
+        novelId="novel-1"
+      />,
+    );
+    expect(await screen.findByText("Loaded chapter content")).toBeInTheDocument();
+  });
+
   it("creates a new chapter from the workspace button", async () => {
     const user = userEvent.setup();
 

@@ -1,6 +1,6 @@
 from uuid import UUID, uuid4
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, tool
 
 from app.agent.graph import _build_agent_system_prompt, _remove_incomplete_tool_call_history, build_agent_graph
@@ -23,9 +23,10 @@ def _empty_context_pack() -> ContextPack:
 def test_default_agent_prompt_allows_selective_automatic_memory() -> None:
     prompt = _build_agent_system_prompt(_empty_context_pack())
     assert "save_key_memory" in prompt
-    assert "propose_document_update" in prompt
+    assert "write_document_content" in prompt
     assert "无需用户审批" in prompt
-    assert "文档和工作区的破坏性写入仍须遵循现有确认流程" in prompt
+    assert "propose_document_update 等需用户确认" in prompt
+    assert "split_chapter_by_max_chars" in prompt
 
 
 def test_agent_tool_registry_exposes_structured_langchain_tools() -> None:
@@ -214,6 +215,30 @@ async def test_create_chapter_with_content_rejects_empty_content(session) -> Non
     assert nodes == []
 
 
+async def test_create_chapter_with_content_rejects_outline_checklist(session) -> None:
+    user = User(email="outline@example.com", username="outline", password_hash="hash")
+    session.add(user)
+    await session.flush()
+    novel = Novel(owner_id=user.id, title="Outline Novel")
+    session.add(novel)
+    await session.commit()
+
+    tools = {tool.name: tool for tool in build_runtime_tools(session, model_profile=None)}
+    result = await tools["create_chapter_with_content"].ainvoke(
+        {
+            "novel_id": str(novel.id),
+            "title": "第五章",
+            "content": "### 本章爽点清单\n> ✅ 城市狩猎\n> ✅ 商城首开",
+            "parent_id": None,
+        }
+    )
+
+    nodes = list(await session.scalars(select(WorkspaceNode)))
+    assert result["status"] == "error"
+    assert "爽点清单" in result["message"]
+    assert nodes == []
+
+
 async def test_scoped_document_tools_create_confirmation_and_hide_other_novels(session) -> None:
     user = User(email="scope@example.com", username="scope", password_hash="hash")
     session.add(user)
@@ -309,13 +334,22 @@ def test_agent_classifies_workspace_organize_shortcut() -> None:
     assert classify_agent_intent("帮我整理章节和草稿目录", None) == "organize_workspace"
 
 
-def test_agent_classifies_write_chapter_content_intent() -> None:
+def test_agent_classifies_explicit_write_requests() -> None:
     assert classify_agent_intent("先写进正文里", None) == "write_chapter_content"
     assert classify_agent_intent("帮我把这章正文保存到工作台", None) == "write_chapter_content"
+    assert classify_agent_intent("写第一章并放到工作台", None) == "write_chapter_content"
+    assert classify_agent_intent("我想你先把前四章的正文写进去", None) == "write_chapter_content"
     assert classify_agent_intent("我想写一个打怪升级的小说", None) == "chat"
 
 
-async def test_create_workspace_node_rejects_empty_chapter(session) -> None:
+def test_agent_tools_include_atomic_write_ops() -> None:
+    tool_names = {tool.name for tool in get_agent_tools()}
+    assert "write_document_content" in tool_names
+    assert "split_chapter_by_max_chars" in tool_names
+    assert "create_chapter_with_content" in tool_names
+
+
+async def test_create_workspace_node_allows_empty_chapter(session) -> None:
     user = User(email="empty-chapter@example.com", username="empty-chapter", password_hash="hash")
     session.add(user)
     await session.flush()
@@ -334,9 +368,9 @@ async def test_create_workspace_node_rejects_empty_chapter(session) -> None:
     )
     nodes = list(await session.scalars(select(WorkspaceNode)))
 
-    assert result["status"] == "error"
-    assert "create_chapter_with_content" in result["message"]
-    assert nodes == []
+    assert result["status"] == "ok"
+    assert result["node"]["node_type"] == "chapter"
+    assert len(nodes) == 1
 
 
 async def test_create_workspace_node_still_allows_folder(session) -> None:
@@ -496,8 +530,8 @@ async def test_agent_graph_executes_multiple_tools_sequentially(monkeypatch) -> 
 
 
 async def test_agent_graph_preserves_workspace_effects_after_final_model_reply(monkeypatch) -> None:
-    @tool("write_chapter")
-    async def write_chapter() -> dict[str, object]:
+    @tool("create_chapter_with_content")
+    async def create_chapter_with_content() -> dict[str, object]:
         """Write a chapter."""
         return {
             "status": "ok",
@@ -515,14 +549,44 @@ async def test_agent_graph_preserves_workspace_effects_after_final_model_reply(m
                 return AIMessage(content="第一章已写入工作台。")
             return AIMessage(
                 content="",
-                tool_calls=[{"name": "write_chapter", "args": {}, "id": "call-write"}],
+                tool_calls=[{"name": "create_chapter_with_content", "args": {}, "id": "call-write"}],
             )
 
     monkeypatch.setattr("app.agent.graph.build_chat_model", lambda profile, purpose="chat": FakeChatModel())
     profile = ModelProfile(owner_id=uuid4(), name="test", provider_kind="openai-compatible", chat_model="test")
-    graph = build_agent_graph(tools=[write_chapter], model_profile=profile)
+    graph = build_agent_graph(tools=[create_chapter_with_content], model_profile=profile)
 
     result = await graph.ainvoke({"novel_id": uuid4(), "message": "写第一章并放到工作台"})
 
     assert result["response"] == "第一章已写入工作台。"
     assert result["workspace_nodes"] == [{"id": "node-1", "document_id": "doc-1"}]
+
+
+async def test_agent_graph_prioritizes_explicit_chapter_write_over_prior_planning(monkeypatch) -> None:
+    captured_messages = []
+
+    class FakeChatModel:
+        def bind_tools(self, tools):
+            return self
+
+        def invoke(self, messages):
+            captured_messages.extend(messages)
+            return AIMessage(content="收到。")
+
+    monkeypatch.setattr("app.agent.graph.build_chat_model", lambda profile, purpose="chat": FakeChatModel())
+    profile = ModelProfile(owner_id=uuid4(), name="test", provider_kind="openai-compatible", chat_model="test")
+    graph = build_agent_graph(tools=[get_agent_tools()[0]], model_profile=profile)
+
+    await graph.ainvoke(
+        {
+            "novel_id": uuid4(),
+            "message": "我想你先把前四章的正文写进去",
+            "system_prompt": "对话历史一直在讨论第八章规划。",
+        }
+    )
+
+    system_text = "\n".join(
+        str(message.content) for message in captured_messages if isinstance(message, SystemMessage)
+    )
+    assert "当前明确写入指令优先于历史规划" in system_text
+    assert "必须调用章节或正文写入工具" in system_text

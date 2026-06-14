@@ -11,7 +11,7 @@ from app.agent.chat_stream import _sse, stream_agent_events
 from app.agent.stream_errors import format_agent_stream_error
 from app.agent.graph import _build_agent_system_prompt
 from app.agent.prompts import append_agent_runtime_guidance
-from app.agent.runtime import invoke_agent_graph
+from app.agent.runtime import invoke_agent_graph, stream_agent_graph
 from app.agent.tools import classify_agent_intent
 from app.api.deps import get_current_user
 from app.db.session import get_session

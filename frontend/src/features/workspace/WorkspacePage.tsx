@@ -52,6 +52,7 @@ import { getStoredDocumentId, setStoredDocumentId } from "./workspaceSessionStor
 type WorkspacePageProps = {
   activeSection?: WorkspaceSection;
   defaultModelProfileId?: string | null;
+  onActiveSectionChange?: (section: WorkspaceSection) => void;
   onDefaultModelProfileChange?: (profileId: string | null) => void;
   onNovelUpdated?: (novel: Pick<import("../../api/novels").Novel, "id" | "title" | "description">) => void;
   onOpenAgentConfig?: () => void;
@@ -256,6 +257,7 @@ function extractDocumentText(content: DocumentBody | null): string {
 export function WorkspacePage({
   activeSection = "workspace",
   defaultModelProfileId = null,
+  onActiveSectionChange,
   onDefaultModelProfileChange,
   onNovelUpdated,
   onOpenAgentConfig,
@@ -605,6 +607,9 @@ export function WorkspacePage({
 
   function handleSelectDocument(nextDocumentId: string) {
     selectDocument(nextDocumentId);
+    if (activeSection !== "workspace") {
+      onActiveSectionChange?.("workspace");
+    }
   }
 
   function selectDocument(nextDocumentId: string | null) {

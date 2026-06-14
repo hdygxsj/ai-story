@@ -1,4 +1,3 @@
-import re
 from typing import Any
 
 from langchain_core.tools import BaseTool, tool
@@ -48,6 +47,17 @@ class CreateChapterWithContentArgs(BaseModel):
 class ProposeDocumentUpdateArgs(BaseModel):
     document_id: str = Field(description="Document UUID in the current novel")
     content: str = Field(description="Complete replacement document text")
+
+
+class WriteDocumentContentArgs(BaseModel):
+    document_id: str = Field(description="Document UUID to update")
+    content: str = Field(description="Complete chapter body text to save immediately")
+
+
+class SplitChapterByMaxCharsArgs(BaseModel):
+    novel_id: str = Field(description="Novel UUID")
+    node_id: str = Field(description="Chapter node UUID to split")
+    max_chars: int = Field(default=3000, ge=500, le=10000, description="Maximum characters per part")
 
 
 class ProposeSelectionReplaceArgs(BaseModel):
@@ -225,51 +235,10 @@ def draft_rewrite(selected_text: str, instruction: str) -> str:
     return f"{selected_text} The room turned tense as every sound seemed to wait for the next mistake."
 
 
-CHAPTER_CONTENT_WRITE_TOOLS = frozenset(
-    {
-        "create_chapter_with_content",
-        "propose_document_update",
-        "propose_selection_replace",
-        "propose_rewrite",
-    }
-)
-
-_CHAPTER_WRITE_PHRASES = (
-    "写进正文",
-    "写入正文",
-    "写正文",
-    "保存正文",
-    "写到工作台",
-    "保存到工作台",
-    "写进当前",
-    "写进章节",
-    "生成正文",
-    "续写正文",
-    "写入章节",
-    "保存到章节",
-    "写进文档",
-)
-
-
-def is_chapter_content_write_request(message: str) -> bool:
-    if any(phrase in message for phrase in _CHAPTER_WRITE_PHRASES):
-        return True
-    if re.search(r"(写|生成|创作|续写).{0,6}第.{0,3}章", message):
-        return True
-    write_verbs = ("写", "生成", "创作", "续写", "撰写", "保存")
-    content_targets = ("正文", "这章", "当前文档", "当前章节", "这一章", "工作台")
-    return any(verb in message for verb in write_verbs) and any(
-        target in message for target in content_targets
-    )
-
-
 def classify_agent_intent(message: str, selected_text: str | None) -> str:
     lowered = message.lower()
     if selected_text and ("rewrite" in lowered or "改写" in lowered or "重写" in lowered):
         return "rewrite_selection"
-
-    if is_chapter_content_write_request(message):
-        return "write_chapter_content"
 
     material_keywords = (
         "素材",
@@ -297,6 +266,17 @@ def classify_agent_intent(message: str, selected_text: str | None) -> str:
     )
     delete_keywords = ("删", "删除", "移除", "去掉", "清理", "清除", "delete", "remove", "trash", "clear")
     organize_keywords = ("整理", "归类", "organize")
+    write_action_keywords = (
+        "写进",
+        "写入",
+        "保存到",
+        "放到工作台",
+        "落到工作台",
+        "录入",
+        "persist",
+        "save to workspace",
+    )
+    write_target_keywords = ("正文", "章节", "章", "工作台", "document", "chapter", "workspace")
 
     if any(keyword in message for keyword in material_keywords):
         return "chat"
@@ -310,6 +290,11 @@ def classify_agent_intent(message: str, selected_text: str | None) -> str:
         keyword in message for keyword in workspace_keywords
     ):
         return "organize_workspace"
+
+    if any(keyword in lowered for keyword in write_action_keywords) and any(
+        keyword in lowered for keyword in write_target_keywords
+    ):
+        return "write_chapter_content"
 
     if "remember" in lowered or "记住" in lowered:
         return "draft_key_memory"
@@ -365,7 +350,7 @@ def create_workspace_node_tool(
     node_type: str,
     parent_id: str | None = None,
 ) -> dict[str, Any]:
-    """Create an empty folder shell only. For chapters with story text, use create_chapter_with_content instead."""
+    """Create a folder, chapter, note, or draft node shell."""
     return {"novel_id": novel_id, "title": title, "node_type": node_type, "parent_id": parent_id}
 
 
@@ -382,8 +367,22 @@ def create_chapter_with_content_tool(
 
 @tool("propose_document_update", args_schema=ProposeDocumentUpdateArgs)
 def propose_document_update(document_id: str, content: str) -> dict[str, Any]:
-    """Persist complete chapter body into the open document; required when the user asks to write into current chapter text."""
+    """Propose a full chapter body replacement; user must confirm before it applies."""
     return {"document_id": document_id, "content": content, "status": "requires_runtime_loader"}
+
+
+@tool("write_document_content", args_schema=WriteDocumentContentArgs)
+def write_document_content_tool(document_id: str, content: str) -> dict[str, Any]:
+    """Atomically replace a chapter body and save immediately without confirmation."""
+    return {"document_id": document_id, "content": content, "status": "requires_runtime_loader"}
+
+
+@tool("split_chapter_by_max_chars", args_schema=SplitChapterByMaxCharsArgs)
+def split_chapter_by_max_chars_tool(
+    novel_id: str, node_id: str, max_chars: int = 3000
+) -> dict[str, Any]:
+    """Split an overlong chapter into multiple parts, each at most max_chars."""
+    return {"novel_id": novel_id, "node_id": node_id, "max_chars": max_chars}
 
 
 @tool("propose_selection_replace", args_schema=ProposeSelectionReplaceArgs)
@@ -630,6 +629,8 @@ def get_agent_tools() -> list[BaseTool]:
         list_workspace_nodes_tool,
         create_workspace_node_tool,
         create_chapter_with_content_tool,
+        write_document_content_tool,
+        split_chapter_by_max_chars_tool,
         propose_document_update,
         propose_selection_replace,
         list_document_versions_tool,

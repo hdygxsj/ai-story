@@ -7,6 +7,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.chapter_body import is_outline_or_meta_content
 from app.models import Document, DocumentVersion, Novel, PendingConfirmation
 from app.services.rag import extract_text_from_prosemirror, index_text
 from app.services.workspace_actions import text_document
@@ -267,6 +268,11 @@ async def create_document_update_proposal(
     )
     if not content.strip():
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Content is empty")
+    if is_outline_or_meta_content(content):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="检测到爽点清单/大纲/要点列表，不能写入章节正文。请先生成小说散文正文。",
+        )
     return await _create_proposal(
         session,
         document=document,

@@ -22,7 +22,7 @@ const TOOL_LABELS: Record<string, string> = {
   list_timeline_events: "列出时间线",
   list_workspace_nodes: "列出章节树",
   organize_workspace_tree: "整理章节树",
-  propose_document_update: "更新正文",
+  propose_document_update: "更新正文（需确认）",
   propose_rewrite: "改写提案",
   propose_selection_replace: "替换选区",
   propose_version_restore: "恢复版本",
@@ -31,10 +31,12 @@ const TOOL_LABELS: Record<string, string> = {
   save_key_memory: "保存记忆",
   search_memory: "检索记忆",
   search_rag: "检索上下文",
+  split_chapter_by_max_chars: "拆分章节",
   trash_workspace_node: "移入回收站",
   update_character_state: "更新角色状态",
   update_novel: "重命名小说",
   update_workspace_node: "更新节点",
+  write_document_content: "写入正文",
 };
 
 function toolLabel(name: string) {

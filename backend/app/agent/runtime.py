@@ -12,9 +12,10 @@ from app.models import ModelProfile
 
 
 def graph_invoke_config(conversation_id: UUID | None) -> dict[str, Any]:
-    if conversation_id is None:
-        return {}
-    return {"configurable": {"thread_id": str(conversation_id)}}
+    config: dict[str, Any] = {"recursion_limit": 25}
+    if conversation_id is not None:
+        config["configurable"] = {"thread_id": str(conversation_id)}
+    return config
 
 
 async def invoke_agent_graph(

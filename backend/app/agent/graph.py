@@ -5,17 +5,12 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableLambda
 from langgraph.graph import END, StateGraph
-from langgraph.prebuilt import tools_condition
 
+from app.agent.atomic_ops import ATOMIC_OPS_GUIDANCE
 from app.agent.context import ContextPack
 from app.agent.model_runtime import build_chat_model
 from app.agent.state import AgentState
-from app.agent.tools import (
-    CHAPTER_CONTENT_WRITE_TOOLS,
-    classify_agent_intent,
-    get_agent_tools,
-    is_chapter_content_write_request,
-)
+from app.agent.tools import classify_agent_intent, get_agent_tools
 from app.models import ModelProfile
 
 _MEMORY_GUIDANCE = (
@@ -28,41 +23,22 @@ _MATERIAL_GUIDANCE = (
     "清理旧版或重复素材时，自行调用 delete_creative_asset 或 delete_creative_assets，"
     "不要要求用户手动删除。修改或删除前先 list 获取 id。"
 )
-_DESTRUCTIVE_WRITE_GUIDANCE = "文档和工作区的破坏性写入仍须遵循现有确认流程。"
-_WRITE_CHAPTER_REMINDER = (
-    "\n\n【本次任务：写入章节正文】"
-    "必须调用 create_chapter_with_content（新章节）或 propose_document_update（当前文档），"
-    "禁止只用 create_workspace_node，禁止只在对话里展示长正文。"
+_DESTRUCTIVE_WRITE_GUIDANCE = "propose_document_update 等需用户确认；write_document_content 等原子写入会立即生效。"
+_EXPLICIT_WRITE_GUIDANCE = (
+    "当前明确写入指令优先于历史规划、讨论和待办。用户要求写入章节正文时，"
+    "不要继续规划、复述大纲或改写其他章节方案；必须调用章节或正文写入工具完成任务。"
+    "先用 list_workspace_nodes 确认目标章节：已有章节调用 read_document 后使用 "
+    "write_document_content，缺失章节使用 create_chapter_with_content。多章请求要逐章处理，"
+    "只有工具成功后才能声称已写入。"
 )
-_MISSED_CHAPTER_WRITE_RESPONSE = (
-    "正文尚未写入工作台。请再说一次要写哪一章，我会调用写作工具保存正文，而不是只在对话里展示。"
-)
-
-
-def _write_content_tools_called(tool_messages: list[ToolMessage]) -> bool:
-    return any(message.name in CHAPTER_CONTENT_WRITE_TOOLS for message in tool_messages)
-
-
-def _missed_chapter_write_response(state: AgentState, tool_messages: list[ToolMessage]) -> str | None:
-    if not is_chapter_content_write_request(str(state.get("message", ""))):
-        return None
-    if _write_content_tools_called(tool_messages):
-        return None
-    if tool_messages:
-        return None
-    return _MISSED_CHAPTER_WRITE_RESPONSE
 
 
 def _default_system_prompt(state: AgentState) -> str:
     novel_id = state.get("novel_id")
     lines = [
-        "你是 AI 小说工坊的共创 Agent，帮助用户规划故事、改写段落、记录记忆、整理章节树和检索上下文。",
-        "请使用与用户相同的语言回复，给出具体、可执行的建议。",
-        "整理章节树（创建空文件夹/占位、移动、重命名、删除）时，调用 create_workspace_node 等工作区工具，不要只给口头建议。",
-        "用户要求写、生成、创作或保存章节正文时，禁止仅用 create_workspace_node 建空章节；"
-        "新章节必须调用 create_chapter_with_content，当前文档必须调用 propose_document_update。"
-        "只有工具返回成功后才能说已写入或已完成。",
-        "整理记忆、素材、时间线，或给当前小说改名时，优先调用相应工具。",
+        "你是 AI 小说工坊的共创 Agent，通过组合原子工具完成用户的复杂创作需求。",
+        "请使用与用户相同的语言回复。",
+        ATOMIC_OPS_GUIDANCE.strip(),
         _MEMORY_GUIDANCE,
         _MATERIAL_GUIDANCE,
         _DESTRUCTIVE_WRITE_GUIDANCE,
@@ -83,13 +59,9 @@ def _build_agent_system_prompt(pack: ContextPack) -> str:
         "conversation_history": "对话历史",
     }
     lines = [
-        "你是 AI 小说工坊的共创 Agent，帮助用户规划故事、改写段落、记录记忆、整理章节树和检索上下文。",
-        "请使用与用户相同的语言回复，给出具体、可执行的建议。",
-        "整理章节树（创建空文件夹/占位、移动、重命名、删除）时，调用 create_workspace_node 等工作区工具，不要只给口头建议。",
-        "用户要求写、生成、创作或保存章节正文时，禁止仅用 create_workspace_node 建空章节；"
-        "新章节必须调用 create_chapter_with_content，当前文档必须调用 propose_document_update。"
-        "只有工具返回成功后才能说已写入或已完成。",
-        "整理记忆、素材、时间线，或给当前小说改名时，优先调用相应工具。",
+        "你是 AI 小说工坊的共创 Agent，通过组合原子工具完成用户的复杂创作需求。",
+        "请使用与用户相同的语言回复。",
+        ATOMIC_OPS_GUIDANCE.strip(),
         _MEMORY_GUIDANCE,
         _MATERIAL_GUIDANCE,
         _DESTRUCTIVE_WRITE_GUIDANCE,
@@ -258,9 +230,11 @@ def build_agent_graph(
 
         system_prompt = state.get("system_prompt") or _default_system_prompt(state)
         if intent == "write_chapter_content":
-            system_prompt = f"{system_prompt}{_WRITE_CHAPTER_REMINDER}"
+            system_prompt = f"{system_prompt}\n\n{_EXPLICIT_WRITE_GUIDANCE}"
         if not prior:
             prior = [SystemMessage(content=system_prompt), HumanMessage(content=state["message"])]
+        elif intent == "write_chapter_content":
+            prior.insert(0, SystemMessage(content=_EXPLICIT_WRITE_GUIDANCE))
 
         model = build_chat_model(model_profile, purpose="chat").bind_tools(tool_list)
         return prior, model, None
@@ -303,10 +277,6 @@ def build_agent_graph(
 
     def finalize_node(state: AgentState) -> dict[str, Any]:
         tool_messages = [message for message in state.get("messages", []) if isinstance(message, ToolMessage)]
-        missed_write = _missed_chapter_write_response(state, tool_messages)
-        if missed_write:
-            return {"response": missed_write}
-
         if not tool_messages:
             if state.get("response"):
                 return {}
@@ -337,12 +307,18 @@ def build_agent_graph(
             **effects,
         }
 
+    def route_after_agent(state: AgentState) -> str:
+        messages = list(state.get("messages", []))
+        if messages and isinstance(messages[-1], AIMessage) and messages[-1].tool_calls:
+            return "tools"
+        return "finalize"
+
     graph = StateGraph(AgentState)
     graph.add_node("agent", RunnableLambda(agent_node_sync, afunc=agent_node_async))
     graph.add_node("tools", RunnableLambda(sequential_tools_node_sync, afunc=sequential_tools_node_async))
     graph.add_node("finalize", finalize_node)
     graph.set_entry_point("agent")
-    graph.add_conditional_edges("agent", tools_condition, {"tools": "tools", END: "finalize"})
+    graph.add_conditional_edges("agent", route_after_agent, {"tools": "tools", "finalize": "finalize"})
     graph.add_edge("tools", "agent")
     graph.add_edge("finalize", END)
     return graph.compile(checkpointer=checkpointer)

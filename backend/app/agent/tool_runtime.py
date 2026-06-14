@@ -35,8 +35,10 @@ from app.agent.tools import (
     ReadDocumentArgs,
     SearchMemoryArgs,
     SearchRagArgs,
+    SplitChapterByMaxCharsArgs,
     RestoreWorkspaceNodeArgs,
     TrashWorkspaceNodeArgs,
+    WriteDocumentContentArgs,
     UpdateCharacterStateArgs,
     UpdateCreativeAssetArgs,
     UpdateRelationshipEdgeArgs,
@@ -90,8 +92,10 @@ from app.services.workspace_actions import (
     list_workspace_nodes,
     organize_workspace_tree,
     restore_workspace_node,
+    split_chapter_by_max_chars,
     trash_workspace_node,
     update_workspace_node,
+    write_document_content,
 )
 
 
@@ -161,7 +165,7 @@ def build_runtime_tools(
 
     @tool("propose_document_update", args_schema=ProposeDocumentUpdateArgs)
     async def propose_document_update_runtime(document_id: str, content: str) -> dict[str, Any]:
-        """Persist complete chapter body into the open document; required when the user asks to write into current chapter text."""
+        """Propose a full chapter body replacement; user must confirm before it applies."""
         scope = scoped_ids()
         if scope is None:
             return {"status": "error", "message": "工具缺少当前用户或小说作用域。"}
@@ -181,6 +185,24 @@ def build_runtime_tools(
             "confirmation_id": str(confirmation.id),
             "message": "正文更新方案已生成，请确认后应用。",
         }
+
+    @tool("write_document_content", args_schema=WriteDocumentContentArgs)
+    async def write_document_content_runtime(document_id: str, content: str) -> dict[str, Any]:
+        """Atomically replace a chapter body and save immediately without confirmation."""
+        scope = scoped_ids()
+        if scope is None:
+            return {"status": "error", "message": "工具缺少当前用户或小说作用域。"}
+        try:
+            result = await write_document_content(
+                session,
+                owner_id=scope[0],
+                novel_id=scope[1],
+                document_id=UUID(document_id),
+                content=content,
+            )
+        except Exception as exc:
+            return {"status": "error", "message": getattr(exc, "detail", str(exc))}
+        return result
 
     @tool("propose_selection_replace", args_schema=ProposeSelectionReplaceArgs)
     async def propose_selection_replace_runtime(
@@ -307,16 +329,7 @@ def build_runtime_tools(
     async def create_workspace_node_runtime(
         novel_id: str, title: str, node_type: str, parent_id: str | None = None
     ) -> dict[str, Any]:
-        """Create an empty folder shell only. For chapters with story text, use create_chapter_with_content instead."""
-        if node_type != "folder":
-            return {
-                "status": "error",
-                "message": (
-                    f"create_workspace_node 不能创建带正文的 {node_type}。"
-                    "写章节正文请调用 create_chapter_with_content；"
-                    "更新已有章节请调用 propose_document_update。"
-                ),
-            }
+        """Create a folder, chapter, note, or draft node shell."""
         return await create_workspace_node(
             session,
             novel_id=current_novel_id(novel_id),
@@ -349,7 +362,7 @@ def build_runtime_tools(
         parent_id: str | None = None,
         position: int | None = None,
     ) -> dict[str, Any]:
-        """Rename or move a workspace node."""
+        """Atomically rename, move, or reorder a chapter/folder node."""
         return await update_workspace_node(
             session,
             novel_id=current_novel_id(novel_id),
@@ -364,6 +377,22 @@ def build_runtime_tools(
         """Move a workspace node to trash."""
         return await trash_workspace_node(
             session, novel_id=current_novel_id(novel_id), node_id=UUID(node_id)
+        )
+
+    @tool("split_chapter_by_max_chars", args_schema=SplitChapterByMaxCharsArgs)
+    async def split_chapter_by_max_chars_runtime(
+        novel_id: str, node_id: str, max_chars: int = 3000
+    ) -> dict[str, Any]:
+        """Split an overlong chapter into multiple parts, each at most max_chars."""
+        scope = scoped_ids()
+        if scope is None:
+            return {"status": "error", "message": "工具缺少当前用户或小说作用域。"}
+        return await split_chapter_by_max_chars(
+            session,
+            novel_id=current_novel_id(novel_id),
+            owner_id=scope[0],
+            node_id=UUID(node_id),
+            max_chars=max_chars,
         )
 
     @tool("organize_workspace_tree", args_schema=OrganizeWorkspaceTreeArgs)
@@ -895,6 +924,8 @@ def build_runtime_tools(
         "list_workspace_nodes": list_workspace_nodes_runtime,
         "create_workspace_node": create_workspace_node_runtime,
         "create_chapter_with_content": create_chapter_with_content_runtime,
+        "write_document_content": write_document_content_runtime,
+        "split_chapter_by_max_chars": split_chapter_by_max_chars_runtime,
         "propose_document_update": propose_document_update_runtime,
         "propose_selection_replace": propose_selection_replace_runtime,
         "list_document_versions": list_document_versions_runtime,

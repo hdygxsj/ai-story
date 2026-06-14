@@ -442,6 +442,7 @@ export function App() {
                 activeSection={activeSection}
                 defaultModelProfileId={selectedNovel?.default_model_profile_id ?? null}
                 novelId={novelId}
+                onActiveSectionChange={navigateSection}
                 onOpenAgentConfig={() => navigateSection("agent-config")}
                 onPendingConfirmationCountChange={setPendingConfirmationCount}
                 onDefaultModelProfileChange={(profileId) => {

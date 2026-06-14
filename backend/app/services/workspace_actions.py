@@ -1,9 +1,12 @@
+from copy import deepcopy
+import re
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Document, DocumentVersion, WorkspaceNode
+from app.agent.chapter_body import is_outline_or_meta_content
+from app.models import Document, DocumentVersion, Novel, WorkspaceNode
 from app.services.rag import extract_text_from_prosemirror, index_text
 
 
@@ -114,6 +117,11 @@ async def create_chapter_with_content(
     normalized = content.strip()
     if not normalized:
         return {"status": "error", "message": "章节正文不能为空。"}
+    if is_outline_or_meta_content(normalized):
+        return {
+            "status": "error",
+            "message": "检测到爽点清单/大纲/要点列表，不能写入章节正文。请先生成小说散文正文。",
+        }
     if parent_id is not None:
         parent = await session.scalar(
             select(WorkspaceNode).where(
@@ -166,6 +174,177 @@ async def create_chapter_with_content(
         "message": f"已将《{title}》写入工作台。",
         "node": workspace_snapshot([node])[0],
         "workspace_nodes": workspace_snapshot(nodes),
+    }
+
+
+async def write_document_content(
+    session: AsyncSession,
+    *,
+    owner_id: UUID,
+    novel_id: UUID,
+    document_id: UUID,
+    content: str,
+) -> dict[str, object]:
+    from app.services.document_actions import get_owned_document
+
+    normalized = content.strip()
+    if not normalized:
+        return {"status": "error", "message": "章节正文不能为空。"}
+    if is_outline_or_meta_content(normalized):
+        return {
+            "status": "error",
+            "message": "检测到爽点清单/大纲/要点列表，不能写入章节正文。",
+        }
+
+    document = await get_owned_document(
+        session,
+        owner_id=owner_id,
+        novel_id=novel_id,
+        document_id=document_id,
+    )
+    session.add(
+        DocumentVersion(document_id=document.id, source="agent", content=deepcopy(document.content))
+    )
+    document.content = text_document(normalized)
+    await index_text(
+        session,
+        novel_id=document.novel_id,
+        source_type="document",
+        source_id=str(document.id),
+        text=normalized,
+    )
+    await session.commit()
+    await session.refresh(document)
+    return {
+        "status": "ok",
+        "action_type": "document_write",
+        "message": "已更新章节正文。",
+        "document_id": str(document.id),
+    }
+
+
+def split_prose_by_max_chars(text: str, max_chars: int) -> list[str]:
+    max_chars = max(500, max_chars)
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text.strip()) if part.strip()]
+    if not paragraphs:
+        paragraphs = [line.strip() for line in text.splitlines() if line.strip()]
+    if not paragraphs:
+        return []
+
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+
+    def flush() -> None:
+        nonlocal current, current_len
+        if current:
+            chunks.append("\n\n".join(current))
+            current = []
+            current_len = 0
+
+    for paragraph in paragraphs:
+        if len(paragraph) > max_chars:
+            flush()
+            start = 0
+            while start < len(paragraph):
+                chunks.append(paragraph[start : start + max_chars])
+                start += max_chars
+            continue
+
+        extra = len(paragraph) + (2 if current else 0)
+        if current and current_len + extra > max_chars:
+            flush()
+        current.append(paragraph)
+        current_len += extra
+
+    flush()
+    return chunks
+
+
+def _split_chapter_titles(base_title: str, parts: int) -> list[str]:
+    if parts <= 1:
+        return [base_title]
+    if parts == 2:
+        return [f"{base_title}（上）", f"{base_title}（下）"]
+    return [f"{base_title}（{index + 1}）" for index in range(parts)]
+
+
+async def split_chapter_by_max_chars(
+    session: AsyncSession,
+    *,
+    novel_id: UUID,
+    owner_id: UUID,
+    node_id: UUID,
+    max_chars: int = 3000,
+) -> dict[str, object]:
+    node = await session.scalar(
+        select(WorkspaceNode).where(
+            WorkspaceNode.id == node_id,
+            WorkspaceNode.novel_id == novel_id,
+            WorkspaceNode.node_type == "chapter",
+            WorkspaceNode.status != "trashed",
+        )
+    )
+    if node is None or node.document_id is None:
+        return {"status": "error", "message": "章节不存在或缺少文档。"}
+
+    from app.services.document_actions import extract_document_plain_text
+
+    document = await session.get(Document, node.document_id)
+    if document is None:
+        return {"status": "error", "message": "章节文档不存在。"}
+
+    text = extract_document_plain_text(document.content) or extract_text_from_prosemirror(document.content)
+    normalized = text.strip()
+    if not normalized:
+        return {"status": "error", "message": "章节正文为空，无法拆分。"}
+    if len(normalized) <= max_chars:
+        return {"status": "error", "message": f"章节未超过 {max_chars} 字，无需拆分。"}
+
+    chunks = split_prose_by_max_chars(normalized, max_chars)
+    if len(chunks) < 2:
+        return {"status": "error", "message": "无法按段落边界拆分，请调整字数上限后重试。"}
+
+    titles = _split_chapter_titles(node.title, len(chunks))
+    await write_document_content(
+        session,
+        owner_id=owner_id,
+        novel_id=novel_id,
+        document_id=document.id,
+        content=chunks[0],
+    )
+    await update_workspace_node(session, novel_id=novel_id, node_id=node.id, title=titles[0])
+
+    created_titles: list[str] = [titles[0]]
+    insert_position = node.position + 1
+    for index, chunk in enumerate(chunks[1:], start=1):
+        result = await create_chapter_with_content(
+            session,
+            novel_id=novel_id,
+            title=titles[index],
+            content=chunk,
+            parent_id=node.parent_id,
+        )
+        if result.get("status") != "ok":
+            return result
+        created_node = result.get("node")
+        if isinstance(created_node, dict) and created_node.get("id"):
+            await update_workspace_node(
+                session,
+                novel_id=novel_id,
+                node_id=UUID(str(created_node["id"])),
+                position=insert_position,
+            )
+            insert_position += 1
+        created_titles.append(titles[index])
+
+    nodes = await load_workspace_nodes(session, novel_id)
+    return {
+        "status": "ok",
+        "action_type": "chapter_split",
+        "message": f"已将「{node.title}」拆为 {len(chunks)} 章：{'、'.join(created_titles)}。",
+        "workspace_nodes": workspace_snapshot(nodes),
+        "parts": created_titles,
     }
 
 

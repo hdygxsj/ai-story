@@ -57,6 +57,42 @@ const placeholderNodes: WorkspaceNode[] = [
   },
 ];
 
+function rectsIntersect(
+  left: { left: number; top: number; right: number; bottom: number },
+  right: { left: number; top: number; right: number; bottom: number },
+) {
+  return left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
+}
+
+export function normalizeMarqueeRect(startX: number, startY: number, endX: number, endY: number) {
+  return {
+    left: Math.min(startX, endX),
+    top: Math.min(startY, endY),
+    right: Math.max(startX, endX),
+    bottom: Math.max(startY, endY),
+  };
+}
+
+export function collectMarqueeNodeIds(
+  container: HTMLElement,
+  selectionRect: { left: number; top: number; right: number; bottom: number },
+): string[] {
+  const ids: string[] = [];
+  for (const element of container.querySelectorAll("[data-workspace-node-id]")) {
+    const nodeId = element.getAttribute("data-workspace-node-id");
+    if (!nodeId) {
+      continue;
+    }
+    const row = element.closest(".ant-tree-treenode");
+    const target = row ?? element;
+    const rect = target.getBoundingClientRect();
+    if (rectsIntersect(selectionRect, rect)) {
+      ids.push(nodeId);
+    }
+  }
+  return ids;
+}
+
 function sortedSiblings(nodes: WorkspaceNode[], parentId: string | null) {
   return nodes
     .filter((node) => node.parent_id === parentId)
@@ -224,6 +260,18 @@ export function calculateTreeRelativeDropPosition(dropPosition: number, nodePosi
   return Number.isFinite(treeIndex) ? dropPosition - treeIndex : dropPosition;
 }
 
+type MarqueeDrag = {
+  additive: boolean;
+  endX: number;
+  endY: number;
+  shift: boolean;
+  startX: number;
+  startY: number;
+  targetNodeId: string | null;
+};
+
+const MARQUEE_MOVE_THRESHOLD = 4;
+
 export function WorkspaceTree({
   nodes = placeholderNodes,
   onCreateChapter,
@@ -243,7 +291,14 @@ export function WorkspaceTree({
   const [recycleBinExpanded, setRecycleBinExpanded] = useState(false);
   const [selectedNodeKeys, setSelectedNodeKeys] = useState<string[]>([]);
   const [lastClickedNodeKey, setLastClickedNodeKey] = useState<string | null>(null);
+  const [marquee, setMarquee] = useState<MarqueeDrag | null>(null);
+  const [marqueeSelecting, setMarqueeSelecting] = useState(false);
   const previousDocumentIdRef = useRef<string | null>(null);
+  const treeAreaRef = useRef<HTMLDivElement | null>(null);
+  const marqueeDragRef = useRef<MarqueeDrag | null>(null);
+  const marqueeSuppressSelectRef = useRef(false);
+  const lastClickedNodeKeyRef = useRef(lastClickedNodeKey);
+  lastClickedNodeKeyRef.current = lastClickedNodeKey;
   const renamingNodeLabel = renamingNode?.node_type === "folder" ? "文件夹" : "章节";
   const activeNodes = useMemo(() => nodes.filter((node) => node.status !== "trashed"), [nodes]);
   const trashedNodes = useMemo(() => nodes.filter((node) => node.status === "trashed"), [nodes]);
@@ -324,6 +379,7 @@ export function WorkspaceTree({
             </span>
             <span
               data-testid={`workspace-node-title-${node.id}`}
+              data-workspace-node-id={node.id}
               title={node.title}
               style={{
                 display: "inline-block",
@@ -361,7 +417,138 @@ export function WorkspaceTree({
     setLastClickedNodeKey(selectedNode.id);
   }, [activeNodes, selectedDocumentId]);
 
+  useEffect(() => {
+    function handleMouseMove(event: MouseEvent) {
+      const drag = marqueeDragRef.current;
+      if (!drag) {
+        return;
+      }
+
+      drag.endX = event.clientX;
+      drag.endY = event.clientY;
+      const movedEnough =
+        Math.abs(drag.endX - drag.startX) > MARQUEE_MOVE_THRESHOLD ||
+        Math.abs(drag.endY - drag.startY) > MARQUEE_MOVE_THRESHOLD;
+
+      if (!movedEnough) {
+        return;
+      }
+
+      if (!marqueeSelecting) {
+        setMarqueeSelecting(true);
+        marqueeSuppressSelectRef.current = true;
+      }
+      setMarquee({ ...drag });
+    }
+
+    function finishMarquee(event: MouseEvent) {
+      const drag = marqueeDragRef.current;
+      if (!drag) {
+        return;
+      }
+
+      const container = treeAreaRef.current;
+      const movedEnough =
+        Math.abs(event.clientX - drag.startX) > MARQUEE_MOVE_THRESHOLD ||
+        Math.abs(event.clientY - drag.startY) > MARQUEE_MOVE_THRESHOLD;
+
+      if (container && movedEnough) {
+        const selectionRect = normalizeMarqueeRect(drag.startX, drag.startY, event.clientX, event.clientY);
+        const marqueeIds = collectMarqueeNodeIds(container, selectionRect);
+        if (marqueeIds.length) {
+          setSelectedNodeKeys((currentKeys) => {
+            const nextKeys = drag.additive ? [...new Set([...currentKeys, ...marqueeIds])] : marqueeIds;
+            return nextKeys;
+          });
+          setLastClickedNodeKey(marqueeIds[marqueeIds.length - 1] ?? null);
+          const documentId = [...marqueeIds]
+            .reverse()
+            .map((id) => activeNodes.find((node) => node.id === id)?.document_id)
+            .find(Boolean);
+          if (documentId) {
+            onSelectDocument?.(documentId);
+          }
+        }
+      } else if (!movedEnough && drag.shift && drag.targetNodeId) {
+        const rangeKeys =
+          lastClickedNodeKeyRef.current
+            ? siblingRangeKeys(activeNodes, lastClickedNodeKeyRef.current, drag.targetNodeId)
+            : [drag.targetNodeId];
+        setSelectedNodeKeys(rangeKeys);
+        setLastClickedNodeKey(drag.targetNodeId);
+        const documentId = activeNodes.find((node) => node.id === drag.targetNodeId)?.document_id;
+        if (documentId) {
+          onSelectDocument?.(documentId);
+        }
+      }
+
+      marqueeDragRef.current = null;
+      setMarquee(null);
+      setMarqueeSelecting(false);
+      window.setTimeout(() => {
+        marqueeSuppressSelectRef.current = false;
+      }, 0);
+    }
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", finishMarquee);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", finishMarquee);
+    };
+  }, [activeNodes, marqueeSelecting, onSelectDocument]);
+
+  function shouldStartMarquee(target: EventTarget | null) {
+    if (!(target instanceof Element) || !treeAreaRef.current?.contains(target)) {
+      return false;
+    }
+    if (target.closest("button") || target.closest(".ant-tree-switcher")) {
+      return false;
+    }
+    return true;
+  }
+
+  function handleTreeAreaMouseDownCapture(event: React.MouseEvent<HTMLDivElement>) {
+    if (event.button !== 0 || !shouldStartMarquee(event.target)) {
+      return;
+    }
+
+    const target = event.target as Element;
+    const additive = event.ctrlKey || event.metaKey;
+    const shift = event.shiftKey;
+    const onContent = target.closest(".ant-tree-node-content-wrapper");
+    const canMarquee = !onContent || shift;
+
+    if (!canMarquee) {
+      return;
+    }
+
+    const drag: MarqueeDrag = {
+      additive,
+      endX: event.clientX,
+      endY: event.clientY,
+      shift,
+      startX: event.clientX,
+      startY: event.clientY,
+      targetNodeId:
+        target.closest(".ant-tree-treenode")?.querySelector("[data-workspace-node-id]")?.getAttribute("data-workspace-node-id") ??
+        null,
+    };
+    marqueeDragRef.current = drag;
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!onContent) {
+      setMarqueeSelecting(true);
+      marqueeSuppressSelectRef.current = true;
+      setMarquee({ ...drag });
+    }
+  }
+
   function handleNodeSelect(_selectedKeys: Key[], info: { nativeEvent: MouseEvent; node: { key: Key } }) {
+    if (marqueeSuppressSelectRef.current || marqueeSelecting || marqueeDragRef.current) {
+      return;
+    }
     const clickedKey = String(info.node.key);
     const clickedNode = activeNodes.find((node) => node.id === clickedKey);
     const nativeEvent = info.nativeEvent;
@@ -431,10 +618,36 @@ export function WorkspaceTree({
               ) : null}
             </Space>
           </div>
-          <Tree
+          <div
+            data-tree-marquee-area
+            onMouseDownCapture={handleTreeAreaMouseDownCapture}
+            ref={treeAreaRef}
+            style={{ minHeight: 160, position: "relative", userSelect: marquee ? "none" : undefined }}
+          >
+            {marquee ? (
+              <div
+                aria-hidden
+                style={{
+                  background: "rgba(59, 130, 246, 0.14)",
+                  border: "1px solid rgba(59, 130, 246, 0.45)",
+                  left: normalizeMarqueeRect(marquee.startX, marquee.startY, marquee.endX, marquee.endY).left,
+                  pointerEvents: "none",
+                  position: "fixed",
+                  top: normalizeMarqueeRect(marquee.startX, marquee.startY, marquee.endX, marquee.endY).top,
+                  width:
+                    normalizeMarqueeRect(marquee.startX, marquee.startY, marquee.endX, marquee.endY).right -
+                    normalizeMarqueeRect(marquee.startX, marquee.startY, marquee.endX, marquee.endY).left,
+                  height:
+                    normalizeMarqueeRect(marquee.startX, marquee.startY, marquee.endX, marquee.endY).bottom -
+                    normalizeMarqueeRect(marquee.startX, marquee.startY, marquee.endX, marquee.endY).top,
+                  zIndex: 20,
+                }}
+              />
+            ) : null}
+            <Tree
             blockNode
             defaultExpandAll
-            draggable={{ icon: false }}
+            draggable={marqueeSelecting ? false : { icon: false }}
             multiple
             selectedKeys={selectedNodeKeys}
             treeData={treeData}
@@ -463,6 +676,7 @@ export function WorkspaceTree({
             }}
             onSelect={handleNodeSelect}
           />
+          </div>
           </Space>
         </div>
           {trashedNodes.length > 0 ? (

@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { WorkspaceTree, calculateTreeRelativeDropPosition, calculateWorkspaceDrop } from "../features/workspace/WorkspaceTree";
+import { WorkspaceTree, calculateTreeRelativeDropPosition, calculateWorkspaceDrop, collectMarqueeNodeIds, normalizeMarqueeRect } from "../features/workspace/WorkspaceTree";
 import type { WorkspaceNode } from "../api/workspace";
 
 const nodes: WorkspaceNode[] = [
@@ -96,7 +96,66 @@ describe("calculateWorkspaceDrop", () => {
     expect(changes).toContainEqual({ id: "chapter-1", parent_id: "folder-1", position: 0 });
     expect(changes).toContainEqual({ id: "chapter-2", parent_id: "folder-1", position: 1 });
   });
+});
 
+describe("marquee selection helpers", () => {
+  it("normalizes marquee rectangles from drag coordinates", () => {
+    expect(normalizeMarqueeRect(10, 20, 30, 40)).toEqual({
+      left: 10,
+      top: 20,
+      right: 30,
+      bottom: 40,
+    });
+    expect(normalizeMarqueeRect(30, 40, 10, 20)).toEqual({
+      left: 10,
+      top: 20,
+      right: 30,
+      bottom: 40,
+    });
+  });
+
+  it("collects node ids intersecting a marquee rectangle", () => {
+    const container = document.createElement("div");
+    const first = document.createElement("div");
+    first.className = "ant-tree-treenode";
+    first.innerHTML = "<span data-workspace-node-id=\"chapter-1\"></span>";
+    first.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        right: 100,
+        bottom: 24,
+        width: 100,
+        height: 24,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    const second = document.createElement("div");
+    second.className = "ant-tree-treenode";
+    second.innerHTML = "<span data-workspace-node-id=\"chapter-2\"></span>";
+    second.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 30,
+        right: 100,
+        bottom: 54,
+        width: 100,
+        height: 24,
+        x: 0,
+        y: 30,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    container.append(first, second);
+
+    expect(collectMarqueeNodeIds(container, { left: 0, top: 0, right: 100, bottom: 20 })).toEqual(["chapter-1"]);
+    expect(collectMarqueeNodeIds(container, { left: 0, top: 0, right: 100, bottom: 60 })).toEqual(["chapter-1", "chapter-2"]);
+  });
+});
+
+describe("WorkspaceTree UI", () => {
   it("shows folder-specific copy when renaming a folder", async () => {
     const user = userEvent.setup();
     render(<WorkspaceTree nodes={nodes} />);

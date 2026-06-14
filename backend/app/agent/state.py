@@ -19,4 +19,5 @@ class AgentState(TypedDict, total=False):
     proposed_payload: dict[str, Any] | None
     confirmation_id: str | None
     workspace_diff: dict[str, Any] | None
+    write_retry_count: int
     workspace_nodes: list[dict[str, Any]] | None
