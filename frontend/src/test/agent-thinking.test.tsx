@@ -27,6 +27,13 @@ describe("AgentThinkingIndicator", () => {
     expect(screen.getByText("3s")).toBeInTheDocument();
   });
 
+  it("shows custom activity label", () => {
+    render(<AgentThinkingIndicator label="正在执行：检索上下文" startedAt={Date.now()} variant="tool" />);
+
+    expect(screen.getByText("正在执行：检索上下文")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-thinking-indicator")).toHaveAttribute("data-variant", "tool");
+  });
+
   it("shows compact reasoning preview when provided", () => {
     render(
       <AgentThinkingIndicator

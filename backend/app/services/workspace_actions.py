@@ -5,13 +5,14 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.chapter_body import is_outline_or_meta_content
+from app.agent.chapter_body import is_outline_or_meta_content, normalize_prose_text
 from app.models import Document, DocumentVersion, WorkspaceNode
 from app.services.rag import extract_text_from_prosemirror, index_text
 
 
 def text_document(text: str) -> dict[str, object]:
-    paragraphs = [paragraph.strip() for paragraph in text.splitlines() if paragraph.strip()]
+    normalized = normalize_prose_text(text)
+    paragraphs = [paragraph.strip() for paragraph in normalized.splitlines() if paragraph.strip()]
     return {
         "type": "doc",
         "content": [
@@ -133,7 +134,7 @@ async def create_chapter_with_content(
     content: str,
     parent_id: UUID | None = None,
 ) -> dict[str, object]:
-    normalized = content.strip()
+    normalized = normalize_prose_text(content)
     if not normalized:
         return {"status": "error", "message": "章节正文不能为空。"}
     if is_outline_or_meta_content(normalized):
@@ -206,7 +207,7 @@ async def write_document_content(
 ) -> dict[str, object]:
     from app.services.document_actions import get_owned_document
 
-    normalized = content.strip()
+    normalized = normalize_prose_text(content)
     if not normalized:
         return {"status": "error", "message": "章节正文不能为空。"}
     if is_outline_or_meta_content(normalized):

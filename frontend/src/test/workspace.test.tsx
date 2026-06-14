@@ -1587,53 +1587,55 @@ describe("WorkspacePage", () => {
                 })}\n\n`,
               ),
             );
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({
-                  type: "tool_call",
-                  id: "run-thinking",
-                  tool: "search_rag",
-                  status: "ok",
-                  args: { query: "主角设定" },
-                  summary: "找到 2 条记忆。",
-                })}\n\n`,
-              ),
-            );
-            releaseReasoning = () => {
+            window.setTimeout(() => {
               controller.enqueue(
                 encoder.encode(
-                  `data: ${JSON.stringify({ type: "reasoning", content: "结合检索结果组织回答。" })}\n\n`,
+                  `data: ${JSON.stringify({
+                    type: "tool_call",
+                    id: "run-thinking",
+                    tool: "search_rag",
+                    status: "ok",
+                    args: { query: "主角设定" },
+                    summary: "找到 2 条记忆。",
+                  })}\n\n`,
                 ),
               );
-              window.setTimeout(() => {
+              releaseReasoning = () => {
                 controller.enqueue(
                   encoder.encode(
-                    `data: ${JSON.stringify({ type: "delta", content: "检索完成。" })}\n\n`,
+                    `data: ${JSON.stringify({ type: "reasoning", content: "结合检索结果组织回答。" })}\n\n`,
                   ),
                 );
-                controller.enqueue(
-                  encoder.encode(
-                    `data: ${JSON.stringify({
-                      type: "done",
-                      message: "检索完成。",
-                      context_status: [],
-                      conversation_id: "conv-thinking",
-                      confirmation: null,
-                      tool_calls: [
-                        {
-                          id: "run-thinking",
-                          tool: "search_rag",
-                          status: "ok",
-                          args: { query: "主角设定" },
-                          summary: "找到 2 条记忆。",
-                        },
-                      ],
-                    })}\n\n`,
-                  ),
-                );
-                controller.close();
-              }, 50);
-            };
+                window.setTimeout(() => {
+                  controller.enqueue(
+                    encoder.encode(
+                      `data: ${JSON.stringify({ type: "delta", content: "检索完成。" })}\n\n`,
+                    ),
+                  );
+                  controller.enqueue(
+                    encoder.encode(
+                      `data: ${JSON.stringify({
+                        type: "done",
+                        message: "检索完成。",
+                        context_status: [],
+                        conversation_id: "conv-thinking",
+                        confirmation: null,
+                        tool_calls: [
+                          {
+                            id: "run-thinking",
+                            tool: "search_rag",
+                            status: "ok",
+                            args: { query: "主角设定" },
+                            summary: "找到 2 条记忆。",
+                          },
+                        ],
+                      })}\n\n`,
+                    ),
+                  );
+                  controller.close();
+                }, 50);
+              };
+            }, 200);
           },
         });
         return Promise.resolve(
@@ -1654,11 +1656,14 @@ describe("WorkspacePage", () => {
     );
 
     expect(await screen.findByTestId("agent-tool-call-card")).toBeInTheDocument();
-    expect(await screen.findByTestId("agent-thinking-indicator")).toBeInTheDocument();
-    expect(screen.getByText("思考中")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("正在执行：检索上下文")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("agent-thinking-indicator")).toHaveAttribute("data-variant", "tool");
 
     await waitFor(() => expect(releaseReasoning).not.toBeNull());
     releaseReasoning!();
+    expect(await screen.findByText("思考中")).toBeInTheDocument();
     expect(await screen.findByText(/结合检索结果组织回答/)).toBeInTheDocument();
     expect(await screen.findByText("检索完成。")).toBeInTheDocument();
     await waitFor(() => {

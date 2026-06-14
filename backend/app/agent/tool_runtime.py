@@ -70,12 +70,14 @@ from app.services.materials import (
     create_creative_asset,
     create_relationship_edge,
     create_timeline_event,
+    deduplicate_character_states,
     delete_character_state,
     delete_creative_asset,
     delete_creative_assets,
     delete_relationship_edge,
     delete_timeline_event,
     list_material_changes,
+    prepare_timeline_events,
     update_character_state_record,
     update_creative_asset,
     update_relationship_edge,
@@ -618,11 +620,12 @@ def build_runtime_tools(
                 select(TimelineEvent).where(TimelineEvent.novel_id == current_novel_id(novel_id))
             )
         )
+        prepared_events = prepare_timeline_events(events)
         return {
             "status": "ok",
             "events": [
                 {"id": str(event.id), "title": event.title, "event_time": event.event_time, "summary": event.summary}
-                for event in events
+                for event in prepared_events
             ],
         }
 
@@ -702,6 +705,7 @@ def build_runtime_tools(
                 select(CharacterState).where(CharacterState.novel_id == current_novel_id(novel_id))
             )
         )
+        deduplicated_states = deduplicate_character_states(states)
         return {
             "status": "ok",
             "states": [
@@ -711,7 +715,7 @@ def build_runtime_tools(
                     "state": state.state,
                     "scope": state.scope,
                 }
-                for state in states
+                for state in deduplicated_states
             ],
         }
 

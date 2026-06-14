@@ -2,11 +2,13 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Button, Card, Input, Space, Spin, Typography } from "antd";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { DocumentBody } from "../../api/documents";
 import type { Confirmation } from "../../api/confirmations";
+import { throttle } from "../../utils/schedule";
 import { focusConfirmationInEditor } from "../confirmations/confirmationLocation";
+import { documentBodiesEqual } from "./documentBodyText";
 import { documentStartPos, focusPlainTextRange } from "./editorTextPosition";
 import { DocumentConfirmationNavigator } from "./DocumentConfirmationNavigator";
 import { DocumentEditorConfirmations } from "./DocumentEditorConfirmations";
@@ -54,10 +56,38 @@ export function DocumentEditor({
 }: DocumentEditorProps) {
   const applyingExternalContent = useRef(false);
   const editorShellRef = useRef<HTMLDivElement>(null);
+  const onChangeRef = useRef(onChange);
+  const onSaveRef = useRef(onSave);
+  const onSelectTextRef = useRef(onSelectText);
   const [activeConfirmationIndex, setActiveConfirmationIndex] = useState(0);
   const [chapterTitleValue, setChapterTitleValue] = useState(chapterTitle ?? "");
   const [pendingSelection, setPendingSelection] = useState("");
   const [selectionToolbarPosition, setSelectionToolbarPosition] = useState<{ left: number; top: number } | null>(null);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+    onSaveRef.current = onSave;
+    onSelectTextRef.current = onSelectText;
+  }, [onChange, onSave, onSelectText]);
+
+  const handleUseSelection = useCallback(() => {
+    const selection = window.getSelection();
+    const nextSelectedText = selection?.toString().trim() ?? "";
+    if (!nextSelectedText || !selection?.rangeCount || !editorShellRef.current) {
+      setPendingSelection("");
+      setSelectionToolbarPosition(null);
+      return;
+    }
+    const rangeRect = selection.getRangeAt(0).getBoundingClientRect();
+    setPendingSelection(nextSelectedText);
+    setSelectionToolbarPosition({
+      left: Math.max(12, Math.min(rangeRect.left, window.innerWidth - 120)),
+      top: Math.max(12, Math.min(rangeRect.bottom + 8, window.innerHeight - 48)),
+    });
+  }, []);
+
+  const throttledHandleUseSelection = useRef(throttle(handleUseSelection, 120)).current;
+
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -71,7 +101,7 @@ export function DocumentEditor({
       if (applyingExternalContent.current || loading) {
         return;
       }
-      onChange?.(updatedEditor.getJSON() as DocumentBody);
+      onChangeRef.current?.(updatedEditor.getJSON() as DocumentBody);
     },
     editorProps: {
       attributes: {
@@ -81,11 +111,11 @@ export function DocumentEditor({
       },
       handleDOMEvents: {
         keyup: () => {
-          handleUseSelection();
+          throttledHandleUseSelection();
           return false;
         },
         mouseup: () => {
-          handleUseSelection();
+          throttledHandleUseSelection();
           return false;
         },
       },
@@ -101,8 +131,8 @@ export function DocumentEditor({
       return;
     }
     const nextContent = content ?? EMPTY_DOCUMENT;
-    const currentContent = editor.getJSON();
-    if (JSON.stringify(currentContent) === JSON.stringify(nextContent)) {
+    const currentContent = editor.getJSON() as DocumentBody;
+    if (documentBodiesEqual(currentContent, nextContent)) {
       return;
     }
     applyingExternalContent.current = true;
@@ -174,20 +204,28 @@ export function DocumentEditor({
     focusConfirmationId ?? pendingConfirmations[activeConfirmationIndex]?.id ?? null;
 
   useEffect(() => {
-    document.addEventListener("mouseup", handleUseSelection);
-    document.addEventListener("selectionchange", handleUseSelection);
+    const shell = editorShellRef.current;
+    if (!shell) {
+      return;
+    }
+
+    shell.addEventListener("mouseup", throttledHandleUseSelection);
+    document.addEventListener("selectionchange", throttledHandleUseSelection);
 
     return () => {
-      document.removeEventListener("mouseup", handleUseSelection);
-      document.removeEventListener("selectionchange", handleUseSelection);
+      shell.removeEventListener("mouseup", throttledHandleUseSelection);
+      document.removeEventListener("selectionchange", throttledHandleUseSelection);
     };
-  });
+  }, [throttledHandleUseSelection]);
 
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
-        handleSave();
+        if (!editor) {
+          return;
+        }
+        handleSaveRef.current();
       }
     }
 
@@ -195,29 +233,13 @@ export function DocumentEditor({
     return () => {
       document.removeEventListener("keydown", handleShortcut);
     };
-  });
-
-  function handleUseSelection() {
-    const selection = window.getSelection();
-    const nextSelectedText = selection?.toString().trim() ?? "";
-    if (!nextSelectedText || !selection?.rangeCount || !editorShellRef.current) {
-      setPendingSelection("");
-      setSelectionToolbarPosition(null);
-      return;
-    }
-    const rangeRect = selection.getRangeAt(0).getBoundingClientRect();
-    setPendingSelection(nextSelectedText);
-    setSelectionToolbarPosition({
-      left: Math.max(12, Math.min(rangeRect.left, window.innerWidth - 120)),
-      top: Math.max(12, Math.min(rangeRect.bottom + 8, window.innerHeight - 48)),
-    });
-  }
+  }, [editor]);
 
   function handleQuoteSelection() {
     if (!pendingSelection) {
       return;
     }
-    onSelectText?.(pendingSelection);
+    onSelectTextRef.current?.(pendingSelection);
     setPendingSelection("");
     setSelectionToolbarPosition(null);
   }
@@ -227,8 +249,11 @@ export function DocumentEditor({
       return;
     }
     commitChapterTitle();
-    onSave?.(editor.getJSON() as DocumentBody);
+    onSaveRef.current?.(editor.getJSON() as DocumentBody);
   }
+
+  const handleSaveRef = useRef(handleSave);
+  handleSaveRef.current = handleSave;
 
   function commitChapterTitle() {
     const nextTitle = chapterTitleValue.trim();
@@ -300,8 +325,6 @@ export function DocumentEditor({
         ) : null}
         <div
           ref={editorShellRef}
-          onKeyUpCapture={handleUseSelection}
-          onMouseUpCapture={handleUseSelection}
           style={{ height: "100%", minHeight: 240, position: "relative" }}
         >
           <EditorContent editor={editor} />

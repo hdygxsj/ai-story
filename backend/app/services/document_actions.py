@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.chapter_body import is_outline_or_meta_content
 from app.models import Document, DocumentVersion, ModelProfile, Novel, PendingConfirmation, WorkspaceNode
 from app.services.rag import extract_text_from_prosemirror, index_text
+from app.agent.chapter_body import normalize_prose_text
 from app.services.workspace_actions import text_document
 
 
@@ -289,7 +290,8 @@ async def create_document_update_proposal(
     document = await get_owned_document(
         session, owner_id=owner_id, novel_id=novel_id, document_id=document_id
     )
-    if not content.strip():
+    content = normalize_prose_text(content)
+    if not content:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Content is empty")
     if is_outline_or_meta_content(content):
         raise HTTPException(
@@ -322,6 +324,7 @@ async def create_selection_replace_proposal(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Selected text is empty",
         )
+    replacement_text = normalize_prose_text(replacement_text)
     return await _create_proposal(
         session,
         document=document,

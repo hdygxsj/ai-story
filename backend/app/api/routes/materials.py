@@ -28,11 +28,13 @@ from app.services.materials import (
     create_creative_asset,
     create_relationship_edge,
     create_timeline_event,
+    deduplicate_character_states,
     delete_character_state,
     delete_creative_asset,
     delete_relationship_edge,
     delete_timeline_event,
     list_material_changes,
+    prepare_timeline_events,
     update_character_state_record,
     update_creative_asset,
     update_relationship_edge,
@@ -150,7 +152,8 @@ async def list_timeline_events(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[TimelineEvent]:
     await get_owned_novel(session, current_user, novel_id)
-    return list(await session.scalars(select(TimelineEvent).where(TimelineEvent.novel_id == novel_id)))
+    events = list(await session.scalars(select(TimelineEvent).where(TimelineEvent.novel_id == novel_id)))
+    return prepare_timeline_events(events)
 
 
 @router.patch("/novels/{novel_id}/timeline-events/{event_id}", response_model=TimelineEventResponse)
@@ -228,7 +231,8 @@ async def list_character_states(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[CharacterState]:
     await get_owned_novel(session, current_user, novel_id)
-    return list(await session.scalars(select(CharacterState).where(CharacterState.novel_id == novel_id)))
+    states = list(await session.scalars(select(CharacterState).where(CharacterState.novel_id == novel_id)))
+    return deduplicate_character_states(states)
 
 
 @router.patch("/novels/{novel_id}/character-states/{state_id}", response_model=CharacterStateResponse)

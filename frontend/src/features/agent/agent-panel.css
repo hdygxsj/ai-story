@@ -309,6 +309,19 @@
   padding: 8px 10px;
 }
 
+.agent-thinking-indicator.is-tool {
+  border-color: rgba(37, 99, 235, 0.18);
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.08);
+}
+
+.agent-thinking-indicator.is-tool .agent-thinking-indicator-spinner {
+  color: #1d4ed8;
+}
+
+.agent-thinking-indicator.is-tool .agent-thinking-indicator-label {
+  color: #1e40af;
+}
+
 .agent-thinking-indicator-header {
   align-items: center;
   color: #64748b;

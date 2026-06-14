@@ -3,10 +3,17 @@ import { useEffect, useState } from "react";
 
 type AgentThinkingIndicatorProps = {
   content?: string;
+  label?: string;
   startedAt: number;
+  variant?: "thinking" | "tool";
 };
 
-export function AgentThinkingIndicator({ content, startedAt }: AgentThinkingIndicatorProps) {
+export function AgentThinkingIndicator({
+  content,
+  label = "思考中",
+  startedAt,
+  variant = "thinking",
+}: AgentThinkingIndicatorProps) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   useEffect(() => {
@@ -21,10 +28,14 @@ export function AgentThinkingIndicator({ content, startedAt }: AgentThinkingIndi
   const preview = content?.trim() ?? "";
 
   return (
-    <div className="agent-thinking-indicator" data-testid="agent-thinking-indicator">
+    <div
+      className={`agent-thinking-indicator${variant === "tool" ? " is-tool" : ""}`}
+      data-testid="agent-thinking-indicator"
+      data-variant={variant}
+    >
       <div className="agent-thinking-indicator-header">
         <LoadingOutlined className="agent-thinking-indicator-spinner" spin />
-        <span className="agent-thinking-indicator-label">思考中</span>
+        <span className="agent-thinking-indicator-label">{label}</span>
         <span className="agent-thinking-indicator-time">{elapsedSeconds}s</span>
         <span aria-hidden="true" className="agent-thinking-indicator-dots">
           <span />

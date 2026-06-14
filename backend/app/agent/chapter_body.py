@@ -53,8 +53,44 @@ def is_outline_or_meta_content(text: str) -> bool:
     return False
 
 
+def normalize_prose_text(text: str) -> str:
+    """Strip markdown formatting so chapter bodies are stored as plain txt prose."""
+    normalized = text.replace("\r\n", "\n").strip()
+    if not normalized:
+        return ""
+
+    normalized = re.sub(r"```[^\n]*\n([\s\S]*?)```", r"\1", normalized)
+    normalized = re.sub(r"`([^`]+)`", r"\1", normalized)
+
+    processed_lines: list[str] = []
+    for line in normalized.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            processed_lines.append("")
+            continue
+        if re.match(r"^[-*_]{3,}$", stripped):
+            continue
+        heading = re.match(r"^(#{1,6})\s+(.*)$", stripped)
+        if heading:
+            processed_lines.append(heading.group(2).strip())
+            continue
+        if stripped.startswith(">"):
+            stripped = stripped.lstrip(">").strip()
+        stripped = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", stripped)
+        stripped = re.sub(r"\*\*(.+?)\*\*", r"\1", stripped)
+        stripped = re.sub(r"__(.+?)__", r"\1", stripped)
+        stripped = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"\1", stripped)
+        stripped = re.sub(r"(?<!_)_([^_]+)_(?!_)", r"\1", stripped)
+        processed_lines.append(stripped)
+
+    normalized = "\n".join(processed_lines)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized.strip()
+
+
 PROSE_BODY_GUIDANCE = (
     "章节正文必须是可直接发表的小说散文（场景、对话、动作、心理描写），"
+    "使用纯文本（txt）段落，禁止使用 Markdown 语法（# 标题、**加粗**、列表符号、代码块等）。"
     "禁止写入：爽点清单、情节要点、章纲、细纲、大纲、节奏点、待办列表、"
     "带 ✅ 的策划条目、系统说明式条目。这些内容只能留在对话里讨论，不能落盘到正文。"
 )

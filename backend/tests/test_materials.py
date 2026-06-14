@@ -148,3 +148,104 @@ def test_create_relationship_edge_deduplicates_same_pair_and_type() -> None:
     assert second.status_code == 201
     assert first.json()["id"] == second.json()["id"]
     assert len(client.get(f"/novels/{novel['id']}/relationship-edges", headers=headers).json()) == 1
+
+
+def test_create_character_state_deduplicates_same_character_and_scope() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client)
+    novel = client.post("/novels", headers=headers, json={"title": "Character State Novel"}).json()
+    payload = {
+        "character_name": "叶尘",
+        "state": "【开局状态】F级0星，华夏高三学生",
+        "scope": "current",
+    }
+
+    first = client.post(f"/novels/{novel['id']}/character-states", headers=headers, json=payload)
+    second = client.post(f"/novels/{novel['id']}/character-states", headers=headers, json=payload)
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["id"] == second.json()["id"]
+    assert len(client.get(f"/novels/{novel['id']}/character-states", headers=headers).json()) == 1
+
+
+def test_create_character_state_updates_existing_scope_snapshot() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client)
+    novel = client.post("/novels", headers=headers, json={"title": "Character State Novel"}).json()
+
+    created = client.post(
+        f"/novels/{novel['id']}/character-states",
+        headers=headers,
+        json={"character_name": "叶尘", "state": "【开局状态】", "scope": "current"},
+    ).json()
+    updated = client.post(
+        f"/novels/{novel['id']}/character-states",
+        headers=headers,
+        json={"character_name": "叶尘", "state": "【第三章末】等级提升", "scope": "current"},
+    ).json()
+
+    assert created["id"] == updated["id"]
+    listed = client.get(f"/novels/{novel['id']}/character-states", headers=headers).json()
+    assert len(listed) == 1
+    assert listed[0]["state"] == "【第三章末】等级提升"
+
+
+def test_create_timeline_event_deduplicates_same_title_and_event_time() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client)
+    novel = client.post("/novels", headers=headers, json={"title": "Timeline Novel"}).json()
+    payload = {
+        "title": "第二卷：世界大变（成长期）",
+        "event_time": "第一卷结束后",
+        "summary": "异界之门开启，叶尘成为先行者。",
+    }
+
+    first = client.post(f"/novels/{novel['id']}/timeline-events", headers=headers, json=payload)
+    second = client.post(f"/novels/{novel['id']}/timeline-events", headers=headers, json=payload)
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["id"] == second.json()["id"]
+    assert len(client.get(f"/novels/{novel['id']}/timeline-events", headers=headers).json()) == 1
+
+
+def test_list_timeline_events_sorts_by_volume_order() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client)
+    novel = client.post("/novels", headers=headers, json={"title": "Timeline Novel"}).json()
+
+    client.post(
+        f"/novels/{novel['id']}/timeline-events",
+        headers=headers,
+        json={
+            "title": "第三卷：开宗立派（崛起期）",
+            "event_time": "第二卷结束后",
+            "summary": "白墨开宗立派。",
+        },
+    )
+    client.post(
+        f"/novels/{novel['id']}/timeline-events",
+        headers=headers,
+        json={
+            "title": "第一卷：觉醒前夜（新手期）",
+            "event_time": "故事开始",
+            "summary": "叶尘觉醒系统。",
+        },
+    )
+    client.post(
+        f"/novels/{novel['id']}/timeline-events",
+        headers=headers,
+        json={
+            "title": "第二卷：世界大变（成长期）",
+            "event_time": "第一卷结束后",
+            "summary": "异界之门开启。",
+        },
+    )
+
+    titles = [item["title"] for item in client.get(f"/novels/{novel['id']}/timeline-events", headers=headers).json()]
+    assert titles == [
+        "第一卷：觉醒前夜（新手期）",
+        "第二卷：世界大变（成长期）",
+        "第三卷：开宗立派（崛起期）",
+    ]

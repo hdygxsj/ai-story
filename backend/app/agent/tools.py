@@ -40,18 +40,18 @@ class CreateWorkspaceNodeArgs(BaseModel):
 class CreateChapterWithContentArgs(BaseModel):
     novel_id: str = Field(description="Novel UUID")
     title: str = Field(description="Chapter title")
-    content: str = Field(description="Complete non-empty chapter body")
+    content: str = Field(description="Complete non-empty chapter body as plain txt prose (no Markdown)")
     parent_id: str | None = Field(default=None, description="Optional parent folder UUID")
 
 
 class ProposeDocumentUpdateArgs(BaseModel):
     document_id: str = Field(description="Document UUID in the current novel")
-    content: str = Field(description="Complete replacement document text")
+    content: str = Field(description="Complete replacement chapter body as plain txt prose (no Markdown)")
 
 
 class WriteDocumentContentArgs(BaseModel):
     document_id: str = Field(description="Document UUID to update")
-    content: str = Field(description="Complete chapter body text to save immediately")
+    content: str = Field(description="Complete chapter body as plain txt prose to save immediately (no Markdown)")
 
 
 class SplitChapterByMaxCharsArgs(BaseModel):
@@ -63,7 +63,7 @@ class SplitChapterByMaxCharsArgs(BaseModel):
 class ProposeSelectionReplaceArgs(BaseModel):
     document_id: str = Field(description="Document UUID in the current novel")
     selected_text: str = Field(description="Existing uniquely matching text")
-    replacement_text: str = Field(description="Replacement text")
+    replacement_text: str = Field(description="Replacement plain txt prose (no Markdown)")
 
 
 class ListDocumentVersionsArgs(BaseModel):
@@ -145,8 +145,8 @@ class ListTimelineEventsArgs(BaseModel):
 
 class CreateTimelineEventArgs(BaseModel):
     novel_id: str
-    title: str
-    event_time: str
+    title: str = Field(description="Arc or milestone title, e.g. 第二卷：世界大变")
+    event_time: str = Field(description="When it happens, e.g. 第一卷结束后. Same title+event_time upserts.")
     summary: str
 
 
@@ -159,7 +159,10 @@ class UpdateCharacterStateArgs(BaseModel):
     character_name: str
     state: str
     state_id: str | None = Field(default=None, description="Existing character state UUID to update")
-    scope: str | None = Field(default=None, description="Scope label such as chapter_3 or global")
+    scope: str | None = Field(
+        default=None,
+        description="Scope label such as current, chapter_3, or global. Same character+scope upserts.",
+    )
 
 
 class CreateRelationshipEdgeArgs(BaseModel):

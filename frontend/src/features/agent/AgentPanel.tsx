@@ -2,7 +2,7 @@ import Bubble from "@ant-design/x/es/bubble";
 import Sender from "@ant-design/x/es/sender";
 import { CloseOutlined, PushpinOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Flex, Space, Tag, Typography } from "antd";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentConfirmation, AgentToolCallRecord, ContextDetail, WorkspaceDiff } from "../../api/agent";
 import { streamAgentMessage } from "../../api/agent";
@@ -16,7 +16,7 @@ import {
 } from "../../api/conversations";
 import type { Novel } from "../../api/novels";
 import type { WorkspaceNode } from "../../api/workspace";
-import { AgentToolCallCard, DOCUMENT_WRITE_TOOLS } from "./AgentToolTrace";
+import { AgentToolCallCard, DOCUMENT_WRITE_TOOLS, toolLabel } from "./AgentToolTrace";
 import { AgentMarkdown } from "./AgentMarkdown";
 import { AgentThinkingIndicator } from "./AgentThinkingIndicator";
 import {
@@ -51,11 +51,21 @@ type AgentPanelProps = {
 };
 
 const WELCOME_MESSAGE = "告诉我你想创建、改写、记录或检索什么。";
+const VISIBLE_MESSAGE_LIMIT = 120;
 
 type ThinkingState = {
   startedAt: number;
   content: string;
+  phase: "thinking" | "tool";
+  toolName?: string;
 };
+
+function thinkingLabel(state: ThinkingState): string {
+  if (state.phase === "tool" && state.toolName) {
+    return `正在执行：${toolLabel(state.toolName)}`;
+  }
+  return "思考中";
+}
 
 function welcomeMessages(): ChatMessage[] {
   return [{ id: createMessageId("assistant"), role: "assistant", content: WELCOME_MESSAGE }];
@@ -152,19 +162,24 @@ export function AgentPanel({
     return () => cancelAnimationFrame(frame);
   }, [activeConversationId, messages, scrollMessagesToBottom, thinking]);
 
-  const hasRunningTool = messages.some(
-    (item) => item.role === "tool" && item.toolCall?.status === "running",
-  );
-
   function startThinking(content = "") {
-    setThinking({ startedAt: Date.now(), content });
+    setThinking({ startedAt: Date.now(), content, phase: "thinking" });
+  }
+
+  function startToolThinking(toolName: string) {
+    setThinking((current) => ({
+      startedAt: current?.phase === "tool" ? current.startedAt : Date.now(),
+      content: "",
+      phase: "tool",
+      toolName,
+    }));
   }
 
   function appendThinkingContent(delta: string) {
     setThinking((current) =>
       current
-        ? { ...current, content: `${current.content}${delta}` }
-        : { startedAt: Date.now(), content: delta },
+        ? { ...current, content: `${current.content}${delta}`, phase: "thinking", toolName: undefined }
+        : { startedAt: Date.now(), content: delta, phase: "thinking" },
     );
   }
 
@@ -227,7 +242,7 @@ export function AgentPanel({
   function upsertToolCallMessage(record: AgentToolCallRecord) {
     if (record.status === "running") {
       closeActiveTextSegment();
-      clearThinking();
+      startToolThinking(record.tool);
     } else if (record.status === "ok" || record.status === "error") {
       startThinking();
     }
@@ -436,6 +451,34 @@ export function AgentPanel({
     void sendMessage("请改写我刚刚选中的这段文字，保持上下文风格并提升表达质量。", rewriteRequest.text);
   }, [rewriteRequest?.id]);
 
+  const hiddenMessageCount = Math.max(0, messages.length - VISIBLE_MESSAGE_LIMIT);
+  const bubbleItems = useMemo(
+    () =>
+      (hiddenMessageCount > 0 ? messages.slice(-VISIBLE_MESSAGE_LIMIT) : messages)
+        .filter(
+          (item) =>
+            !(
+              thinking &&
+              item.role === "assistant" &&
+              !item.content.trim() &&
+              item.id === activeTextIdRef.current
+            ),
+        )
+        .map((item) => ({
+          key: item.id,
+          role: item.role === "user" ? "user" : "ai",
+          content:
+            item.role === "tool" && item.toolCall ? (
+              <AgentToolCallCard toolCall={item.toolCall} />
+            ) : item.role === "assistant" ? (
+              <AgentMarkdown content={item.content} />
+            ) : (
+              item.content
+            ),
+        })),
+    [hiddenMessageCount, messages, thinking],
+  );
+
   return (
     <Card
       className="agent-panel-card"
@@ -506,37 +549,26 @@ export function AgentPanel({
           ref={messagesScrollRef}
           style={{ flex: "1 1 0", minHeight: 0, overflow: "auto" }}
         >
+          {hiddenMessageCount > 0 ? (
+            <Typography.Text style={{ display: "block", marginBottom: 8 }} type="secondary">
+              已折叠较早的 {hiddenMessageCount} 条消息以提升性能
+            </Typography.Text>
+          ) : null}
           <Bubble.List
             autoScroll
-            items={messages
-              .filter(
-                (item) =>
-                  !(
-                    thinking &&
-                    item.role === "assistant" &&
-                    !item.content.trim() &&
-                    item.id === activeTextIdRef.current
-                  ),
-              )
-              .map((item) => ({
-              key: item.id,
-              role: item.role === "user" ? "user" : "ai",
-              content:
-                item.role === "tool" && item.toolCall ? (
-                  <AgentToolCallCard toolCall={item.toolCall} />
-                ) : item.role === "assistant" ? (
-                  <AgentMarkdown content={item.content} />
-                ) : (
-                  item.content
-                ),
-            }))}
+            items={bubbleItems}
             role={{
               ai: { placement: "start", variant: "shadow" },
               user: { placement: "end", variant: "filled" },
             }}
           />
-          {thinking && !hasRunningTool ? (
-            <AgentThinkingIndicator content={thinking.content} startedAt={thinking.startedAt} />
+          {thinking ? (
+            <AgentThinkingIndicator
+              content={thinking.content}
+              label={thinkingLabel(thinking)}
+              startedAt={thinking.startedAt}
+              variant={thinking.phase}
+            />
           ) : null}
         </div>
         {error ? <Alert message={error} showIcon style={{ flexShrink: 0 }} type="error" /> : null}

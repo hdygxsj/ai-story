@@ -20,6 +20,10 @@ _MEMORY_GUIDANCE = (
 _MATERIAL_GUIDANCE = (
     "当用户要求创建、修改、删除创作资产、时间线、角色状态或人物关系时，"
     "必须直接调用相应 list/create/update/delete 工具，无需用户确认。"
+    "角色状态：同一角色 + 同一 scope 只保留一条记录，更新时用 update_character_state 并传 state_id；"
+    "scope=current 表示最新状态，章节快照请用 chapter_3 等独立 scope，不要重复创建。"
+    "时间线：同一 title + event_time 只保留一条，更新时用 update_timeline_event 并传 event_id；"
+    "卷级节点按第一卷/第二卷顺序维护，不要重复创建同名卷节点。"
     "清理旧版或重复素材时，自行调用 delete_creative_asset 或 delete_creative_assets，"
     "不要要求用户手动删除。修改或删除前先 list 获取 id。"
 )

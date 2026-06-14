@@ -3,6 +3,7 @@ import { Button, Card, Empty, Form, Input, Modal, Popconfirm, Select, Tabs, Tag,
 import { useMemo, useState } from "react";
 
 import type { CharacterState, CreativeAsset, MaterialChange, RelationshipEdge } from "../../api/materials";
+import { dedupeCharacterStates } from "./characterStatePresentation";
 import { RelationshipGraph } from "./RelationshipGraph";
 
 import "./materials-panel.css";
@@ -225,7 +226,15 @@ function CreativeAssetGrid({ assets, searchQuery, onDeleteCreativeAsset, onUpdat
   );
 }
 
-function CharacterStateGrid({ states, searchQuery }: { states: CharacterState[]; searchQuery: string }) {
+function CharacterStateGrid({
+  hiddenDuplicateCount = 0,
+  states,
+  searchQuery,
+}: {
+  hiddenDuplicateCount?: number;
+  states: CharacterState[];
+  searchQuery: string;
+}) {
   const filteredStates = useMemo(
     () =>
       states.filter((state) =>
@@ -255,8 +264,14 @@ function CharacterStateGrid({ states, searchQuery }: { states: CharacterState[];
   }
 
   return (
-    <div className="materials-panel-grid">
-      {filteredStates.map((state) => (
+    <>
+      {hiddenDuplicateCount > 0 ? (
+        <Typography.Text style={{ display: "block", marginBottom: 12 }} type="secondary">
+          已合并 {hiddenDuplicateCount} 条重复角色状态，同一角色同一 scope 仅展示最新一条。
+        </Typography.Text>
+      ) : null}
+      <div className="materials-panel-grid">
+        {filteredStates.map((state) => (
         <article className="materials-panel-item" key={state.id}>
           <h4 className="materials-panel-item-title">{state.character_name}</h4>
           <p className="materials-panel-item-summary">{state.state}</p>
@@ -274,7 +289,8 @@ function CharacterStateGrid({ states, searchQuery }: { states: CharacterState[];
           </div>
         </article>
       ))}
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -400,7 +416,9 @@ export function MaterialsPanel({
   onUpdateCreativeAsset,
 }: MaterialsPanelProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const totalCount = creativeAssets.length + characterStates.length + relationshipEdges.length;
+  const visibleCharacterStates = useMemo(() => dedupeCharacterStates(characterStates), [characterStates]);
+  const hiddenCharacterStateCount = Math.max(0, characterStates.length - visibleCharacterStates.length);
+  const totalCount = creativeAssets.length + visibleCharacterStates.length + relationshipEdges.length;
 
   return (
     <Card
@@ -421,7 +439,7 @@ export function MaterialsPanel({
         <div className="materials-panel-stats">
           <Tag color="orange">{totalCount} 项素材</Tag>
           <Tag color="gold">{creativeAssets.length} 创作资产</Tag>
-          <Tag color="blue">{characterStates.length} 角色状态</Tag>
+          <Tag color="blue">{visibleCharacterStates.length} 角色状态</Tag>
           <Tag color="purple">{relationshipEdges.length} 人物关系</Tag>
           <Tag color="cyan">{materialChanges.length} 条变更</Tag>
         </div>
@@ -459,10 +477,16 @@ export function MaterialsPanel({
             key: "states",
             label: (
               <span>
-                <UserOutlined /> 角色状态 ({characterStates.length})
+                <UserOutlined /> 角色状态 ({visibleCharacterStates.length})
               </span>
             ),
-            children: <CharacterStateGrid searchQuery={searchQuery} states={characterStates} />,
+            children: (
+              <CharacterStateGrid
+                hiddenDuplicateCount={hiddenCharacterStateCount}
+                searchQuery={searchQuery}
+                states={visibleCharacterStates}
+              />
+            ),
           },
           {
             key: "relationships",

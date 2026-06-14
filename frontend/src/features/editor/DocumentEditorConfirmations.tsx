@@ -1,9 +1,10 @@
 import { Button, Space, Typography } from "antd";
 import type { Editor } from "@tiptap/react";
 import type { RefObject } from "react";
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Confirmation } from "../../api/confirmations";
+import { createAnimationFrameScheduler } from "../../utils/schedule";
 import { confirmationAnchorText } from "../confirmations/confirmationLocation";
 import { documentStartPos, findTextRangeInEditor } from "./editorTextPosition";
 
@@ -45,6 +46,8 @@ export function DocumentEditorConfirmations({
   shellRef,
 }: DocumentEditorConfirmationsProps) {
   const [positions, setPositions] = useState<PositionedConfirmation[]>([]);
+  const anchorCacheRef = useRef<Map<string, number>>(new Map());
+  const schedulePositionRefreshRef = useRef(createAnimationFrameScheduler());
 
   const sortedConfirmations = useMemo(
     () =>
@@ -54,7 +57,18 @@ export function DocumentEditorConfirmations({
     [confirmations],
   );
 
+  function resolveCachedAnchorPos(editor: Editor, confirmation: Confirmation): number {
+    const cached = anchorCacheRef.current.get(confirmation.id);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const anchorPos = resolveAnchorPos(editor, confirmation);
+    anchorCacheRef.current.set(confirmation.id, anchorPos);
+    return anchorPos;
+  }
+
   useLayoutEffect(() => {
+    anchorCacheRef.current.clear();
     if (sortedConfirmations.length === 0) {
       setPositions([]);
       return;
@@ -67,7 +81,7 @@ export function DocumentEditorConfirmations({
 
     const shellRect = shell.getBoundingClientRect();
     const nextPositions = sortedConfirmations.map((confirmation) => {
-      const anchorPos = resolveAnchorPos(editor, confirmation);
+      const anchorPos = resolveCachedAnchorPos(editor, confirmation);
       const coords = editor.view.coordsAtPos(anchorPos);
       return {
         confirmation,
@@ -78,30 +92,34 @@ export function DocumentEditorConfirmations({
   }, [editor, shellRef, sortedConfirmations]);
 
   useEffect(() => {
+    const scheduleRefresh = schedulePositionRefreshRef.current;
     const refresh = () => {
       const shell = shellRef.current;
       if (!shell) {
         return;
       }
+      anchorCacheRef.current.clear();
       const shellRect = shell.getBoundingClientRect();
-      setPositions((current) =>
-        current.map((item) => {
-          const anchorPos = resolveAnchorPos(editor, item.confirmation);
+      setPositions(
+        sortedConfirmations.map((confirmation) => {
+          const anchorPos = resolveCachedAnchorPos(editor, confirmation);
           const coords = editor.view.coordsAtPos(anchorPos);
           return {
-            ...item,
+            confirmation,
             top: coords.top - shellRect.top + shell.scrollTop,
           };
         }),
       );
     };
-    editor.on("update", refresh);
-    window.addEventListener("resize", refresh);
+    const schedule = () => scheduleRefresh(refresh);
+    editor.on("update", schedule);
+    window.addEventListener("resize", schedule);
     return () => {
-      editor.off("update", refresh);
-      window.removeEventListener("resize", refresh);
+      editor.off("update", schedule);
+      window.removeEventListener("resize", schedule);
+      scheduleRefresh.cancel();
     };
-  }, [editor, shellRef]);
+  }, [editor, shellRef, sortedConfirmations]);
 
   if (positions.length === 0) {
     return null;

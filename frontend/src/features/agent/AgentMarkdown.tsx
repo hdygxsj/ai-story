@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -16,7 +17,7 @@ const markdownComponents: Components = {
   ),
 };
 
-export function AgentMarkdown({ content }: AgentMarkdownProps) {
+export const AgentMarkdown = memo(function AgentMarkdown({ content }: AgentMarkdownProps) {
   if (!content.trim()) {
     return null;
   }
@@ -28,4 +29,4 @@ export function AgentMarkdown({ content }: AgentMarkdownProps) {
       </ReactMarkdown>
     </div>
   );
-}
+});

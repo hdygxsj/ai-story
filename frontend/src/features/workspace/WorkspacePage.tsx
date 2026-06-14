@@ -1,13 +1,16 @@
 import { RightOutlined, SearchOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Empty, Form, Input, List, message, Popconfirm, Select, Space, Statistic, Tabs, Tag, Timeline, Typography } from "antd";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import { extractDocumentBodyText } from "../editor/documentBodyText";
+import { debounce } from "../../utils/schedule";
 import { AgentPanel } from "../agent/AgentPanel";
 import { DocumentEditor } from "../editor/DocumentEditor";
 import { DocumentVersionHistory } from "../editor/DocumentVersionHistory";
 import { MaterialsPanel } from "./MaterialsPanel";
 import { NovelSearchModal } from "./NovelSearchModal";
+import { prepareTimelineEvents } from "./timelinePresentation";
 import { WorkspaceTree } from "./WorkspaceTree";
 import { ApiError } from "../../api/http";
 import type { WorkspaceDiff } from "../../api/agent";
@@ -236,28 +239,37 @@ const optionalPurposeFields = [
   "writing_provider_kind",
 ] as const;
 
-function extractDocumentText(content: DocumentBody | null): string {
-  const parts: string[] = [];
+function createDirtyDraftTracker() {
+  const drafts: Record<string, DocumentBody> = {};
+  const dirtyIds = new Set<string>();
+  let revision = 0;
 
-  function visit(node: unknown) {
-    if (Array.isArray(node)) {
-      node.forEach(visit);
-      return;
-    }
-    if (!node || typeof node !== "object") {
-      return;
-    }
-    const current = node as { content?: unknown; text?: unknown };
-    if (typeof current.text === "string") {
-      parts.push(current.text);
-    }
-    if (current.content) {
-      visit(current.content);
-    }
-  }
-
-  visit(content);
-  return parts.join("");
+  return {
+    getDraft(documentId: string) {
+      return drafts[documentId];
+    },
+    setDraft(documentId: string, content: DocumentBody) {
+      drafts[documentId] = content;
+      if (!dirtyIds.has(documentId)) {
+        dirtyIds.add(documentId);
+        revision += 1;
+      }
+      return revision;
+    },
+    clearDraft(documentId: string) {
+      delete drafts[documentId];
+      if (dirtyIds.delete(documentId)) {
+        revision += 1;
+      }
+      return revision;
+    },
+    isDirty(documentId: string | null) {
+      return Boolean(documentId && dirtyIds.has(documentId));
+    },
+    getRevision() {
+      return revision;
+    },
+  };
 }
 
 export function WorkspacePage({
@@ -276,7 +288,14 @@ export function WorkspacePage({
   const [document, setDocument] = useState<DocumentRecord | null>(null);
   const [documentLoading, setDocumentLoading] = useState(() => getStoredDocumentId(novelId) != null);
   const [agentDocumentWriteLocked, setAgentDocumentWriteLocked] = useState(false);
-  const [draftsByDocumentId, setDraftsByDocumentId] = useState<Record<string, DocumentBody>>({});
+  const draftTrackerRef = useRef(createDirtyDraftTracker());
+  const [draftRevision, setDraftRevision] = useState(0);
+  const [currentWordCount, setCurrentWordCount] = useState(0);
+  const scheduleWordCountUpdateRef = useRef(
+    debounce((content: DocumentBody) => {
+      setCurrentWordCount(extractDocumentBodyText(content).length);
+    }, 400),
+  );
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
   const [selectedText, setSelectedText] = useState<string | null>(null);
   const [confirmationCount, setConfirmationCount] = useState(0);
@@ -542,11 +561,7 @@ export function WorkspacePage({
       const loadedVersions = await listDocumentVersions(token, documentId);
       setDocument(saved);
       setVersions(loadedVersions);
-      setDraftsByDocumentId((current) => {
-        const next = { ...current };
-        delete next[documentId];
-        return next;
-      });
+      setDraftRevision(draftTrackerRef.current.clearDraft(documentId));
       message.success("章节已保存");
     } catch (error) {
       const detail = error instanceof ApiError ? error.message : "保存章节失败";
@@ -560,7 +575,8 @@ export function WorkspacePage({
     if (!documentId || documentLoading || document?.id !== documentId) {
       return;
     }
-    setDraftsByDocumentId((current) => ({ ...current, [documentId]: content }));
+    setDraftRevision(draftTrackerRef.current.setDraft(documentId, content));
+    scheduleWordCountUpdateRef.current(content);
   }
 
   async function handleRestoreDocumentVersion(versionId: string) {
@@ -573,11 +589,7 @@ export function WorkspacePage({
       const loadedVersions = await listDocumentVersions(token, documentId);
       setDocument(restored);
       setVersions(loadedVersions);
-      setDraftsByDocumentId((current) => {
-        const next = { ...current };
-        delete next[documentId];
-        return next;
-      });
+      setDraftRevision(draftTrackerRef.current.clearDraft(documentId));
       setVersionHistoryOpen(false);
       message.success("已恢复到此版本");
     } catch (error) {
@@ -643,14 +655,7 @@ export function WorkspacePage({
       ]);
       setDocument(loadedDocument);
       setVersions(loadedVersions);
-      setDraftsByDocumentId((current) => {
-        if (!(documentId in current)) {
-          return current;
-        }
-        const next = { ...current };
-        delete next[documentId];
-        return next;
-      });
+      setDraftRevision(draftTrackerRef.current.clearDraft(documentId));
     } catch {
       setDocument(null);
       setVersions([]);
@@ -683,14 +688,7 @@ export function WorkspacePage({
       if (changedDocumentId === documentId) {
         setDocument(loadedDocument);
         setVersions(loadedVersions);
-        setDraftsByDocumentId((current) => {
-          if (!(changedDocumentId in current)) {
-            return current;
-          }
-          const next = { ...current };
-          delete next[changedDocumentId];
-          return next;
-        });
+        setDraftRevision(draftTrackerRef.current.clearDraft(changedDocumentId));
       }
     }
   }
@@ -1117,12 +1115,25 @@ export function WorkspacePage({
   }
 
   const serverDocumentContent = document?.id === documentId ? document.content : null;
-  const editorContent = documentId ? draftsByDocumentId[documentId] ?? serverDocumentContent : null;
-  const hasUnsavedDraft = Boolean(documentId && draftsByDocumentId[documentId]);
+  const editorContent = useMemo(() => {
+    if (!documentId) {
+      return null;
+    }
+    return draftTrackerRef.current.getDraft(documentId) ?? serverDocumentContent;
+  }, [documentId, draftRevision, serverDocumentContent]);
+  const hasUnsavedDraft = useMemo(
+    () => draftTrackerRef.current.isDirty(documentId),
+    [documentId, draftRevision],
+  );
+  const visibleTimelineEvents = useMemo(() => prepareTimelineEvents(timelineEvents), [timelineEvents]);
+  const hiddenTimelineDuplicateCount = Math.max(0, timelineEvents.length - visibleTimelineEvents.length);
   const activeNodes = nodes.filter((node) => node.status !== "trashed");
   const chapterCount = activeNodes.filter((node) => node.node_type !== "folder").length;
   const folderCount = activeNodes.filter((node) => node.node_type === "folder").length;
-  const currentWordCount = extractDocumentText(editorContent).length;
+
+  useEffect(() => {
+    setCurrentWordCount(extractDocumentBodyText(editorContent).length);
+  }, [documentId, editorContent]);
   const currentChapterNode = nodes.find((node) => node.document_id === documentId) ?? null;
   const currentChapterTitle = currentChapterNode?.title ?? null;
   const pendingWriteConfirmations = pendingDocumentWriteConfirmations(confirmations);
@@ -1790,13 +1801,18 @@ export function WorkspacePage({
         梳理故事中的关键事件，按时间顺序回顾剧情脉络。
       </Typography.Paragraph>
       <Tag color="orange" style={{ marginBottom: 16 }}>
-        {timelineEvents.length} 个事件
+        {visibleTimelineEvents.length} 个事件
       </Tag>
-      {timelineEvents.length === 0 ? (
+      {hiddenTimelineDuplicateCount > 0 ? (
+        <Typography.Text style={{ display: "block", marginBottom: 12 }} type="secondary">
+          已合并 {hiddenTimelineDuplicateCount} 条重复时间线，并按卷序重新排序。
+        </Typography.Text>
+      ) : null}
+      {visibleTimelineEvents.length === 0 ? (
         <Empty description="还没有时间线事件，可以让 Agent 帮你梳理故事线" />
       ) : (
         <Timeline
-          items={timelineEvents.map((event) => ({
+          items={visibleTimelineEvents.map((event) => ({
             key: event.id,
             color: "#ff7a18",
             children: (

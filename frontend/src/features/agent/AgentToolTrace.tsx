@@ -48,7 +48,7 @@ const TOOL_LABELS: Record<string, string> = {
   write_document_content: "写入正文",
 };
 
-function toolLabel(name: string) {
+export function toolLabel(name: string) {
   return TOOL_LABELS[name] ?? name;
 }
 

@@ -12,6 +12,7 @@ export type TimelineEvent = {
   title: string;
   event_time: string;
   summary?: string;
+  created_at?: string;
 };
 
 export type CharacterState = {
@@ -19,6 +20,7 @@ export type CharacterState = {
   character_name: string;
   state: string;
   scope?: string;
+  created_at?: string;
 };
 
 export type RelationshipEdge = {
