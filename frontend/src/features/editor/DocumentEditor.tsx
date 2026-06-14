@@ -5,14 +5,23 @@ import { Button, Card, Input, Space, Spin, Typography } from "antd";
 import { useEffect, useRef, useState } from "react";
 
 import type { DocumentBody } from "../../api/documents";
+import type { Confirmation } from "../../api/confirmations";
+import { focusConfirmationInEditor } from "../confirmations/confirmationLocation";
+import { DocumentConfirmationNavigator } from "./DocumentConfirmationNavigator";
+import { DocumentEditorConfirmations } from "./DocumentEditorConfirmations";
 
 const EMPTY_DOCUMENT: DocumentBody = { type: "doc", content: [] };
 
 type DocumentEditorProps = {
   chapterTitle?: string | null;
   content?: DocumentBody | null;
+  focusConfirmationId?: string | null;
   loading?: boolean;
+  pendingConfirmations?: Confirmation[];
+  onApproveConfirmation?: (confirmationId: string) => void;
   onChange?: (content: DocumentBody) => void;
+  onFocusConfirmationHandled?: () => void;
+  onRejectConfirmation?: (confirmationId: string) => void;
   onRenameChapter?: (title: string) => void;
   onOpenVersionHistory?: () => void;
   onSelectText?: (text: string) => void;
@@ -24,8 +33,13 @@ type DocumentEditorProps = {
 export function DocumentEditor({
   chapterTitle,
   content,
+  focusConfirmationId = null,
   loading = false,
+  pendingConfirmations = [],
+  onApproveConfirmation,
   onChange,
+  onFocusConfirmationHandled,
+  onRejectConfirmation,
   onRenameChapter,
   onOpenVersionHistory,
   onSelectText,
@@ -35,6 +49,7 @@ export function DocumentEditor({
 }: DocumentEditorProps) {
   const applyingExternalContent = useRef(false);
   const editorShellRef = useRef<HTMLDivElement>(null);
+  const [activeConfirmationIndex, setActiveConfirmationIndex] = useState(0);
   const [chapterTitleValue, setChapterTitleValue] = useState(chapterTitle ?? "");
   const [pendingSelection, setPendingSelection] = useState("");
   const [selectionToolbarPosition, setSelectionToolbarPosition] = useState<{ left: number; top: number } | null>(null);
@@ -57,7 +72,7 @@ export function DocumentEditor({
       attributes: {
         "data-testid": "tiptap-editor",
         style:
-          "min-height: 100%; padding: 30px 44px; border: none; border-radius: 18px; outline: none; background: #fff; box-shadow: inset 0 0 0 1px rgba(15,23,42,0.06); line-height: 1.9; font-size: 16px;",
+          "min-height: 100%; padding: 8px 4px 24px; border: none; outline: none; background: transparent; line-height: 1.9; font-size: 16px;",
       },
       handleDOMEvents: {
         keyup: () => {
@@ -77,7 +92,7 @@ export function DocumentEditor({
   }, [chapterTitle]);
 
   useEffect(() => {
-    if (!editor) {
+    if (!editor || loading) {
       return;
     }
     const nextContent = content ?? EMPTY_DOCUMENT;
@@ -90,7 +105,7 @@ export function DocumentEditor({
     queueMicrotask(() => {
       applyingExternalContent.current = false;
     });
-  }, [content, editor]);
+  }, [content, editor, loading]);
 
   useEffect(() => {
     if (!editor) {
@@ -98,6 +113,44 @@ export function DocumentEditor({
     }
     editor.setEditable(!loading);
   }, [editor, loading]);
+
+  useEffect(() => {
+    if (activeConfirmationIndex >= pendingConfirmations.length) {
+      setActiveConfirmationIndex(Math.max(0, pendingConfirmations.length - 1));
+    }
+  }, [activeConfirmationIndex, pendingConfirmations.length]);
+
+  useEffect(() => {
+    if (!editor || loading || !focusConfirmationId) {
+      return;
+    }
+    const confirmation = pendingConfirmations.find((item) => item.id === focusConfirmationId);
+    if (!confirmation) {
+      return;
+    }
+    const index = pendingConfirmations.findIndex((item) => item.id === focusConfirmationId);
+    if (index >= 0) {
+      setActiveConfirmationIndex(index);
+    }
+    requestAnimationFrame(() => {
+      const scrollContainer = editorShellRef.current?.closest(".ant-card-body") as HTMLElement | null;
+      focusConfirmationInEditor(editor, confirmation, scrollContainer);
+      onFocusConfirmationHandled?.();
+    });
+  }, [editor, focusConfirmationId, loading, onFocusConfirmationHandled, pendingConfirmations]);
+
+  function handleNavigateConfirmation(index: number) {
+    setActiveConfirmationIndex(index);
+    const confirmation = pendingConfirmations[index];
+    if (!editor || !confirmation) {
+      return;
+    }
+    const scrollContainer = editorShellRef.current?.closest(".ant-card-body") as HTMLElement | null;
+    focusConfirmationInEditor(editor, confirmation, scrollContainer);
+  }
+
+  const highlightedConfirmationId =
+    focusConfirmationId ?? pendingConfirmations[activeConfirmationIndex]?.id ?? null;
 
   useEffect(() => {
     document.addEventListener("mouseup", handleUseSelection);
@@ -215,8 +268,15 @@ export function DocumentEditor({
           minHeight: 0,
           minWidth: 0,
         }}
-        styles={{ body: { flex: 1, minHeight: 0, overflow: "auto", padding: 14 } }}
+        styles={{ body: { flex: 1, minHeight: 0, overflow: "auto", padding: "0 18px 18px" } }}
       >
+        {!loading && pendingConfirmations.length > 1 ? (
+          <DocumentConfirmationNavigator
+            activeIndex={activeConfirmationIndex}
+            onSelect={handleNavigateConfirmation}
+            total={pendingConfirmations.length}
+          />
+        ) : null}
         <div
           ref={editorShellRef}
           onKeyUpCapture={handleUseSelection}
@@ -224,6 +284,17 @@ export function DocumentEditor({
           style={{ height: "100%", minHeight: 240, position: "relative" }}
         >
           <EditorContent editor={editor} />
+          {!loading && editor && pendingConfirmations.length > 0 && onApproveConfirmation && onRejectConfirmation ? (
+            <DocumentEditorConfirmations
+              confirmations={pendingConfirmations}
+              disabled={loading}
+              editor={editor}
+              highlightedConfirmationId={highlightedConfirmationId}
+              onApprove={onApproveConfirmation}
+              onReject={onRejectConfirmation}
+              shellRef={editorShellRef}
+            />
+          ) : null}
           {loading ? (
             <div
               aria-busy="true"

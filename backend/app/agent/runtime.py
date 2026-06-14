@@ -76,6 +76,10 @@ async def stream_agent_graph(
             content = getattr(chunk, "content", "")
             if isinstance(content, str) and content:
                 yield "delta", content
+            additional_kwargs = getattr(chunk, "additional_kwargs", None) or {}
+            reasoning = additional_kwargs.get("reasoning_content")
+            if isinstance(reasoning, str) and reasoning:
+                yield "reasoning", reasoning
             continue
 
         if event_type == "on_tool_start":

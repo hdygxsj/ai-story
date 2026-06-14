@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -13,5 +14,8 @@ class ConfirmationResponse(BaseModel):
     is_stale: bool = False
     before_text: str | None = None
     after_text: str | None = None
+    created_at: datetime | None = None
+    resolved_at: datetime | None = None
+    chapter_title: str | None = None
 
     model_config = ConfigDict(from_attributes=True)

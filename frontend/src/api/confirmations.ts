@@ -9,10 +9,17 @@ export type Confirmation = {
   is_stale?: boolean;
   before_text?: string | null;
   after_text?: string | null;
+  created_at?: string | null;
+  resolved_at?: string | null;
+  chapter_title?: string | null;
 };
 
 export function listConfirmations(token: string, novelId: string) {
   return apiRequest<Confirmation[]>(`/novels/${novelId}/confirmations`, { token });
+}
+
+export function listConfirmationHistory(token: string, novelId: string) {
+  return apiRequest<Confirmation[]>(`/novels/${novelId}/confirmations/history`, { token });
 }
 
 export function approveConfirmation(token: string, confirmationId: string) {

@@ -18,6 +18,7 @@ import type { Novel } from "../../api/novels";
 import type { WorkspaceNode } from "../../api/workspace";
 import { AgentToolCallCard, DOCUMENT_WRITE_TOOLS } from "./AgentToolTrace";
 import { AgentMarkdown } from "./AgentMarkdown";
+import { AgentThinkingIndicator } from "./AgentThinkingIndicator";
 import {
   type ChatMessage,
   createMessageId,
@@ -51,6 +52,11 @@ type AgentPanelProps = {
 
 const WELCOME_MESSAGE = "告诉我你想创建、改写、记录或检索什么。";
 
+type ThinkingState = {
+  startedAt: number;
+  content: string;
+};
+
 function welcomeMessages(): ChatMessage[] {
   return [{ id: createMessageId("assistant"), role: "assistant", content: WELCOME_MESSAGE }];
 }
@@ -79,6 +85,7 @@ export function AgentPanel({
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(false);
+  const [thinking, setThinking] = useState<ThinkingState | null>(null);
   const [contextDetail, setContextDetail] = useState<ContextDetail | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const activeTextIdRef = useRef<string | null>(null);
@@ -143,7 +150,27 @@ export function AgentPanel({
     scrollMessagesToBottom();
     const frame = requestAnimationFrame(scrollMessagesToBottom);
     return () => cancelAnimationFrame(frame);
-  }, [activeConversationId, messages, scrollMessagesToBottom]);
+  }, [activeConversationId, messages, scrollMessagesToBottom, thinking]);
+
+  const hasRunningTool = messages.some(
+    (item) => item.role === "tool" && item.toolCall?.status === "running",
+  );
+
+  function startThinking(content = "") {
+    setThinking({ startedAt: Date.now(), content });
+  }
+
+  function appendThinkingContent(delta: string) {
+    setThinking((current) =>
+      current
+        ? { ...current, content: `${current.content}${delta}` }
+        : { startedAt: Date.now(), content: delta },
+    );
+  }
+
+  function clearThinking() {
+    setThinking(null);
+  }
 
   const documentWriteLocked =
     streaming &&
@@ -200,6 +227,9 @@ export function AgentPanel({
   function upsertToolCallMessage(record: AgentToolCallRecord) {
     if (record.status === "running") {
       closeActiveTextSegment();
+      clearThinking();
+    } else if (record.status === "ok" || record.status === "error") {
+      startThinking();
     }
 
     setMessages((current) => {
@@ -224,6 +254,7 @@ export function AgentPanel({
   }
 
   function appendAssistantDelta(delta: string) {
+    clearThinking();
     const assistantId = ensureActiveTextBubble();
     appendAssistantContent(assistantId, delta);
   }
@@ -266,6 +297,7 @@ export function AgentPanel({
     }
     setError(null);
     setStreaming(true);
+    startThinking();
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -293,6 +325,9 @@ export function AgentPanel({
         onDelta: (content) => {
           appendAssistantDelta(content);
         },
+        onReasoning: (content) => {
+          appendThinkingContent(content);
+        },
         onToolCall: (record) => {
           upsertToolCallMessage(record);
         },
@@ -314,6 +349,7 @@ export function AgentPanel({
             ? `${payload.message} 正文写入方案已生成，请在对应章节的编辑器中确认。`
             : payload.message;
           finalizeActiveTextMessage(finalMessage);
+          clearThinking();
           void (async () => {
             try {
               await onRunCompleted?.();
@@ -329,12 +365,14 @@ export function AgentPanel({
         onError: (caught) => {
           setError(caught.message);
           finalizeActiveTextMessage(caught.message);
+          clearThinking();
           setStreaming(false);
           activeTextIdRef.current = null;
           abortControllerRef.current = null;
         },
         onCancelled: () => {
           finalizeCancelledAssistantMessage();
+          clearThinking();
           setStreaming(false);
           activeTextIdRef.current = null;
           abortControllerRef.current = null;
@@ -470,19 +508,24 @@ export function AgentPanel({
         >
           <Bubble.List
             autoScroll
-            items={messages.map((item) => ({
+            items={messages
+              .filter(
+                (item) =>
+                  !(
+                    thinking &&
+                    item.role === "assistant" &&
+                    !item.content.trim() &&
+                    item.id === activeTextIdRef.current
+                  ),
+              )
+              .map((item) => ({
               key: item.id,
               role: item.role === "user" ? "user" : "ai",
               content:
                 item.role === "tool" && item.toolCall ? (
                   <AgentToolCallCard toolCall={item.toolCall} />
                 ) : item.role === "assistant" ? (
-                  <AgentMarkdown
-                    content={
-                      item.content ||
-                      (streaming && item.id === activeTextIdRef.current ? "..." : "")
-                    }
-                  />
+                  <AgentMarkdown content={item.content} />
                 ) : (
                   item.content
                 ),
@@ -492,6 +535,9 @@ export function AgentPanel({
               user: { placement: "end", variant: "filled" },
             }}
           />
+          {thinking && !hasRunningTool ? (
+            <AgentThinkingIndicator content={thinking.content} startedAt={thinking.startedAt} />
+          ) : null}
         </div>
         {error ? <Alert message={error} showIcon style={{ flexShrink: 0 }} type="error" /> : null}
         {workspaceDiff ? (

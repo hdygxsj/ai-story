@@ -25,6 +25,47 @@ export function confirmationActionLabel(actionType: string): string {
   }
 }
 
+export function confirmationStatusLabel(status: string): string {
+  switch (status) {
+    case "approved":
+      return "已写入";
+    case "rejected":
+      return "已拒绝";
+    case "pending":
+      return "待确认";
+    default:
+      return status;
+  }
+}
+
+export function formatConfirmationTime(value?: string | null): string {
+  if (!value) {
+    return "时间未知";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "时间未知";
+  }
+  return date.toLocaleString();
+}
+
+export function confirmationHistoryPreview(confirmation: Confirmation): string {
+  if (confirmation.status === "approved") {
+    const after = confirmation.after_text?.trim();
+    if (after) {
+      return after.length > 120 ? `${after.slice(0, 120)}…` : after;
+    }
+  }
+  if (confirmation.status === "rejected") {
+    const before = confirmation.before_text?.trim();
+    if (before) {
+      return `未写入，原内容：${before.length > 80 ? `${before.slice(0, 80)}…` : before}`;
+    }
+    return "已拒绝本次写入";
+  }
+  return confirmationPreview(confirmation.payload);
+}
+
 export function pendingConfirmations(items: Confirmation[]): Confirmation[] {
   return items.filter((item) => item.status === "pending");
 }
@@ -48,4 +89,15 @@ export function pendingDocumentWriteConfirmationIds(items: Confirmation[]): stri
   return pendingDocumentWriteConfirmations(items)
     .map((item) => item.document_id)
     .filter((documentId): documentId is string => Boolean(documentId));
+}
+
+export function pendingDocumentWriteCountsByDocumentId(items: Confirmation[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const item of pendingDocumentWriteConfirmations(items)) {
+    if (!item.document_id) {
+      continue;
+    }
+    counts[item.document_id] = (counts[item.document_id] ?? 0) + 1;
+  }
+  return counts;
 }

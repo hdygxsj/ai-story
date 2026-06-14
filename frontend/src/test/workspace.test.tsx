@@ -11,6 +11,16 @@ function jsonResponse(body: unknown) {
   });
 }
 
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") {
+    return input;
+  }
+  if (input instanceof URL) {
+    return input.toString();
+  }
+  return input.url;
+}
+
 function conversationMockResponse(url: string) {
   if (url.endsWith("/novels/novel-1/conversations")) {
     return jsonResponse([]);
@@ -21,10 +31,17 @@ function conversationMockResponse(url: string) {
   return null;
 }
 
-async function waitForDocumentEditorReady() {
+async function waitForDocumentEditorReady(expectedTitle?: string, expectedContent?: string) {
   await waitFor(() => {
-    expect(screen.getByLabelText("章节名称")).not.toBeDisabled();
+    const titleInput = screen.getByLabelText("章节名称");
+    expect(titleInput).not.toBeDisabled();
     expect(screen.queryByTestId("document-editor-loading")).not.toBeInTheDocument();
+    if (expectedTitle) {
+      expect(titleInput).toHaveValue(expectedTitle);
+    }
+    if (expectedContent) {
+      expect(screen.getByText(expectedContent)).toBeInTheDocument();
+    }
   });
 }
 
@@ -132,7 +149,7 @@ describe("WorkspacePage", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
-        const url = String(input);
+        const url = requestUrl(input);
         if (url.endsWith("/novels/novel-1/nodes")) {
           return Promise.resolve(
             jsonResponse([
@@ -165,8 +182,7 @@ describe("WorkspacePage", () => {
 
     render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
 
-    await waitForDocumentEditorReady();
-    expect(await screen.findByLabelText("章节名称")).toHaveValue("第二章");
+    await waitForDocumentEditorReady("第二章");
     expect(await screen.findByText("第二章内容")).toBeInTheDocument();
   });
 
@@ -254,6 +270,9 @@ describe("WorkspacePage", () => {
             ]),
           );
         }
+        if (url.endsWith("/documents/doc-1/versions")) {
+          return Promise.resolve(jsonResponse([]));
+        }
         if (url.endsWith("/documents/doc-1")) {
           return Promise.resolve(
             jsonResponse({
@@ -311,8 +330,8 @@ describe("WorkspacePage", () => {
 
     render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
 
-    await waitForDocumentEditorReady();
-    const titleInput = await screen.findByLabelText("章节名称");
+    await waitForDocumentEditorReady("第一章");
+    const titleInput = screen.getByLabelText("章节名称");
     await user.clear(titleInput);
     await user.type(titleInput, "第一章 新标题{Enter}");
 
@@ -335,6 +354,9 @@ describe("WorkspacePage", () => {
           ]),
         );
       }
+      if (url.endsWith("/documents/doc-1/versions")) {
+        return Promise.resolve(jsonResponse([]));
+      }
       if (url.endsWith("/documents/doc-1") && init?.method === "PATCH") {
         return Promise.resolve(jsonResponse({ id: "doc-1", content: JSON.parse(String(init.body)).content }));
       }
@@ -348,9 +370,6 @@ describe("WorkspacePage", () => {
             },
           }),
         );
-      }
-      if (url.endsWith("/documents/doc-1/versions")) {
-        return Promise.resolve(jsonResponse([]));
       }
       return Promise.resolve(jsonResponse([]));
     });
@@ -439,6 +458,17 @@ describe("WorkspacePage", () => {
     const user = userEvent.setup();
     let versionCalls = 0;
     let confirmationResolved = false;
+    const approvedHistoryItem = {
+      id: "confirmation-1",
+      action_type: "selection_replace",
+      status: "approved",
+      payload: { replacement_text: "新文本" },
+      document_id: "doc-1",
+      before_text: "旧文本",
+      after_text: "新文本",
+      chapter_title: "第一章",
+      resolved_at: "2026-06-14T08:00:00.000Z",
+    };
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/novels/novel-1/nodes")) {
@@ -447,6 +477,9 @@ describe("WorkspacePage", () => {
             { id: "node-1", title: "第一章", node_type: "chapter", parent_id: null, document_id: "doc-1", position: 0 },
           ]),
         );
+      }
+      if (url.endsWith("/novels/novel-1/confirmations/history")) {
+        return Promise.resolve(jsonResponse(confirmationResolved ? [approvedHistoryItem] : []));
       }
       if (url.endsWith("/novels/novel-1/confirmations")) {
         return Promise.resolve(
@@ -494,7 +527,8 @@ describe("WorkspacePage", () => {
     await user.click(approveButtons[0]!);
 
     await waitFor(() => expect(versionCalls).toBeGreaterThan(1));
-    expect(await screen.findByText("2 个已保存版本")).toBeInTheDocument();
+    expect(await screen.findByTestId("confirmation-history-card")).toBeInTheDocument();
+    expect(screen.getByText("已写入")).toBeInTheDocument();
   });
 
   it("commits the focused chapter title when saving with shortcut", async () => {
@@ -527,8 +561,8 @@ describe("WorkspacePage", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
-    await waitForDocumentEditorReady();
-    const titleInput = await screen.findByLabelText("章节名称");
+    await waitForDocumentEditorReady("第一章");
+    const titleInput = screen.getByLabelText("章节名称");
     await user.clear(titleInput);
     await user.type(titleInput, "第一章 即时保存");
 
@@ -1179,11 +1213,25 @@ describe("WorkspacePage", () => {
 
   it("opens a chapter created by the Agent", async () => {
     const user = userEvent.setup();
+    let chapterCreated = false;
+    const createdNode = {
+      id: "node-created",
+      novel_id: "novel-1",
+      title: "第一章",
+      node_type: "chapter",
+      parent_id: null,
+      document_id: "doc-created",
+      position: 0,
+      status: "draft",
+    };
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
       const conversationResponse = conversationMockResponse(url);
       if (conversationResponse) {
         return Promise.resolve(conversationResponse);
+      }
+      if (url.endsWith("/novels/novel-1/nodes")) {
+        return Promise.resolve(jsonResponse(chapterCreated ? [createdNode] : []));
       }
       if (url.endsWith("/documents/doc-created/versions")) {
         return Promise.resolve(jsonResponse([]));
@@ -1200,6 +1248,7 @@ describe("WorkspacePage", () => {
         );
       }
       if (url.endsWith("/novels/novel-1/agent/messages/stream")) {
+        chapterCreated = true;
         return Promise.resolve(
           sseResponse([
             { type: "delta", content: "第一章已写入工作台。" },
@@ -1209,18 +1258,7 @@ describe("WorkspacePage", () => {
               context_status: [],
               conversation_id: "conv-write",
               confirmation: null,
-              workspace_nodes: [
-                {
-                  id: "node-created",
-                  novel_id: "novel-1",
-                  title: "第一章",
-                  node_type: "chapter",
-                  parent_id: null,
-                  document_id: "doc-created",
-                  position: 0,
-                  status: "draft",
-                },
-              ],
+              workspace_nodes: [createdNode],
             },
           ]),
         );
@@ -1236,7 +1274,7 @@ describe("WorkspacePage", () => {
     );
 
     expect(await screen.findByText("第一章已经写入工作台")).toBeInTheDocument();
-    expect(screen.getByText("第一章")).toBeInTheDocument();
+    expect(await screen.findByTestId("workspace-node-title-node-created")).toHaveTextContent("第一章");
   });
 
   it("shows inline confirmation to write generated body into the current document", async () => {
@@ -1291,6 +1329,9 @@ describe("WorkspacePage", () => {
           }),
         );
       }
+      if (url.endsWith("/novels/novel-1/confirmations/history")) {
+        return Promise.resolve(jsonResponse([]));
+      }
       if (url.endsWith("/novels/novel-1/confirmations")) {
         return Promise.resolve(
           jsonResponse(confirmationCreated && !approved ? [pendingConfirmation] : []),
@@ -1323,10 +1364,9 @@ describe("WorkspacePage", () => {
       "把这段正文写进当前章节{Enter}",
     );
 
-    expect(await screen.findByTestId("agent-write-confirmation")).toBeInTheDocument();
-    expect(await screen.findByTestId("confirmation-diff-view")).toBeInTheDocument();
-    expect(screen.getByTestId("confirmation-diff-modify")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "写入正文" }));
+    expect(await screen.findByTestId("document-inline-confirmation-layer")).toBeInTheDocument();
+    expect(await screen.findByTestId("inline-confirmation-confirmation-write")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "确认写入" }));
     expect(await screen.findByText("Agent 已写入正文")).toBeInTheDocument();
   });
 
@@ -1358,6 +1398,9 @@ describe("WorkspacePage", () => {
           }),
         );
       }
+      if (url.endsWith("/novels/novel-1/confirmations/history")) {
+        return Promise.resolve(jsonResponse([]));
+      }
       if (url.endsWith("/novels/novel-1/confirmations")) {
         return Promise.resolve(
           jsonResponse([
@@ -1379,9 +1422,9 @@ describe("WorkspacePage", () => {
 
     render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
 
-    expect(await screen.findByTestId("agent-write-confirmation")).toBeInTheDocument();
+    expect(await screen.findByTestId("document-inline-confirmation-layer")).toBeInTheDocument();
     expect(screen.getByText("等待确认的新正文")).toBeInTheDocument();
-    expect(screen.getByTestId("workspace-node-pending-write-node-1")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-node-pending-write-node-1")).toHaveTextContent("1 处待确认");
     expect(screen.queryByText("等待写入确认")).not.toBeInTheDocument();
   });
 
@@ -1412,6 +1455,9 @@ describe("WorkspacePage", () => {
             },
           }),
         );
+      }
+      if (url.endsWith("/novels/novel-1/confirmations/history")) {
+        return Promise.resolve(jsonResponse([]));
       }
       if (url.endsWith("/novels/novel-1/confirmations")) {
         return Promise.resolve(jsonResponse([]));
@@ -1466,6 +1512,7 @@ describe("WorkspacePage", () => {
               args: { title: "第一章", content: "正文内容" },
               summary: "已将《第一章》写入工作台。",
             },
+            { type: "reasoning", content: "整理写入结果并准备回复。" },
             { type: "delta", content: "第一章已写入。" },
             {
               type: "done",
@@ -1499,5 +1546,123 @@ describe("WorkspacePage", () => {
     expect(await screen.findByTestId("agent-tool-call-card")).toBeInTheDocument();
     expect(screen.getByText("写入章节")).toBeInTheDocument();
     expect(screen.getByText("已将《第一章》写入工作台。")).toBeInTheDocument();
+    expect(await screen.findByText("第一章已写入。")).toBeInTheDocument();
+  });
+
+  it("shows thinking indicator after tool call completes", async () => {
+    const user = userEvent.setup();
+    let releaseReasoning: (() => void) | null = null;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      const conversationResponse = conversationMockResponse(url);
+      if (conversationResponse) {
+        return Promise.resolve(conversationResponse);
+      }
+      if (url.endsWith("/novels/novel-1/nodes")) {
+        return Promise.resolve(
+          jsonResponse([
+            { id: "node-1", title: "第一章", node_type: "chapter", parent_id: null, document_id: "doc-1", position: 0 },
+          ]),
+        );
+      }
+      if (url.endsWith("/documents/doc-1/versions")) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith("/documents/doc-1")) {
+        return Promise.resolve(jsonResponse({ id: "doc-1", content: { type: "doc", content: [] } }));
+      }
+      if (url.endsWith("/novels/novel-1/agent/messages/stream")) {
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  type: "tool_call",
+                  id: "run-thinking",
+                  tool: "search_rag",
+                  status: "running",
+                  args: { query: "主角设定" },
+                  summary: null,
+                })}\n\n`,
+              ),
+            );
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  type: "tool_call",
+                  id: "run-thinking",
+                  tool: "search_rag",
+                  status: "ok",
+                  args: { query: "主角设定" },
+                  summary: "找到 2 条记忆。",
+                })}\n\n`,
+              ),
+            );
+            releaseReasoning = () => {
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({ type: "reasoning", content: "结合检索结果组织回答。" })}\n\n`,
+                ),
+              );
+              window.setTimeout(() => {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({ type: "delta", content: "检索完成。" })}\n\n`,
+                  ),
+                );
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      type: "done",
+                      message: "检索完成。",
+                      context_status: [],
+                      conversation_id: "conv-thinking",
+                      confirmation: null,
+                      tool_calls: [
+                        {
+                          id: "run-thinking",
+                          tool: "search_rag",
+                          status: "ok",
+                          args: { query: "主角设定" },
+                          summary: "找到 2 条记忆。",
+                        },
+                      ],
+                    })}\n\n`,
+                  ),
+                );
+                controller.close();
+              }, 50);
+            };
+          },
+        });
+        return Promise.resolve(
+          new Response(stream, {
+            headers: { "Content-Type": "text/event-stream" },
+            status: 200,
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
+    await user.type(
+      screen.getByPlaceholderText("让 Agent 规划、改写、记录记忆或检索上下文"),
+      "检索主角设定{Enter}",
+    );
+
+    expect(await screen.findByTestId("agent-tool-call-card")).toBeInTheDocument();
+    expect(await screen.findByTestId("agent-thinking-indicator")).toBeInTheDocument();
+    expect(screen.getByText("思考中")).toBeInTheDocument();
+
+    await waitFor(() => expect(releaseReasoning).not.toBeNull());
+    releaseReasoning!();
+    expect(await screen.findByText(/结合检索结果组织回答/)).toBeInTheDocument();
+    expect(await screen.findByText("检索完成。")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByTestId("agent-thinking-indicator")).not.toBeInTheDocument();
+    });
   });
 });

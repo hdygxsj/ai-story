@@ -17,7 +17,8 @@ type WorkspaceTreeProps = {
   onRestoreNode?: (nodeId: string) => void;
   onSelectDocument?: (documentId: string) => void;
   onTrashNode?: (nodeId: string) => void;
-  pendingWriteDocumentIds?: string[];
+  pendingWriteCountsByDocumentId?: Record<string, number>;
+  onLocatePendingWrites?: (documentId: string) => void;
   selectedDocumentId?: string | null;
 };
 
@@ -285,7 +286,8 @@ export function WorkspaceTree({
   onRestoreNode,
   onSelectDocument,
   onTrashNode,
-  pendingWriteDocumentIds = [],
+  onLocatePendingWrites,
+  pendingWriteCountsByDocumentId = {},
   selectedDocumentId = null,
 }: WorkspaceTreeProps) {
   const [renamingNode, setRenamingNode] = useState<WorkspaceNode | null>(null);
@@ -302,10 +304,6 @@ export function WorkspaceTree({
   const lastClickedNodeKeyRef = useRef(lastClickedNodeKey);
   lastClickedNodeKeyRef.current = lastClickedNodeKey;
   const renamingNodeLabel = renamingNode?.node_type === "folder" ? "文件夹" : "章节";
-  const pendingWriteDocumentIdSet = useMemo(
-    () => new Set(pendingWriteDocumentIds),
-    [pendingWriteDocumentIds],
-  );
   const activeNodes = useMemo(() => nodes.filter((node) => node.status !== "trashed"), [nodes]);
   const trashedNodes = useMemo(() => nodes.filter((node) => node.status === "trashed"), [nodes]);
   const childrenByParent = useMemo(() => {
@@ -398,13 +396,26 @@ export function WorkspaceTree({
             >
               {node.title}
             </span>
-            {node.document_id && pendingWriteDocumentIdSet.has(node.document_id) ? (
+            {node.document_id && (pendingWriteCountsByDocumentId[node.document_id] ?? 0) > 0 ? (
               <Tag
                 color="gold"
                 data-testid={`workspace-node-pending-write-${node.id}`}
-                style={{ flexShrink: 0, fontSize: 10, lineHeight: "16px", margin: 0, paddingInline: 4 }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (node.document_id) {
+                    onLocatePendingWrites?.(node.document_id);
+                  }
+                }}
+                style={{
+                  cursor: onLocatePendingWrites ? "pointer" : "default",
+                  flexShrink: 0,
+                  fontSize: 10,
+                  lineHeight: "16px",
+                  margin: 0,
+                  paddingInline: 4,
+                }}
               >
-                待写入
+                {pendingWriteCountsByDocumentId[node.document_id]} 处待确认
               </Tag>
             ) : null}
           </span>

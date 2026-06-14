@@ -8,9 +8,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.chapter_body import is_outline_or_meta_content
-from app.models import Document, DocumentVersion, ModelProfile, Novel, PendingConfirmation
+from app.models import Document, DocumentVersion, ModelProfile, Novel, PendingConfirmation, WorkspaceNode
 from app.services.rag import extract_text_from_prosemirror, index_text
 from app.services.workspace_actions import text_document
+
+
+def mark_confirmation_resolved(confirmation: PendingConfirmation, status: str) -> None:
+    confirmation.status = status
+    confirmation.resolved_at = datetime.now(UTC)
 
 
 async def get_owned_document(
@@ -146,7 +151,7 @@ def reject_pending_confirmations_for_document(
             continue
         if not confirmation.payload.get("expected_updated_at"):
             continue
-        confirmation.status = "rejected"
+        mark_confirmation_resolved(confirmation, "rejected")
         changed = True
     return changed
 
@@ -170,7 +175,7 @@ async def expire_stale_pending_confirmations(
     changed = False
     for confirmation in confirmations:
         if confirmation.status == "pending" and confirmation_is_stale(confirmation, documents_by_id):
-            confirmation.status = "rejected"
+            mark_confirmation_resolved(confirmation, "rejected")
             changed = True
     if changed:
         await session.commit()
@@ -197,6 +202,8 @@ async def expire_pending_confirmations_for_document(
 async def build_confirmation_responses(
     session: AsyncSession,
     confirmations: list[PendingConfirmation],
+    *,
+    novel_id: UUID | None = None,
 ) -> list[dict[str, Any]]:
     document_ids = {
         UUID(str(confirmation.payload["document_id"]))
@@ -207,6 +214,18 @@ async def build_confirmation_responses(
     if document_ids:
         documents = await session.scalars(select(Document).where(Document.id.in_(document_ids)))
         documents_by_id = {document.id: document for document in documents}
+
+    chapter_titles_by_document_id: dict[UUID, str] = {}
+    if novel_id and document_ids:
+        nodes = await session.scalars(
+            select(WorkspaceNode).where(
+                WorkspaceNode.novel_id == novel_id,
+                WorkspaceNode.document_id.in_(document_ids),
+            )
+        )
+        chapter_titles_by_document_id = {
+            node.document_id: node.title for node in nodes if node.document_id is not None
+        }
 
     version_ids = {
         UUID(str(confirmation.payload["version_id"]))
@@ -221,6 +240,7 @@ async def build_confirmation_responses(
     responses: list[dict[str, Any]] = []
     for confirmation in confirmations:
         document_id = confirmation.payload.get("document_id")
+        document_uuid = UUID(str(document_id)) if document_id else None
         before_text, after_text = confirmation_diff_texts(confirmation, documents_by_id, versions_by_id)
         responses.append(
             {
@@ -228,10 +248,13 @@ async def build_confirmation_responses(
                 "action_type": confirmation.action_type,
                 "status": confirmation.status,
                 "payload": confirmation.payload,
-                "document_id": UUID(str(document_id)) if document_id else None,
+                "document_id": document_uuid,
                 "is_stale": False,
                 "before_text": before_text,
                 "after_text": after_text,
+                "created_at": confirmation.created_at,
+                "resolved_at": confirmation.resolved_at,
+                "chapter_title": chapter_titles_by_document_id.get(document_uuid) if document_uuid else None,
             }
         )
     return responses
@@ -453,7 +476,7 @@ async def approve_document_confirmation(
         document_id=UUID(confirmation.payload["document_id"]),
     )
     if _timestamp_token(document.updated_at) != confirmation.payload.get("expected_updated_at"):
-        confirmation.status = "rejected"
+        mark_confirmation_resolved(confirmation, "rejected")
         await session.commit()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -488,7 +511,7 @@ async def approve_document_confirmation(
         source_id=str(document.id),
         text=extract_text_from_prosemirror(document.content),
     )
-    confirmation.status = "approved"
+    mark_confirmation_resolved(confirmation, "approved")
     pending = list(
         await session.scalars(
             select(PendingConfirmation).where(

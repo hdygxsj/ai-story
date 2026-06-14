@@ -85,6 +85,11 @@ export type AgentStreamDeltaPayload = {
   content: string;
 };
 
+export type AgentStreamReasoningPayload = {
+  type: "reasoning";
+  content: string;
+};
+
 export type AgentStreamDonePayload = AgentMessageResponse & {
   type: "done";
   proposed_payload?: Record<string, unknown> | null;
@@ -101,12 +106,14 @@ export type AgentStreamToolCallPayload = AgentToolCallRecord & {
 
 export type AgentStreamEvent =
   | AgentStreamDeltaPayload
+  | AgentStreamReasoningPayload
   | AgentStreamDonePayload
   | AgentStreamErrorPayload
   | AgentStreamToolCallPayload;
 
 export type AgentStreamHandlers = {
   onDelta: (content: string) => void;
+  onReasoning?: (content: string) => void;
   onToolCall: (record: AgentToolCallRecord) => void;
   onDone: (payload: AgentStreamDonePayload) => void;
   onError: (error: Error) => void;
@@ -203,6 +210,10 @@ export async function streamAgentMessage(
     const parsed = JSON.parse(line.slice(6)) as AgentStreamEvent;
     if (parsed.type === "delta") {
       handlers.onDelta(parsed.content);
+      return;
+    }
+    if (parsed.type === "reasoning") {
+      handlers.onReasoning?.(parsed.content);
       return;
     }
     if (parsed.type === "tool_call") {

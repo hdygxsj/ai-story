@@ -10,7 +10,12 @@ from app.db.session import get_session
 from app.models import Document, DocumentVersion, PendingConfirmation, User
 from app.schemas.confirmation import ConfirmationResponse
 from app.services.novels import get_owned_novel
-from app.services.document_actions import approve_document_confirmation, build_confirmation_responses, expire_stale_pending_confirmations
+from app.services.document_actions import (
+    approve_document_confirmation,
+    build_confirmation_responses,
+    expire_stale_pending_confirmations,
+    mark_confirmation_resolved,
+)
 from app.services.rag import extract_text_from_prosemirror, index_text
 
 router = APIRouter(tags=["confirmations"])
@@ -35,7 +40,27 @@ async def list_confirmations(
     )
     await expire_stale_pending_confirmations(session, confirmations)
     active_confirmations = [confirmation for confirmation in confirmations if confirmation.status == "pending"]
-    return await build_confirmation_responses(session, active_confirmations)
+    return await build_confirmation_responses(session, active_confirmations, novel_id=novel_id)
+
+
+@router.get("/novels/{novel_id}/confirmations/history", response_model=list[ConfirmationResponse])
+async def list_confirmation_history(
+    novel_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> list[ConfirmationResponse]:
+    await get_owned_novel(session, current_user, novel_id)
+    confirmations = list(
+        await session.scalars(
+            select(PendingConfirmation)
+            .where(
+                PendingConfirmation.novel_id == novel_id,
+                PendingConfirmation.status.in_(("approved", "rejected")),
+            )
+            .order_by(PendingConfirmation.resolved_at.desc(), PendingConfirmation.created_at.desc(), PendingConfirmation.id.desc())
+        )
+    )
+    return await build_confirmation_responses(session, confirmations, novel_id=novel_id)
 
 
 @router.post("/confirmations/{confirmation_id}/approve", response_model=ConfirmationResponse)
@@ -87,15 +112,15 @@ async def approve_confirmation(
             text=extract_text_from_prosemirror(document.content),
         )
 
-        confirmation.status = "approved"
+        mark_confirmation_resolved(confirmation, "approved")
         await session.commit()
         await session.refresh(confirmation)
         document_id = document.id
     else:
-        confirmation.status = "approved"
+        mark_confirmation_resolved(confirmation, "approved")
         await session.commit()
         await session.refresh(confirmation)
-    responses = await build_confirmation_responses(session, [confirmation])
+    responses = await build_confirmation_responses(session, [confirmation], novel_id=confirmation.novel_id)
     response = responses[0]
     response["document_id"] = document_id
     return response
@@ -116,8 +141,8 @@ async def reject_confirmation(
     if confirmation.status != "pending":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Confirmation already resolved")
 
-    confirmation.status = "rejected"
+    mark_confirmation_resolved(confirmation, "rejected")
     await session.commit()
     await session.refresh(confirmation)
-    responses = await build_confirmation_responses(session, [confirmation])
+    responses = await build_confirmation_responses(session, [confirmation], novel_id=confirmation.novel_id)
     return responses[0]

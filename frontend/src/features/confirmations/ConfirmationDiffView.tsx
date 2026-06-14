@@ -143,12 +143,8 @@ export function ConfirmationDiffView({ confirmation }: ConfirmationDiffViewProps
       </Space>
       <div
         style={{
-          background: "#ffffff",
-          border: "1px solid rgba(15,23,42,0.08)",
-          borderRadius: 12,
           maxHeight: 280,
           overflow: "auto",
-          padding: 10,
         }}
       >
         {segments.map((segment, index) => renderSegment(segment, index))}

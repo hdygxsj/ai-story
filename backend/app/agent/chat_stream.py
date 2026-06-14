@@ -89,6 +89,8 @@ async def stream_agent_events(
         if event_type == "delta":
             streamed_content += str(payload)
             yield _sse({"type": "delta", "content": str(payload)})
+        elif event_type == "reasoning":
+            yield _sse({"type": "reasoning", "content": str(payload)})
         elif event_type == "tool_call":
             yield _sse({"type": "tool_call", **(payload if isinstance(payload, dict) else {})})
         else:

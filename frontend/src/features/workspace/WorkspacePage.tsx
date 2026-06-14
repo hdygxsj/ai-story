@@ -12,11 +12,11 @@ import { ApiError } from "../../api/http";
 import type { WorkspaceDiff } from "../../api/agent";
 import type { Confirmation } from "../../api/confirmations";
 import { approveConfirmation, listConfirmations, rejectConfirmation } from "../../api/confirmations";
-import { ConfirmationActionCard } from "../confirmations/ConfirmationActionCard";
+import { ConfirmationsPanel } from "../confirmations/ConfirmationsPanel";
+import { loadConfirmationHistorySafe } from "../confirmations/loadConfirmationHistorySafe";
 import {
-  pendingConfirmations as filterPendingConfirmations,
   pendingDocumentWriteConfirmations,
-  pendingDocumentWriteConfirmationIds,
+  pendingDocumentWriteCountsByDocumentId,
 } from "../confirmations/confirmationPresentation";
 import type { DocumentBody, DocumentRecord, DocumentVersion } from "../../api/documents";
 import { getDocument, listDocumentVersions, restoreDocumentVersion, updateDocument } from "../../api/documents";
@@ -272,7 +272,7 @@ export function WorkspacePage({
   const [nodes, setNodes] = useState<WorkspaceNode[]>([]);
   const [documentId, setDocumentId] = useState<string | null>(() => getStoredDocumentId(novelId));
   const [document, setDocument] = useState<DocumentRecord | null>(null);
-  const [documentLoading, setDocumentLoading] = useState(false);
+  const [documentLoading, setDocumentLoading] = useState(() => getStoredDocumentId(novelId) != null);
   const [agentDocumentWriteLocked, setAgentDocumentWriteLocked] = useState(false);
   const [draftsByDocumentId, setDraftsByDocumentId] = useState<Record<string, DocumentBody>>({});
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
@@ -280,6 +280,8 @@ export function WorkspacePage({
   const [confirmationCount, setConfirmationCount] = useState(0);
   const [modelProfileCount, setModelProfileCount] = useState(0);
   const [confirmations, setConfirmations] = useState<Confirmation[]>([]);
+  const [confirmationHistory, setConfirmationHistory] = useState<Confirmation[]>([]);
+  const [focusConfirmationId, setFocusConfirmationId] = useState<string | null>(null);
   const [memoryItems, setMemoryItems] = useState<MemoryItem[]>([]);
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [creativeAssets, setCreativeAssets] = useState<CreativeAsset[]>([]);
@@ -304,6 +306,17 @@ export function WorkspacePage({
   const [treePanelCollapsed, setTreePanelCollapsed] = useState(initialTreePanelCollapsed);
   const treeResizeStart = useRef<{ startX: number; startWidth: number } | null>(null);
   const agentResizeStart = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  function setActiveDocumentId(nextDocumentId: string | null) {
+    setDocumentId((current) => {
+      if (current === nextDocumentId) {
+        return current;
+      }
+      setDocumentLoading(nextDocumentId != null);
+      setStoredDocumentId(novelId, nextDocumentId);
+      return nextDocumentId;
+    });
+  }
 
   function handleEmbeddingProviderChange(providerKind: string) {
     if (providerKind !== "ollama") {
@@ -368,7 +381,7 @@ export function WorkspacePage({
   }, [novelId]);
 
   useEffect(() => {
-    setDocumentId(getStoredDocumentId(novelId));
+    setActiveDocumentId(getStoredDocumentId(novelId));
   }, [novelId]);
 
   useEffect(() => {
@@ -383,6 +396,7 @@ export function WorkspacePage({
         const [
           loadedNodes,
           confirmations,
+          loadedConfirmationHistory,
           memories,
           modelProfiles,
           assets,
@@ -393,6 +407,7 @@ export function WorkspacePage({
         ] = await Promise.all([
           listWorkspaceNodes(token, novelId),
           listConfirmations(token, novelId),
+          loadConfirmationHistorySafe(token, novelId),
           listMemoryItems(token, novelId),
           listModelProfiles(token),
           listCreativeAssets(token, novelId),
@@ -418,9 +433,9 @@ export function WorkspacePage({
               null
             );
           })();
-          setDocumentId(resolvedDocumentId);
-          setStoredDocumentId(novelId, resolvedDocumentId);
+          setActiveDocumentId(resolvedDocumentId);
           setConfirmations(confirmations);
+          setConfirmationHistory(loadedConfirmationHistory);
           setMemoryItems(memories);
           setModelProfiles(modelProfiles);
           setCreativeAssets(assets);
@@ -523,7 +538,7 @@ export function WorkspacePage({
   }
 
   function handleDocumentDraftChange(content: DocumentBody) {
-    if (!documentId) {
+    if (!documentId || documentLoading || document?.id !== documentId) {
       return;
     }
     setDraftsByDocumentId((current) => ({ ...current, [documentId]: content }));
@@ -555,11 +570,13 @@ export function WorkspacePage({
   }
 
   async function refreshReviewQueues() {
-    const [loadedConfirmations, loadedMemoryItems] = await Promise.all([
+    const [loadedConfirmations, loadedConfirmationHistory, loadedMemoryItems] = await Promise.all([
       listConfirmations(token, novelId),
+      loadConfirmationHistorySafe(token, novelId),
       listMemoryItems(token, novelId),
     ]);
     setConfirmations(loadedConfirmations);
+    setConfirmationHistory(loadedConfirmationHistory);
     setMemoryItems(loadedMemoryItems);
     setConfirmationCount(loadedConfirmations.filter((item) => item.status === "pending").length);
   }
@@ -577,6 +594,39 @@ export function WorkspacePage({
     setCharacterStates(states);
     setRelationshipEdges(relationships);
     setMaterialChanges(changes);
+  }
+
+  async function refreshWorkspaceNodes() {
+    const loadedNodes = await listWorkspaceNodes(token, novelId);
+    setNodes(loadedNodes);
+  }
+
+  async function reloadActiveDocument() {
+    if (!documentId) {
+      return;
+    }
+    setDocumentLoading(true);
+    try {
+      const [loadedDocument, loadedVersions] = await Promise.all([
+        getDocument(token, documentId),
+        listDocumentVersions(token, documentId),
+      ]);
+      setDocument(loadedDocument);
+      setVersions(loadedVersions);
+      setDraftsByDocumentId((current) => {
+        if (!(documentId in current)) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[documentId];
+        return next;
+      });
+    } catch {
+      setDocument(null);
+      setVersions([]);
+    } finally {
+      setDocumentLoading(false);
+    }
   }
 
   async function resolveConfirmation(confirmationId: string, action: "approve" | "reject") {
@@ -658,9 +708,27 @@ export function WorkspacePage({
     }
   }
 
+  function locatePendingConfirmation(confirmation: Confirmation) {
+    if (!confirmation.document_id) {
+      return;
+    }
+    setFocusConfirmationId(confirmation.id);
+    handleSelectDocument(confirmation.document_id);
+  }
+
+  function locateFirstPendingWriteForDocument(documentId: string) {
+    const confirmation = pendingDocumentWriteConfirmations(confirmations).find(
+      (item) => item.document_id === documentId,
+    );
+    if (confirmation) {
+      locatePendingConfirmation(confirmation);
+      return;
+    }
+    handleSelectDocument(documentId);
+  }
+
   function selectDocument(nextDocumentId: string | null) {
-    setDocumentId(nextDocumentId);
-    setStoredDocumentId(novelId, nextDocumentId);
+    setActiveDocumentId(nextDocumentId);
   }
 
   function buildModelProfilePayload(
@@ -1018,7 +1086,7 @@ export function WorkspacePage({
   const currentChapterNode = nodes.find((node) => node.document_id === documentId) ?? null;
   const currentChapterTitle = currentChapterNode?.title ?? null;
   const pendingWriteConfirmations = pendingDocumentWriteConfirmations(confirmations);
-  const pendingWriteDocumentIds = pendingDocumentWriteConfirmationIds(confirmations);
+  const pendingWriteCountsByDocumentId = pendingDocumentWriteCountsByDocumentId(confirmations);
   const currentChapterConfirmations = pendingWriteConfirmations.filter(
     (confirmation) => confirmation.document_id === documentId,
   );
@@ -1094,7 +1162,8 @@ export function WorkspacePage({
       onRenameNode={(nodeId, title) => void handleUpdateWorkspaceNode(nodeId, { title })}
       onRestoreNode={(nodeId) => void handleWorkspaceNodeStatus(nodeId, "draft")}
       onSelectDocument={handleSelectDocument}
-      pendingWriteDocumentIds={pendingWriteDocumentIds}
+      onLocatePendingWrites={locateFirstPendingWriteForDocument}
+      pendingWriteCountsByDocumentId={pendingWriteCountsByDocumentId}
       selectedDocumentId={documentId}
       onTrashNode={(nodeId) => void handleWorkspaceNodeStatus(nodeId, "trashed")}
     />
@@ -1110,8 +1179,12 @@ export function WorkspacePage({
       onClearSelectedText={() => setSelectedText(null)}
       onDismissWorkspaceDiff={() => setWorkspaceDiff(null)}
       onRunCompleted={async () => {
-        await refreshCreativeCollections();
-        await refreshReviewQueues();
+        await Promise.all([
+          refreshCreativeCollections(),
+          refreshReviewQueues(),
+          refreshWorkspaceNodes(),
+          reloadActiveDocument(),
+        ]);
       }}
       onNovelUpdated={onNovelUpdated}
       onDocumentWriteLockChange={setAgentDocumentWriteLocked}
@@ -1119,6 +1192,29 @@ export function WorkspacePage({
         if (confirmation.document_id) {
           selectDocument(confirmation.document_id);
         }
+        setFocusConfirmationId(confirmation.id);
+        setConfirmations((current) => {
+          const nextItem: Confirmation = {
+            id: confirmation.id,
+            action_type: confirmation.action_type,
+            status: confirmation.status,
+            payload: confirmation.payload,
+            document_id: confirmation.document_id ?? null,
+            before_text:
+              "before_text" in confirmation && typeof confirmation.before_text === "string"
+                ? confirmation.before_text
+                : null,
+            after_text:
+              "after_text" in confirmation && typeof confirmation.after_text === "string"
+                ? confirmation.after_text
+                : null,
+          };
+          if (current.some((item) => item.id === nextItem.id)) {
+            return current;
+          }
+          return [...current, nextItem];
+        });
+        setConfirmationCount((count) => count + 1);
       }}
       onUndoWorkspaceDiff={() => void handleUndoWorkspaceDiff()}
       onWorkspaceOrganized={(updatedNodes, diff) => {
@@ -1232,46 +1328,37 @@ export function WorkspacePage({
     <>
       <div
         data-testid="workspace-chapter-panel"
-        style={{ display: "flex", flexDirection: "column", gap: 10, height: "100%", minHeight: 0, minWidth: 0 }}
+        style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, minWidth: 0 }}
       >
-        {currentChapterConfirmations.length > 0 ? (
-          <Space direction="vertical" size={8} style={{ flexShrink: 0, width: "100%" }}>
-            {currentChapterConfirmations.map((confirmation) => (
-              <ConfirmationActionCard
-                key={confirmation.id}
-                confirmation={confirmation}
-                onApprove={(confirmationId) =>
-                  void resolveConfirmation(confirmationId, "approve").catch((error: Error) =>
-                    message.error(error.message),
-                  )
-                }
-                onReject={(confirmationId) =>
-                  void resolveConfirmation(confirmationId, "reject").catch((error: Error) =>
-                    message.error(error.message),
-                  )
-                }
-              />
-            ))}
-          </Space>
-        ) : null}
-        <div style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
-          <DocumentEditor
-            chapterTitle={currentChapterTitle}
-            content={editorContent}
-            loading={editorLoading}
-            onChange={handleDocumentDraftChange}
-            onOpenVersionHistory={() => setVersionHistoryOpen(true)}
-            onRenameChapter={(title) => {
-              if (currentChapterNode) {
-                void handleUpdateWorkspaceNode(currentChapterNode.id, { title });
-              }
-            }}
-            onSave={handleSaveDocument}
-            onSelectText={setSelectedText}
-            saveStatus={saving ? "saving" : hasUnsavedDraft ? "dirty" : "saved"}
-            saving={saving}
-          />
-        </div>
+        <DocumentEditor
+          chapterTitle={currentChapterTitle}
+          content={editorContent}
+          focusConfirmationId={focusConfirmationId}
+          loading={editorLoading}
+          pendingConfirmations={currentChapterConfirmations}
+          onApproveConfirmation={(confirmationId) =>
+            void resolveConfirmation(confirmationId, "approve").catch((error: Error) =>
+              message.error(error.message),
+            )
+          }
+          onChange={handleDocumentDraftChange}
+          onFocusConfirmationHandled={() => setFocusConfirmationId(null)}
+          onOpenVersionHistory={() => setVersionHistoryOpen(true)}
+          onRejectConfirmation={(confirmationId) =>
+            void resolveConfirmation(confirmationId, "reject").catch((error: Error) =>
+              message.error(error.message),
+            )
+          }
+          onRenameChapter={(title) => {
+            if (currentChapterNode) {
+              void handleUpdateWorkspaceNode(currentChapterNode.id, { title });
+            }
+          }}
+          onSave={handleSaveDocument}
+          onSelectText={setSelectedText}
+          saveStatus={saving ? "saving" : hasUnsavedDraft ? "dirty" : "saved"}
+          saving={saving}
+        />
       </div>
       <DocumentVersionHistory
         onClose={() => setVersionHistoryOpen(false)}
@@ -1593,38 +1680,24 @@ export function WorkspacePage({
     </Card>
   );
 
-  const pendingReviewConfirmations = filterPendingConfirmations(confirmations);
-
   const confirmationsCenterContent = (
     <Card style={{ border: "none", boxShadow: "0 18px 45px rgba(15,23,42,0.08)" }}>
-      <Typography.Title level={3}>确认</Typography.Title>
-      <Typography.Paragraph>Agent 的写入动作会先进入这里，等待你通过或拒绝。</Typography.Paragraph>
-      <Space wrap>
-        <Tag color="gold">{confirmationCount} 条待确认</Tag>
-        <Tag>{versions.length} 个已保存版本</Tag>
-      </Space>
-      {pendingReviewConfirmations.length === 0 ? (
-        <Empty description="没有待确认操作" style={{ marginTop: 16 }} />
-      ) : (
-        <Space direction="vertical" size={12} style={{ marginTop: 16, width: "100%" }}>
-          {pendingReviewConfirmations.map((confirmation) => (
-            <ConfirmationActionCard
-              key={confirmation.id}
-              confirmation={confirmation}
-              onApprove={(confirmationId) =>
-                void resolveConfirmation(confirmationId, "approve").catch((error: Error) =>
-                  message.error(error.message),
-                )
-              }
-              onReject={(confirmationId) =>
-                void resolveConfirmation(confirmationId, "reject").catch((error: Error) =>
-                  message.error(error.message),
-                )
-              }
-            />
-          ))}
-        </Space>
-      )}
+      <ConfirmationsPanel
+        confirmationCount={confirmationCount}
+        confirmationHistory={confirmationHistory}
+        confirmations={confirmations}
+        onApprove={(confirmationId) =>
+          void resolveConfirmation(confirmationId, "approve").catch((error: Error) =>
+            message.error(error.message),
+          )
+        }
+        onLocate={locatePendingConfirmation}
+        onReject={(confirmationId) =>
+          void resolveConfirmation(confirmationId, "reject").catch((error: Error) =>
+            message.error(error.message),
+          )
+        }
+      />
     </Card>
   );
 

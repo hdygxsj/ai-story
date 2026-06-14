@@ -4,6 +4,7 @@ import {
   isDocumentWriteConfirmation,
   pendingDocumentWriteConfirmationIds,
   pendingDocumentWriteConfirmations,
+  pendingDocumentWriteCountsByDocumentId,
 } from "../features/confirmations/confirmationPresentation";
 import type { Confirmation } from "../api/confirmations";
 
@@ -39,5 +40,6 @@ describe("confirmationPresentation document write helpers", () => {
   it("filters pending document write confirmations and document ids", () => {
     expect(pendingDocumentWriteConfirmations(items)).toEqual([items[0]]);
     expect(pendingDocumentWriteConfirmationIds(items)).toEqual(["doc-1"]);
+    expect(pendingDocumentWriteCountsByDocumentId(items)).toEqual({ "doc-1": 1 });
   });
 });

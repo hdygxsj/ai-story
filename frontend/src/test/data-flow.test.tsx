@@ -170,6 +170,9 @@ describe("frontend data flow", () => {
         if (url.endsWith("/novels/novel-1/memory-review-items")) {
           return Promise.resolve(jsonResponse([]));
         }
+        if (url.endsWith("/novels/novel-1/confirmations/history")) {
+          return Promise.resolve(jsonResponse([]));
+        }
         if (url.endsWith("/novels/novel-1/confirmations")) {
           return Promise.resolve(
             jsonResponse([
@@ -258,6 +261,7 @@ describe("frontend data flow", () => {
     expect(screen.getByRole("heading", { name: "章节" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "执笔" })).toBeInTheDocument();
     rerender(<WorkspacePage activeSection="confirmations" token="token" novelId="novel-1" />);
+    expect(screen.getByTestId("confirmations-history-section")).toBeInTheDocument();
     expect(screen.getAllByText("段落改写").length).toBeGreaterThanOrEqual(1);
     rerender(<WorkspacePage activeSection="materials" token="token" novelId="novel-1" />);
     expect(await screen.findByRole("heading", { name: "素材" })).toBeInTheDocument();

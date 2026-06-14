@@ -8,6 +8,7 @@ type ConfirmationActionCardProps = {
   confirmation: Confirmation;
   disabled?: boolean;
   onApprove: (confirmationId: string) => void;
+  onLocate?: (confirmation: Confirmation) => void;
   onReject: (confirmationId: string) => void;
 };
 
@@ -15,6 +16,7 @@ export function ConfirmationActionCard({
   confirmation,
   disabled = false,
   onApprove,
+  onLocate,
   onReject,
 }: ConfirmationActionCardProps) {
   return (
@@ -38,6 +40,16 @@ export function ConfirmationActionCard({
           <ConfirmationDiffView confirmation={confirmation} />
         </Space>
         <Space wrap>
+          {onLocate && confirmation.document_id ? (
+            <Button
+              data-testid={`confirmation-locate-${confirmation.id}`}
+              disabled={disabled}
+              onClick={() => onLocate(confirmation)}
+              size="small"
+            >
+              定位正文
+            </Button>
+          ) : null}
           <Button disabled={disabled} size="small" type="primary" onClick={() => onApprove(confirmation.id)}>
             写入正文
           </Button>
