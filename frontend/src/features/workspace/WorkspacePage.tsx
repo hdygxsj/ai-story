@@ -1,4 +1,4 @@
-import { RightOutlined } from "@ant-design/icons";
+import { RightOutlined, SearchOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Empty, Form, Input, List, message, Popconfirm, Select, Space, Statistic, Tabs, Tag, Timeline, Typography } from "antd";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
@@ -7,6 +7,7 @@ import { AgentPanel } from "../agent/AgentPanel";
 import { DocumentEditor } from "../editor/DocumentEditor";
 import { DocumentVersionHistory } from "../editor/DocumentVersionHistory";
 import { MaterialsPanel } from "./MaterialsPanel";
+import { NovelSearchModal } from "./NovelSearchModal";
 import { WorkspaceTree } from "./WorkspaceTree";
 import { ApiError } from "../../api/http";
 import type { WorkspaceDiff } from "../../api/agent";
@@ -42,6 +43,7 @@ import {
   updateModelProfile,
 } from "../../api/modelProfiles";
 import { updateNovel } from "../../api/novels";
+import type { DocumentSearchHit } from "../../api/search";
 import { ollamaDefaults } from "../../config/ollama";
 import type { WorkspaceNode } from "../../api/workspace";
 import {
@@ -282,6 +284,8 @@ export function WorkspacePage({
   const [confirmations, setConfirmations] = useState<Confirmation[]>([]);
   const [confirmationHistory, setConfirmationHistory] = useState<Confirmation[]>([]);
   const [focusConfirmationId, setFocusConfirmationId] = useState<string | null>(null);
+  const [focusSearchRange, setFocusSearchRange] = useState<{ matchIndex: number; matchLength: number } | null>(null);
+  const [novelSearchOpen, setNovelSearchOpen] = useState(false);
   const [memoryItems, setMemoryItems] = useState<MemoryItem[]>([]);
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [creativeAssets, setCreativeAssets] = useState<CreativeAsset[]>([]);
@@ -387,6 +391,20 @@ export function WorkspacePage({
   useEffect(() => {
     onPendingConfirmationCountChange?.(confirmationCount);
   }, [confirmationCount, onPendingConfirmationCountChange]);
+
+  useEffect(() => {
+    function handleSearchShortcut(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        setNovelSearchOpen(true);
+      }
+    }
+
+    window.addEventListener("keydown", handleSearchShortcut);
+    return () => {
+      window.removeEventListener("keydown", handleSearchShortcut);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -706,6 +724,16 @@ export function WorkspacePage({
     if (activeSection !== "workspace") {
       onActiveSectionChange?.("workspace");
     }
+  }
+
+  function handleSearchHit(hit: DocumentSearchHit) {
+    setNovelSearchOpen(false);
+    if (hit.match_source === "body" && hit.match_length > 0) {
+      setFocusSearchRange({ matchIndex: hit.match_index, matchLength: hit.match_length });
+    } else {
+      setFocusSearchRange({ matchIndex: 0, matchLength: 0 });
+    }
+    handleSelectDocument(hit.document_id);
   }
 
   function locatePendingConfirmation(confirmation: Confirmation) {
@@ -1141,9 +1169,20 @@ export function WorkspacePage({
         <Statistic title="章节" value={chapterCount} styles={{ content: { color: "#111827", fontSize: 17 } }} />
         <Statistic title="文件夹" value={folderCount} styles={{ content: { color: "#111827", fontSize: 17 } }} />
         <Statistic title="当前字数" value={currentWordCount} styles={{ content: { color: "#111827", fontSize: 17 } }} />
-        <Tag color={hasUnsavedDraft ? "orange" : "green"} style={{ justifySelf: "end", marginInlineEnd: 0 }}>
-          {hasUnsavedDraft ? "有本地草稿" : "已同步"}
-        </Tag>
+        <div style={{ alignItems: "center", display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <Tag color={hasUnsavedDraft ? "orange" : "green"} style={{ marginInlineEnd: 0 }}>
+            {hasUnsavedDraft ? "有本地草稿" : "已同步"}
+          </Tag>
+          <Button
+            aria-label="全小说搜索"
+            data-testid="novel-search-open"
+            icon={<SearchOutlined />}
+            onClick={() => setNovelSearchOpen(true)}
+            size="small"
+          >
+            搜索
+          </Button>
+        </div>
       </div>
     </Card>
   );
@@ -1334,6 +1373,7 @@ export function WorkspacePage({
           chapterTitle={currentChapterTitle}
           content={editorContent}
           focusConfirmationId={focusConfirmationId}
+          focusSearchRange={focusSearchRange}
           loading={editorLoading}
           pendingConfirmations={currentChapterConfirmations}
           onApproveConfirmation={(confirmationId) =>
@@ -1343,6 +1383,7 @@ export function WorkspacePage({
           }
           onChange={handleDocumentDraftChange}
           onFocusConfirmationHandled={() => setFocusConfirmationId(null)}
+          onFocusSearchHandled={() => setFocusSearchRange(null)}
           onOpenVersionHistory={() => setVersionHistoryOpen(true)}
           onRejectConfirmation={(confirmationId) =>
             void resolveConfirmation(confirmationId, "reject").catch((error: Error) =>
@@ -1366,6 +1407,13 @@ export function WorkspacePage({
         open={versionHistoryOpen}
         restoringVersionId={restoringVersionId}
         versions={versions}
+      />
+      <NovelSearchModal
+        novelId={novelId}
+        onClose={() => setNovelSearchOpen(false)}
+        onSelectHit={handleSearchHit}
+        open={novelSearchOpen}
+        token={token}
       />
     </>
   );

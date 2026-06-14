@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import type { DocumentBody } from "../../api/documents";
 import type { Confirmation } from "../../api/confirmations";
 import { focusConfirmationInEditor } from "../confirmations/confirmationLocation";
+import { documentStartPos, focusPlainTextRange } from "./editorTextPosition";
 import { DocumentConfirmationNavigator } from "./DocumentConfirmationNavigator";
 import { DocumentEditorConfirmations } from "./DocumentEditorConfirmations";
 
@@ -16,11 +17,13 @@ type DocumentEditorProps = {
   chapterTitle?: string | null;
   content?: DocumentBody | null;
   focusConfirmationId?: string | null;
+  focusSearchRange?: { matchIndex: number; matchLength: number } | null;
   loading?: boolean;
   pendingConfirmations?: Confirmation[];
   onApproveConfirmation?: (confirmationId: string) => void;
   onChange?: (content: DocumentBody) => void;
   onFocusConfirmationHandled?: () => void;
+  onFocusSearchHandled?: () => void;
   onRejectConfirmation?: (confirmationId: string) => void;
   onRenameChapter?: (title: string) => void;
   onOpenVersionHistory?: () => void;
@@ -34,11 +37,13 @@ export function DocumentEditor({
   chapterTitle,
   content,
   focusConfirmationId = null,
+  focusSearchRange = null,
   loading = false,
   pendingConfirmations = [],
   onApproveConfirmation,
   onChange,
   onFocusConfirmationHandled,
+  onFocusSearchHandled,
   onRejectConfirmation,
   onRenameChapter,
   onOpenVersionHistory,
@@ -138,6 +143,22 @@ export function DocumentEditor({
       onFocusConfirmationHandled?.();
     });
   }, [editor, focusConfirmationId, loading, onFocusConfirmationHandled, pendingConfirmations]);
+
+  useEffect(() => {
+    if (!editor || loading || !focusSearchRange) {
+      return;
+    }
+    requestAnimationFrame(() => {
+      const scrollContainer = editorShellRef.current?.closest(".ant-card-body") as HTMLElement | null;
+      if (focusSearchRange.matchLength > 0) {
+        focusPlainTextRange(editor, focusSearchRange.matchIndex, focusSearchRange.matchLength, scrollContainer);
+      } else {
+        const start = documentStartPos(editor);
+        focusPlainTextRange(editor, start, 1, scrollContainer);
+      }
+      onFocusSearchHandled?.();
+    });
+  }, [editor, focusSearchRange, loading, onFocusSearchHandled]);
 
   function handleNavigateConfirmation(index: number) {
     setActiveConfirmationIndex(index);

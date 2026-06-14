@@ -7,6 +7,7 @@ from app.api.routes.materials import router as materials_router
 from app.api.routes.model_profiles import router as model_profiles_router
 from app.api.routes.novels import router as novels_router
 from app.api.routes.rag import router as rag_router
+from app.api.routes.search import router as search_router
 
 __all__ = [
     "agent_router",
@@ -18,4 +19,5 @@ __all__ = [
     "model_profiles_router",
     "novels_router",
     "rag_router",
+    "search_router",
 ]

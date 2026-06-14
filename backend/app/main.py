@@ -14,6 +14,7 @@ from app.api.routes import (
     model_profiles_router,
     novels_router,
     rag_router,
+    search_router,
 )
 from app.core.config import settings
 
@@ -43,6 +44,7 @@ app.include_router(agent_router)
 app.include_router(conversations_router)
 app.include_router(confirmations_router)
 app.include_router(rag_router)
+app.include_router(search_router)
 
 
 @app.get("/health")

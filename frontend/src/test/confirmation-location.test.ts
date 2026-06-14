@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { Confirmation } from "../../api/confirmations";
+import type { Confirmation } from "../api/confirmations";
 import { confirmationAnchorText } from "../features/confirmations/confirmationLocation";
 
 describe("confirmationAnchorText", () => {
