@@ -2,7 +2,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Button, Card, Input, Space, Spin, Typography } from "antd";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 
 import type { DocumentBody } from "../../api/documents";
 import type { Confirmation } from "../../api/confirmations";
@@ -14,6 +14,13 @@ import { DocumentConfirmationNavigator } from "./DocumentConfirmationNavigator";
 import { DocumentEditorConfirmations } from "./DocumentEditorConfirmations";
 
 const EMPTY_DOCUMENT: DocumentBody = { type: "doc", content: [] };
+
+const EDITOR_EXTENSIONS = [
+  StarterKit,
+  Placeholder.configure({
+    placeholder: "开始写这一章...",
+  }),
+];
 
 type DocumentEditorProps = {
   chapterTitle?: string | null;
@@ -35,7 +42,11 @@ type DocumentEditorProps = {
   saving?: boolean;
 };
 
-export function DocumentEditor({
+export function DocumentEditor(props: DocumentEditorProps) {
+  return <DocumentEditorView {...props} />;
+}
+
+const DocumentEditorView = memo(function DocumentEditorView({
   chapterTitle,
   content,
   focusConfirmationId = null,
@@ -89,12 +100,7 @@ export function DocumentEditor({
   const throttledHandleUseSelection = useRef(throttle(handleUseSelection, 120)).current;
 
   const editor = useEditor({
-    extensions: [
-      StarterKit,
-      Placeholder.configure({
-        placeholder: "开始写这一章...",
-      }),
-    ],
+    extensions: EDITOR_EXTENSIONS,
     content: content ?? EMPTY_DOCUMENT,
     editable: !loading,
     onUpdate: ({ editor: updatedEditor }) => {
@@ -382,4 +388,4 @@ export function DocumentEditor({
       </Card>
     </section>
   );
-}
+});

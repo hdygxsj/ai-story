@@ -1,11 +1,12 @@
 import { RightOutlined, SearchOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Empty, Form, Input, List, message, Popconfirm, Select, Space, Statistic, Tabs, Tag, Timeline, Typography } from "antd";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { extractDocumentBodyText } from "../editor/documentBodyText";
+import { documentBodiesEqual, extractDocumentBodyText } from "../editor/documentBodyText";
 import { debounce } from "../../utils/schedule";
 import { AgentPanel } from "../agent/AgentPanel";
+import { MATERIAL_REFRESH_TOOLS } from "../agent/AgentToolTrace";
 import { DocumentEditor } from "../editor/DocumentEditor";
 import { DocumentVersionHistory } from "../editor/DocumentVersionHistory";
 import { MaterialsPanel } from "./MaterialsPanel";
@@ -13,7 +14,7 @@ import { NovelSearchModal } from "./NovelSearchModal";
 import { prepareTimelineEvents } from "./timelinePresentation";
 import { WorkspaceTree } from "./WorkspaceTree";
 import { ApiError } from "../../api/http";
-import type { WorkspaceDiff } from "../../api/agent";
+import type { AgentStreamDonePayload, WorkspaceDiff } from "../../api/agent";
 import type { Confirmation } from "../../api/confirmations";
 import { approveConfirmation, listConfirmations, rejectConfirmation } from "../../api/confirmations";
 import { ConfirmationsPanel } from "../confirmations/ConfirmationsPanel";
@@ -248,13 +249,23 @@ function createDirtyDraftTracker() {
     getDraft(documentId: string) {
       return drafts[documentId];
     },
-    setDraft(documentId: string, content: DocumentBody) {
-      drafts[documentId] = content;
-      if (!dirtyIds.has(documentId)) {
+    updateDraft(
+      documentId: string,
+      content: DocumentBody,
+      serverContent: DocumentBody | null | undefined,
+    ) {
+      const wasDirty = dirtyIds.has(documentId);
+      if (!wasDirty) {
+        if (serverContent && documentBodiesEqual(content, serverContent)) {
+          return { dirtyChanged: false, revision };
+        }
+        drafts[documentId] = content;
         dirtyIds.add(documentId);
         revision += 1;
+        return { dirtyChanged: true, revision };
       }
-      return revision;
+      drafts[documentId] = content;
+      return { dirtyChanged: false, revision };
     },
     clearDraft(documentId: string) {
       delete drafts[documentId];
@@ -330,6 +341,8 @@ export function WorkspacePage({
   const [nodesRefreshing, setNodesRefreshing] = useState(false);
   const treeResizeStart = useRef<{ startX: number; startWidth: number } | null>(null);
   const agentResizeStart = useRef<{ startX: number; startWidth: number } | null>(null);
+  const pendingTreePanelWidthRef = useRef<number | null>(null);
+  const pendingAgentPanelWidthRef = useRef<number | null>(null);
 
   function setActiveDocumentId(nextDocumentId: string | null) {
     setDocumentId((current) => {
@@ -376,18 +389,26 @@ export function WorkspacePage({
         const nextWidth = clampAgentPanelWidth(
           agentResizeStart.current.startWidth + agentResizeStart.current.startX - event.clientX,
         );
+        pendingAgentPanelWidthRef.current = nextWidth;
         setAgentPanelWidth(nextWidth);
-        window.localStorage.setItem(agentPanelWidthStorageKey, String(nextWidth));
         return;
       }
       const nextWidth = clampTreePanelWidth(
         treeResizeStart.current.startWidth + event.clientX - treeResizeStart.current.startX,
       );
+      pendingTreePanelWidthRef.current = nextWidth;
       setTreePanelWidth(nextWidth);
-      window.localStorage.setItem(treePanelWidthStorageKey, String(nextWidth));
     }
 
     function handleMouseUp() {
+      if (pendingTreePanelWidthRef.current !== null) {
+        window.localStorage.setItem(treePanelWidthStorageKey, String(pendingTreePanelWidthRef.current));
+        pendingTreePanelWidthRef.current = null;
+      }
+      if (pendingAgentPanelWidthRef.current !== null) {
+        window.localStorage.setItem(agentPanelWidthStorageKey, String(pendingAgentPanelWidthRef.current));
+        pendingAgentPanelWidthRef.current = null;
+      }
       treeResizeStart.current = null;
       agentResizeStart.current = null;
     }
@@ -575,7 +596,14 @@ export function WorkspacePage({
     if (!documentId || documentLoading || document?.id !== documentId) {
       return;
     }
-    setDraftRevision(draftTrackerRef.current.setDraft(documentId, content));
+    const { dirtyChanged, revision } = draftTrackerRef.current.updateDraft(
+      documentId,
+      content,
+      document.content,
+    );
+    if (dirtyChanged) {
+      setDraftRevision(revision);
+    }
     scheduleWordCountUpdateRef.current(content);
   }
 
@@ -665,6 +693,10 @@ export function WorkspacePage({
   }
 
   async function resolveConfirmation(confirmationId: string, action: "approve" | "reject") {
+    if (action === "approve" && hasUnsavedDraft) {
+      message.warning("当前章节有未保存的本地修改。请先保存或撤销修改，再让 Agent 重新生成写入方案。");
+      return;
+    }
     let resolved: Confirmation | null = null;
     try {
       if (action === "approve") {
@@ -1127,21 +1159,60 @@ export function WorkspacePage({
   );
   const visibleTimelineEvents = useMemo(() => prepareTimelineEvents(timelineEvents), [timelineEvents]);
   const hiddenTimelineDuplicateCount = Math.max(0, timelineEvents.length - visibleTimelineEvents.length);
-  const activeNodes = nodes.filter((node) => node.status !== "trashed");
+  const activeNodes = useMemo(() => nodes.filter((node) => node.status !== "trashed"), [nodes]);
   const chapterCount = activeNodes.filter((node) => node.node_type !== "folder").length;
   const folderCount = activeNodes.filter((node) => node.node_type === "folder").length;
 
   useEffect(() => {
-    setCurrentWordCount(extractDocumentBodyText(editorContent).length);
-  }, [documentId, editorContent]);
-  const currentChapterNode = nodes.find((node) => node.document_id === documentId) ?? null;
+    setCurrentWordCount(extractDocumentBodyText(serverDocumentContent).length);
+  }, [documentId, serverDocumentContent]);
+  const currentChapterNode = useMemo(
+    () => nodes.find((node) => node.document_id === documentId) ?? null,
+    [documentId, nodes],
+  );
   const currentChapterTitle = currentChapterNode?.title ?? null;
-  const pendingWriteConfirmations = pendingDocumentWriteConfirmations(confirmations);
-  const pendingWriteCountsByDocumentId = pendingDocumentWriteCountsByDocumentId(confirmations);
-  const currentChapterConfirmations = pendingWriteConfirmations.filter(
-    (confirmation) => confirmation.document_id === documentId,
+  const pendingWriteConfirmations = useMemo(
+    () => pendingDocumentWriteConfirmations(confirmations),
+    [confirmations],
+  );
+  const pendingWriteCountsByDocumentId = useMemo(
+    () => pendingDocumentWriteCountsByDocumentId(confirmations),
+    [confirmations],
+  );
+  const currentChapterConfirmations = useMemo(
+    () => pendingWriteConfirmations.filter((confirmation) => confirmation.document_id === documentId),
+    [documentId, pendingWriteConfirmations],
   );
   const editorLoading = documentLoading || agentDocumentWriteLocked;
+
+  const handleAgentRunCompleted = useCallback(async (payload: AgentStreamDonePayload) => {
+    const tasks: Promise<unknown>[] = [refreshReviewQueues()];
+    if (payload.confirmation) {
+      tasks.push(reloadActiveDocument());
+    }
+    const toolCalls = payload.tool_calls ?? [];
+    if (toolCalls.some((call) => MATERIAL_REFRESH_TOOLS.has(call.tool))) {
+      tasks.push(refreshCreativeCollections());
+    }
+    if (!payload.workspace_nodes) {
+      const touchedWorkspace = toolCalls.some((call) =>
+        [
+          "cleanup_workspace_folders",
+          "create_chapter_with_content",
+          "create_workspace_node",
+          "organize_workspace_tree",
+          "restore_workspace_node",
+          "split_chapter_by_max_chars",
+          "trash_workspace_node",
+          "update_workspace_node",
+        ].includes(call.tool),
+      );
+      if (touchedWorkspace) {
+        tasks.push(refreshWorkspaceNodes());
+      }
+    }
+    await Promise.all(tasks);
+  }, [novelId, token, documentId]);
 
   const workspaceStats = (
     <Card
@@ -1242,14 +1313,7 @@ export function WorkspacePage({
       documentId={documentId}
       onClearSelectedText={() => setSelectedText(null)}
       onDismissWorkspaceDiff={() => setWorkspaceDiff(null)}
-      onRunCompleted={async () => {
-        await Promise.all([
-          refreshCreativeCollections(),
-          refreshReviewQueues(),
-          refreshWorkspaceNodes(),
-          reloadActiveDocument(),
-        ]);
-      }}
+      onRunCompleted={handleAgentRunCompleted}
       onNovelUpdated={onNovelUpdated}
       onDocumentWriteLockChange={setAgentDocumentWriteLocked}
       onWriteConfirmationCreated={(confirmation) => {

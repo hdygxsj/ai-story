@@ -95,6 +95,51 @@ async def test_selection_replace_changes_only_unique_selection(session, monkeypa
     assert extract_text_from_prosemirror(document.content) == "甲冒雨来到门前。乙留在屋内。"
 
 
+async def test_selection_replace_works_when_selected_text_spans_formatted_nodes(session, monkeypatch) -> None:
+    async def fake_index_text(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.services.document_actions.index_text", fake_index_text)
+    user = User(email=f"{uuid4()}@example.com", username=str(uuid4()), password_hash="hash")
+    session.add(user)
+    await session.flush()
+    novel = Novel(owner_id=user.id, title="Formatted Novel")
+    session.add(novel)
+    await session.flush()
+    document = Document(
+        novel_id=novel.id,
+        content={
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {"type": "text", "text": "甲来到"},
+                        {"type": "text", "text": "门前。", "marks": [{"type": "bold"}]},
+                        {"type": "text", "text": "乙留在屋内。"},
+                    ],
+                }
+            ],
+        },
+    )
+    session.add(document)
+    await session.commit()
+
+    confirmation = await create_selection_replace_proposal(
+        session,
+        owner_id=user.id,
+        novel_id=novel.id,
+        document_id=document.id,
+        selected_text="甲来到门前。",
+        replacement_text="甲冒雨来到门前。",
+    )
+
+    await approve_document_confirmation(session, owner_id=user.id, confirmation=confirmation)
+
+    await session.refresh(document)
+    assert extract_text_from_prosemirror(document.content) == "甲冒雨来到门前。乙留在屋内。"
+
+
 async def test_stale_document_confirmation_is_rejected(session) -> None:
     user, novel, document = await create_owned_document(session)
     confirmation = await create_document_update_proposal(

@@ -1,4 +1,5 @@
 import { Empty, Space, Tag, Typography } from "antd";
+import { useMemo } from "react";
 
 import type { Confirmation } from "../../api/confirmations";
 import { ConfirmationActionCard } from "./ConfirmationActionCard";
@@ -22,7 +23,7 @@ export function ConfirmationsPanel({
   onLocate,
   onReject,
 }: ConfirmationsPanelProps) {
-  const pendingReviewConfirmations = pendingConfirmations(confirmations);
+  const pendingReviewConfirmations = useMemo(() => pendingConfirmations(confirmations), [confirmations]);
 
   return (
     <div data-testid="confirmations-panel">

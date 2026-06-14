@@ -250,7 +250,7 @@ async def build_confirmation_responses(
                 "status": confirmation.status,
                 "payload": confirmation.payload,
                 "document_id": document_uuid,
-                "is_stale": False,
+                "is_stale": confirmation_is_stale(confirmation, documents_by_id),
                 "before_text": before_text,
                 "after_text": after_text,
                 "created_at": confirmation.created_at,
@@ -323,6 +323,12 @@ async def create_selection_replace_proposal(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Selected text is empty",
+        )
+    document_plain_text = extract_document_plain_text(document.content)
+    if document_plain_text.count(selected_text) != 1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Selected text is not uniquely present in the current document",
         )
     replacement_text = normalize_prose_text(replacement_text)
     return await _create_proposal(
@@ -430,9 +436,80 @@ async def create_version_restore_proposal(
     )
 
 
+def _block_inline_plain_text(block: dict[str, Any]) -> tuple[str, list[tuple[dict[str, Any] | None, int]]]:
+    plain_parts: list[str] = []
+    mapping: list[tuple[dict[str, Any] | None, int]] = []
+
+    def visit(node: Any) -> None:
+        if isinstance(node, list):
+            for item in node:
+                visit(item)
+            return
+        if not isinstance(node, dict):
+            return
+        node_type = node.get("type")
+        if node_type == "text":
+            text = str(node.get("text", ""))
+            plain_parts.append(text)
+            for index in range(len(text)):
+                mapping.append((node, index))
+            return
+        if node_type == "hardBreak":
+            plain_parts.append("\n")
+            mapping.append((None, -1))
+            return
+        visit(node.get("content"))
+
+    visit(block.get("content"))
+    return "".join(plain_parts), mapping
+
+
+def _prune_empty_text_nodes(block: dict[str, Any]) -> None:
+    content = block.get("content")
+    if not isinstance(content, list):
+        return
+    block["content"] = [
+        child
+        for child in content
+        if not (
+            isinstance(child, dict)
+            and child.get("type") == "text"
+            and not str(child.get("text", ""))
+        )
+    ]
+
+
+def _apply_block_selection_replace(block: dict[str, Any], selected_text: str, replacement_text: str) -> bool:
+    plain, mapping = _block_inline_plain_text(block)
+    if plain.count(selected_text) != 1:
+        return False
+    start = plain.index(selected_text)
+    end = start + len(selected_text)
+    span = mapping[start:end]
+    text_entries = [(node, index) for node, index in span if node is not None]
+    if not text_entries:
+        return False
+
+    first_node, first_index = text_entries[0]
+    last_node, last_index = text_entries[-1]
+    if first_node is last_node:
+        original = str(first_node.get("text", ""))
+        first_node["text"] = original[:first_index] + replacement_text + original[last_index + 1 :]
+    else:
+        first_original = str(first_node.get("text", ""))
+        last_original = str(last_node.get("text", ""))
+        first_node["text"] = first_original[:first_index] + replacement_text
+        last_node["text"] = last_original[last_index + 1 :]
+        for node, _ in text_entries[1:-1]:
+            node["text"] = ""
+
+    _prune_empty_text_nodes(block)
+    return True
+
+
 def _replace_unique_text_node(content: dict[str, Any], selected_text: str, replacement_text: str) -> dict[str, Any]:
     updated = deepcopy(content)
-    matches: list[dict[str, Any]] = []
+    single_node_matches: list[dict[str, Any]] = []
 
     def visit(value: Any) -> None:
         if isinstance(value, list):
@@ -443,17 +520,39 @@ def _replace_unique_text_node(content: dict[str, Any], selected_text: str, repla
             return
         text = value.get("text")
         if isinstance(text, str) and selected_text in text:
-            matches.append(value)
+            single_node_matches.append(value)
         visit(value.get("content"))
 
     visit(updated)
-    if len(matches) != 1 or matches[0]["text"].count(selected_text) != 1:
+    if len(single_node_matches) == 1 and single_node_matches[0]["text"].count(selected_text) == 1:
+        single_node_matches[0]["text"] = single_node_matches[0]["text"].replace(selected_text, replacement_text, 1)
+        return updated
+
+    blocks = updated.get("content")
+    if not isinstance(blocks, list):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Selected text no longer has a unique editable match",
         )
-    matches[0]["text"] = matches[0]["text"].replace(selected_text, replacement_text, 1)
-    return updated
+
+    matched_block_indices = [
+        index
+        for index, block in enumerate(blocks)
+        if isinstance(block, dict)
+        and _block_inline_plain_text(block)[0].count(selected_text) == 1
+    ]
+    if len(matched_block_indices) == 1:
+        _apply_block_selection_replace(blocks[matched_block_indices[0]], selected_text, replacement_text)
+        return updated
+
+    plain = extract_document_plain_text(updated)
+    if plain.count(selected_text) == 1:
+        return text_document(plain.replace(selected_text, replacement_text, 1))
+
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Selected text no longer has a unique editable match",
+    )
 
 
 async def approve_document_confirmation(

@@ -1,4 +1,5 @@
 import { Space, Tag, Typography } from "antd";
+import { memo, useMemo } from "react";
 
 import type { Confirmation } from "../../api/confirmations";
 import { diffText, hasDiffChanges, type DiffDisplaySegment } from "./textDiff";
@@ -113,10 +114,10 @@ function renderSegment(segment: DiffDisplaySegment, index: number) {
   );
 }
 
-export function ConfirmationDiffView({ confirmation }: ConfirmationDiffViewProps) {
+export const ConfirmationDiffView = memo(function ConfirmationDiffView({ confirmation }: ConfirmationDiffViewProps) {
   const before = confirmation.before_text ?? "";
   const after = confirmation.after_text ?? "";
-  const segments = diffText(before, after);
+  const segments = useMemo(() => diffText(before, after), [before, after]);
 
   if (!before && !after) {
     return (
@@ -151,4 +152,4 @@ export function ConfirmationDiffView({ confirmation }: ConfirmationDiffViewProps
       </div>
     </div>
   );
-}
+});

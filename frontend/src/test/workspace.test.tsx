@@ -1190,6 +1190,7 @@ describe("WorkspacePage", () => {
               context_status: [],
               conversation_id: "conv-material",
               confirmation: null,
+              tool_calls: [{ id: "tool-1", tool: "create_character_asset", status: "ok" }],
             },
           ]),
         );

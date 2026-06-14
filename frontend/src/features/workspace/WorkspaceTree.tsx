@@ -2,7 +2,7 @@ import { CaretRightOutlined, FileTextOutlined, FolderOutlined, LeftOutlined, Plu
 import { Button, Dropdown, Input, Modal, Space, Tag, Tree, Typography } from "antd";
 import type { MenuProps } from "antd";
 import type { Key } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { WorkspaceNode } from "../../api/workspace";
 
 type WorkspaceTreeProps = {
@@ -276,7 +276,11 @@ type MarqueeDrag = {
 
 const MARQUEE_MOVE_THRESHOLD = 4;
 
-export function WorkspaceTree({
+export function WorkspaceTree(props: WorkspaceTreeProps) {
+  return <WorkspaceTreeView {...props} />;
+}
+
+const WorkspaceTreeView = memo(function WorkspaceTreeView({
   nodes = placeholderNodes,
   onCreateChapter,
   onCreateFolder,
@@ -430,7 +434,18 @@ export function WorkspaceTree({
     }));
   }
 
-  const treeData = buildTree(null);
+  const treeData = useMemo(
+    () => buildTree(null),
+    [
+      childrenByParent,
+      pendingWriteCountsByDocumentId,
+      onCreateChapter,
+      onCreateFolder,
+      onExportNode,
+      onLocatePendingWrites,
+      onTrashNode,
+    ],
+  );
 
   useEffect(() => {
     if (selectedDocumentId === previousDocumentIdRef.current) {
@@ -797,4 +812,4 @@ export function WorkspaceTree({
       </Modal>
     </>
   );
-}
+});

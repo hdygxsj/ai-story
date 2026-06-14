@@ -4,7 +4,7 @@ import { CloseOutlined, PushpinOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Flex, Space, Tag, Typography } from "antd";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import type { AgentConfirmation, AgentToolCallRecord, ContextDetail, WorkspaceDiff } from "../../api/agent";
+import type { AgentConfirmation, AgentStreamDonePayload, AgentToolCallRecord, ContextDetail, WorkspaceDiff } from "../../api/agent";
 import { streamAgentMessage } from "../../api/agent";
 import type { Conversation } from "../../api/conversations";
 import {
@@ -39,7 +39,7 @@ type AgentPanelProps = {
   documentId?: string | null;
   onClearSelectedText?: () => void;
   onDismissWorkspaceDiff?: () => void;
-  onRunCompleted?: () => void | Promise<void>;
+  onRunCompleted?: (payload: AgentStreamDonePayload) => void | Promise<void>;
   onNovelUpdated?: (novel: Pick<Novel, "id" | "title" | "description">) => void;
   onDocumentWriteLockChange?: (locked: boolean) => void;
   onUndoWorkspaceDiff?: () => void;
@@ -102,6 +102,8 @@ export function AgentPanel({
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
 
+  const scrollRafRef = useRef<number | null>(null);
+
   const scrollMessagesToBottom = useCallback(() => {
     const container = messagesScrollRef.current;
     if (!container) {
@@ -109,6 +111,16 @@ export function AgentPanel({
     }
     container.scrollTop = container.scrollHeight;
   }, []);
+
+  const scheduleScrollToBottom = useCallback(() => {
+    if (scrollRafRef.current !== null) {
+      return;
+    }
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+      scrollMessagesToBottom();
+    });
+  }, [scrollMessagesToBottom]);
 
   const refreshConversations = useCallback(async () => {
     const items = await listConversations(token, novelId);
@@ -157,10 +169,14 @@ export function AgentPanel({
   }, [activeConversationId, novelId]);
 
   useLayoutEffect(() => {
-    scrollMessagesToBottom();
-    const frame = requestAnimationFrame(scrollMessagesToBottom);
-    return () => cancelAnimationFrame(frame);
-  }, [activeConversationId, messages, scrollMessagesToBottom, thinking]);
+    scheduleScrollToBottom();
+    return () => {
+      if (scrollRafRef.current !== null) {
+        cancelAnimationFrame(scrollRafRef.current);
+        scrollRafRef.current = null;
+      }
+    };
+  }, [activeConversationId, messages.length, scheduleScrollToBottom, thinking]);
 
   function startThinking(content = "") {
     setThinking({ startedAt: Date.now(), content, phase: "thinking" });
@@ -367,7 +383,7 @@ export function AgentPanel({
           clearThinking();
           void (async () => {
             try {
-              await onRunCompleted?.();
+              await onRunCompleted?.(payload);
             } catch {
               // The completed Agent response remains usable if a background refresh fails.
             }

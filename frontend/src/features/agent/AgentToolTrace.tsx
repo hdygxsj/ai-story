@@ -18,6 +18,14 @@ export const DOCUMENT_WRITE_TOOLS = new Set([
   "write_document_content",
 ]);
 
+export const MATERIAL_REFRESH_TOOLS = new Set([
+  "create_character_asset",
+  "create_timeline_event",
+  "create_world_rule",
+  "update_character_state",
+  "update_novel",
+]);
+
 const TOOL_LABELS: Record<string, string> = {
   cleanup_workspace_folders: "清理目录",
   create_chapter_with_content: "写入章节",
