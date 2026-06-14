@@ -4,6 +4,7 @@ import pytest
 from langgraph.checkpoint.memory import MemorySaver
 
 from app.agent.graph import build_agent_graph
+from app.agent.runtime import graph_invoke_config
 from app.agent.tool_runtime import build_runtime_tools
 
 
@@ -29,3 +30,14 @@ async def test_checkpoint_persists_graph_messages(session) -> None:
     snapshot = await graph.aget_state(config)
     assert snapshot.values.get("messages")
     assert len(snapshot.values["messages"]) >= 2
+
+
+def test_each_agent_request_gets_an_isolated_checkpoint_thread() -> None:
+    conversation_id = uuid4()
+
+    first = graph_invoke_config(conversation_id)
+    second = graph_invoke_config(conversation_id)
+
+    assert first["configurable"]["thread_id"] != second["configurable"]["thread_id"]
+    assert str(conversation_id) in first["configurable"]["thread_id"]
+    assert str(conversation_id) in second["configurable"]["thread_id"]

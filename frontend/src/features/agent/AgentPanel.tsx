@@ -90,6 +90,7 @@ export function AgentPanel({
   const [contextDetail, setContextDetail] = useState<ContextDetail | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const activeAssistantIdRef = useRef<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
 
   const scrollMessagesToBottom = useCallback(() => {
@@ -203,12 +204,33 @@ export function AgentPanel({
     );
   }
 
+  function handleCancelStream() {
+    abortControllerRef.current?.abort();
+  }
+
+  function finalizeCancelledAssistantMessage(assistantId: string) {
+    setMessages((current) =>
+      current.map((item) => {
+        if (item.id !== assistantId) {
+          return item;
+        }
+        if (item.content.trim()) {
+          return item;
+        }
+        return { ...item, content: "（已停止生成）" };
+      }),
+    );
+  }
+
   async function sendMessage(value: string, overrideSelectedText?: string | null) {
     if (!value.trim() || streaming) {
       return;
     }
     setError(null);
     setStreaming(true);
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     const assistantId = createMessageId("assistant");
     activeAssistantIdRef.current = assistantId;
@@ -258,6 +280,7 @@ export function AgentPanel({
             }
             setStreaming(false);
             activeAssistantIdRef.current = null;
+            abortControllerRef.current = null;
             void refreshConversations().catch(() => undefined);
           })();
         },
@@ -266,8 +289,16 @@ export function AgentPanel({
           finalizeAssistantMessage(assistantId, caught.message);
           setStreaming(false);
           activeAssistantIdRef.current = null;
+          abortControllerRef.current = null;
+        },
+        onCancelled: () => {
+          finalizeCancelledAssistantMessage(assistantId);
+          setStreaming(false);
+          activeAssistantIdRef.current = null;
+          abortControllerRef.current = null;
         },
       },
+      { signal: controller.signal },
     );
   }
 
@@ -536,6 +567,7 @@ export function AgentPanel({
             loading={streaming}
             placeholder="让 Agent 规划、改写、记录记忆或检索上下文"
             value={message}
+            onCancel={handleCancelStream}
             onChange={setMessage}
             onSubmit={handleSend}
           />

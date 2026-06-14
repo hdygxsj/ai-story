@@ -1,9 +1,29 @@
+import json
+from uuid import uuid4
+
+from app.agent.chat_stream import _sse
 from app.agent.tool_trace import (
     build_tool_call_record,
     sanitize_tool_args,
     summarize_tool_result,
     tool_result_status,
 )
+
+
+def test_sse_serializes_nested_uuid_values() -> None:
+    node_id = uuid4()
+
+    event = _sse(
+        {
+            "type": "done",
+            "workspace_nodes": [{"id": node_id}],
+            "workspace_diff": {"changes": [{"node_id": node_id}]},
+        }
+    )
+
+    payload = json.loads(event.removeprefix("data: ").strip())
+    assert payload["workspace_nodes"][0]["id"] == str(node_id)
+    assert payload["workspace_diff"]["changes"][0]["node_id"] == str(node_id)
 
 
 def test_sanitize_tool_args_truncates_long_content() -> None:

@@ -5,10 +5,10 @@ from langchain_core.tools import BaseTool, tool
 
 from app.agent.graph import _build_agent_system_prompt, _remove_incomplete_tool_call_history, build_agent_graph
 from app.agent.tool_runtime import build_runtime_tools
-from app.agent.tools import classify_agent_intent, get_agent_tools
+from app.agent.tools import get_agent_tools
 from app.core.crypto import encrypt_api_key
 from app.agent.context import ContextPack
-from app.models import CreativeAsset, Document, DocumentVersion, MemoryItem, MemoryReviewItem, ModelProfile, Novel, PendingConfirmation, RagChunk, User, WorkspaceNode
+from app.models import CreativeAsset, Document, DocumentVersion, ModelProfile, Novel, PendingConfirmation, User, WorkspaceNode
 from app.services.materials import list_material_changes
 from app.services.rag import extract_text_from_prosemirror
 
@@ -27,6 +27,8 @@ def test_default_agent_prompt_allows_selective_automatic_memory() -> None:
     assert "无需用户审批" in prompt
     assert "propose_document_update 等需用户确认" in prompt
     assert "split_chapter_by_max_chars" in prompt
+    assert "已有章节必须更新原 document_id" in prompt
+    assert "禁止新建同名章节" in prompt
 
 
 def test_agent_tool_registry_exposes_structured_langchain_tools() -> None:
@@ -197,6 +199,58 @@ async def test_create_chapter_with_content_persists_workspace_document(session, 
     assert versions[0].source == "agent"
 
 
+async def test_list_workspace_nodes_reports_chapter_content_state(session) -> None:
+    user = User(email="content-state@example.com", username="content-state", password_hash="hash")
+    session.add(user)
+    await session.flush()
+    novel = Novel(owner_id=user.id, title="Content State Novel")
+    session.add(novel)
+    await session.flush()
+    empty_document = Document(novel_id=novel.id)
+    written_document = Document(
+        novel_id=novel.id,
+        content={"type": "doc", "content": [{"type": "paragraph", "text": "已有正文"}]},
+    )
+    session.add_all([empty_document, written_document])
+    await session.flush()
+    session.add_all(
+        [
+            WorkspaceNode(
+                novel_id=novel.id,
+                document_id=empty_document.id,
+                title="第一章",
+                node_type="chapter",
+                position=0,
+            ),
+            WorkspaceNode(
+                novel_id=novel.id,
+                document_id=written_document.id,
+                title="第二章",
+                node_type="chapter",
+                position=1,
+            ),
+        ]
+    )
+    await session.commit()
+
+    tools = {
+        tool.name: tool
+        for tool in build_runtime_tools(
+            session,
+            model_profile=None,
+            owner_id=user.id,
+            novel_id=novel.id,
+        )
+    }
+    result = await tools["list_workspace_nodes"].ainvoke({"novel_id": str(novel.id)})
+
+    by_title = {node["title"]: node for node in result["nodes"]}
+    assert by_title["第一章"]["has_content"] is False
+    assert by_title["第一章"]["content_chars"] == 0
+    assert by_title["第二章"]["has_content"] is True
+    assert by_title["第二章"]["content_chars"] == 4
+
+
 async def test_create_chapter_with_content_rejects_empty_content(session) -> None:
     user = User(email="empty@example.com", username="empty", password_hash="hash")
     session.add(user)
@@ -311,35 +365,6 @@ async def test_restore_workspace_node_tool_restores_trashed_node(session) -> Non
     assert result["status"] == "ok"
     assert result["workspace_diff"]["changes"][0]["action"] == "restore"
     assert node.status == "draft"
-
-
-def test_agent_classifies_cleanup_chapters_as_workspace_cleanup() -> None:
-    assert classify_agent_intent("清理一下章节", None) == "cleanup_workspace"
-
-
-def test_agent_classifies_delete_written_followup_as_workspace_cleanup() -> None:
-    assert classify_agent_intent("有正文的也删除", None) == "cleanup_workspace"
-
-
-def test_agent_classifies_material_organize_as_chat() -> None:
-    assert classify_agent_intent("整理一下素材", None) == "chat"
-    assert classify_agent_intent("你整理一下角色资产", None) == "chat"
-
-
-def test_agent_classifies_vague_organize_as_chat() -> None:
-    assert classify_agent_intent("你整理一下", None) == "chat"
-
-
-def test_agent_classifies_workspace_organize_shortcut() -> None:
-    assert classify_agent_intent("帮我整理章节和草稿目录", None) == "organize_workspace"
-
-
-def test_agent_classifies_explicit_write_requests() -> None:
-    assert classify_agent_intent("先写进正文里", None) == "write_chapter_content"
-    assert classify_agent_intent("帮我把这章正文保存到工作台", None) == "write_chapter_content"
-    assert classify_agent_intent("写第一章并放到工作台", None) == "write_chapter_content"
-    assert classify_agent_intent("我想你先把前四章的正文写进去", None) == "write_chapter_content"
-    assert classify_agent_intent("我想写一个打怪升级的小说", None) == "chat"
 
 
 def test_agent_tools_include_atomic_write_ops() -> None:
@@ -562,7 +587,77 @@ async def test_agent_graph_preserves_workspace_effects_after_final_model_reply(m
     assert result["workspace_nodes"] == [{"id": "node-1", "document_id": "doc-1"}]
 
 
-async def test_agent_graph_prioritizes_explicit_chapter_write_over_prior_planning(monkeypatch) -> None:
+async def test_agent_graph_stops_repeated_identical_tool_calls(monkeypatch) -> None:
+    calls = 0
+
+    @tool("list_workspace_nodes")
+    async def list_workspace_nodes() -> dict[str, object]:
+        """List workspace nodes."""
+        nonlocal calls
+        calls += 1
+        return {"status": "ok", "message": "已读取章节树。", "nodes": []}
+
+    class RepeatingChatModel:
+        def bind_tools(self, tools):
+            return self
+
+        def invoke(self, messages):
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "list_workspace_nodes",
+                        "args": {"novel_id": "novel-1"},
+                        "id": f"call-{len(messages)}",
+                    }
+                ],
+            )
+
+    monkeypatch.setattr("app.agent.graph.build_chat_model", lambda profile, purpose="chat": RepeatingChatModel())
+    profile = ModelProfile(owner_id=uuid4(), name="test", provider_kind="openai-compatible", chat_model="test")
+    graph = build_agent_graph(tools=[list_workspace_nodes], model_profile=profile)
+
+    result = await graph.ainvoke(
+        {"novel_id": uuid4(), "message": "查看章节树"},
+        {"recursion_limit": 8},
+    )
+
+    assert calls == 1
+    assert "重复" in result["response"]
+
+
+async def test_agent_graph_stops_after_maximum_tool_rounds(monkeypatch) -> None:
+    calls = 0
+
+    @tool("read_document")
+    async def read_document(step: int) -> dict[str, object]:
+        """Read a document for one step."""
+        nonlocal calls
+        calls += 1
+        return {"status": "ok", "message": f"已读取第 {step} 步。"}
+
+    class CyclingChatModel:
+        def bind_tools(self, tools):
+            return self
+
+        def invoke(self, messages):
+            step = 1 + sum(isinstance(message, ToolMessage) for message in messages)
+            return AIMessage(
+                content="",
+                tool_calls=[{"name": "read_document", "args": {"step": step}, "id": f"call-{step}"}],
+            )
+
+    monkeypatch.setattr("app.agent.graph.build_chat_model", lambda profile, purpose="chat": CyclingChatModel())
+    profile = ModelProfile(owner_id=uuid4(), name="test", provider_kind="openai-compatible", chat_model="test")
+    graph = build_agent_graph(tools=[read_document], model_profile=profile)
+
+    result = await graph.ainvoke({"novel_id": uuid4(), "message": "持续读取"})
+
+    assert calls == 8
+    assert "轮次" in result["response"]
+
+
+async def test_agent_graph_prioritizes_current_request_over_prior_planning(monkeypatch) -> None:
     captured_messages = []
 
     class FakeChatModel:
@@ -588,5 +683,5 @@ async def test_agent_graph_prioritizes_explicit_chapter_write_over_prior_plannin
     system_text = "\n".join(
         str(message.content) for message in captured_messages if isinstance(message, SystemMessage)
     )
-    assert "当前明确写入指令优先于历史规划" in system_text
-    assert "必须调用章节或正文写入工具" in system_text
+    assert "始终优先处理用户当前消息" in system_text
+    assert "自主规划并组合原子工具" in system_text

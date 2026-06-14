@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.chapter_body import is_outline_or_meta_content
-from app.models import Document, DocumentVersion, Novel, WorkspaceNode
+from app.models import Document, DocumentVersion, WorkspaceNode
 from app.services.rag import extract_text_from_prosemirror, index_text
 
 
@@ -21,7 +21,11 @@ def text_document(text: str) -> dict[str, object]:
     }
 
 
-def workspace_snapshot(nodes: list[WorkspaceNode]) -> list[dict[str, object]]:
+def workspace_snapshot(
+    nodes: list[WorkspaceNode],
+    document_text_by_id: dict[UUID, str] | None = None,
+) -> list[dict[str, object]]:
+    document_text_by_id = document_text_by_id or {}
     return [
         {
             "id": str(node.id),
@@ -31,6 +35,12 @@ def workspace_snapshot(nodes: list[WorkspaceNode]) -> list[dict[str, object]]:
             "document_id": str(node.document_id) if node.document_id else None,
             "position": node.position,
             "status": node.status,
+            "has_content": bool(document_text_by_id.get(node.document_id, "").strip())
+            if node.document_id
+            else False,
+            "content_chars": len(document_text_by_id.get(node.document_id, "").strip())
+            if node.document_id
+            else 0,
         }
         for node in nodes
     ]
@@ -48,7 +58,16 @@ async def load_workspace_nodes(session: AsyncSession, novel_id: UUID) -> list[Wo
 
 async def list_workspace_nodes(session: AsyncSession, *, novel_id: UUID) -> list[dict[str, object]]:
     nodes = await load_workspace_nodes(session, novel_id)
-    return workspace_snapshot(nodes)
+    document_ids = [node.document_id for node in nodes if node.document_id is not None]
+    documents = (
+        list(await session.scalars(select(Document).where(Document.id.in_(document_ids))))
+        if document_ids
+        else []
+    )
+    document_text_by_id = {
+        document.id: extract_text_from_prosemirror(document.content) for document in documents
+    }
+    return workspace_snapshot(nodes, document_text_by_id)
 
 
 async def create_workspace_node(

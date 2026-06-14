@@ -109,7 +109,16 @@ export type AgentStreamHandlers = {
   onToolCall: (record: AgentToolCallRecord) => void;
   onDone: (payload: AgentStreamDonePayload) => void;
   onError: (error: Error) => void;
+  onCancelled?: () => void;
 };
+
+export type AgentStreamOptions = {
+  signal?: AbortSignal;
+};
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
 
 function normalizeAgentStreamError(error: unknown): Error {
   if (!(error instanceof Error)) {
@@ -137,6 +146,7 @@ export async function streamAgentMessage(
     conversation_id?: string | null;
   },
   handlers: AgentStreamHandlers,
+  options?: AgentStreamOptions,
 ) {
   const headers = new Headers({ "Content-Type": "application/json" });
   headers.set("Authorization", `Bearer ${token}`);
@@ -147,8 +157,13 @@ export async function streamAgentMessage(
       method: "POST",
       headers,
       body: JSON.stringify(payload),
+      signal: options?.signal,
     });
   } catch (error) {
+    if (isAbortError(error)) {
+      handlers.onCancelled?.();
+      return;
+    }
     handlers.onError(normalizeAgentStreamError(error));
     return;
   }
@@ -222,8 +237,13 @@ export async function streamAgentMessage(
       finishWithError("Agent 响应中断，请检查模型配置和网络连接。");
     }
   } catch (error) {
-    if (!completed) {
-      handlers.onError(normalizeAgentStreamError(error));
+    if (completed) {
+      return;
     }
+    if (isAbortError(error)) {
+      handlers.onCancelled?.();
+      return;
+    }
+    handlers.onError(normalizeAgentStreamError(error));
   }
 }

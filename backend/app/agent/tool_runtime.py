@@ -56,7 +56,6 @@ from app.models import (
     MemoryReviewItem,
     ModelProfile,
     Novel,
-    RelationshipEdge,
     TimelineEvent,
 )
 from app.services.document_actions import (
@@ -84,7 +83,7 @@ from app.services.materials import (
 )
 from app.services.memory import create_memory_item
 from app.services.memory_search import search_memory_items
-from app.services.rag import extract_text_from_prosemirror, index_text, search_rag_chunks
+from app.services.rag import extract_text_from_prosemirror, search_rag_chunks
 from app.services.workspace_actions import (
     cleanup_workspace_folders,
     create_chapter_with_content,
@@ -321,7 +320,7 @@ def build_runtime_tools(
 
     @tool("list_workspace_nodes", args_schema=ListWorkspaceNodesArgs)
     async def list_workspace_nodes_runtime(novel_id: str) -> dict[str, Any]:
-        """List chapter tree nodes including folders, chapters, and trash status."""
+        """List nodes with document ids and content state; use existing document_id for old or empty chapters."""
         nodes = await list_workspace_nodes(session, novel_id=current_novel_id(novel_id))
         return {"status": "ok", "nodes": nodes}
 
@@ -345,7 +344,7 @@ def build_runtime_tools(
         content: str,
         parent_id: str | None = None,
     ) -> dict[str, Any]:
-        """Create a chapter and persist complete non-empty body text when the user asks to write or generate chapter content."""
+        """Create a new chapter only when no matching chapter exists; never duplicate an existing chapter title."""
         return await create_chapter_with_content(
             session,
             novel_id=current_novel_id(novel_id),

@@ -1,8 +1,9 @@
+import asyncio
 import json
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,20 +12,16 @@ from app.agent.chat_stream import _sse, stream_agent_events
 from app.agent.stream_errors import format_agent_stream_error
 from app.agent.graph import _build_agent_system_prompt
 from app.agent.prompts import append_agent_runtime_guidance
-from app.agent.runtime import invoke_agent_graph, stream_agent_graph
-from app.agent.tools import classify_agent_intent
+from app.agent.runtime import invoke_agent_graph
 from app.api.deps import get_current_user
 from app.db.session import get_session
 from app.models import Document, ModelProfile, PendingConfirmation, User
 from app.schemas.agent import AgentMessageRequest, AgentMessageResponse
-from app.schemas.confirmation import ConfirmationResponse
-from app.schemas.workspace import WorkspaceNodeResponse
 from app.services.context_assembly import assemble_context
 from app.services.conversations import append_message, maybe_auto_title_conversation, resolve_conversation_for_message
 from app.services.document_actions import build_confirmation_responses
-from app.services.memory import create_memory_item
 from app.services.novels import get_owned_novel
-from app.services.workspace_actions import cleanup_workspace_folders, load_workspace_nodes, organize_workspace_tree
+from app.services.workspace_actions import load_workspace_nodes
 
 router = APIRouter(prefix="/novels/{novel_id}/agent", tags=["agent"])
 
@@ -78,27 +75,6 @@ async def send_agent_message(
         role="user",
         content=payload.message,
     )
-
-    intent = classify_agent_intent(payload.message, payload.selected_text)
-    if intent in {"organize_workspace", "cleanup_workspace"}:
-        if intent == "cleanup_workspace":
-            action_result = await cleanup_workspace_folders(
-                session, novel_id=novel_id, message=payload.message
-            )
-        else:
-            action_result = await organize_workspace_tree(session, novel_id=novel_id)
-        message = str(action_result.get("message", "操作已完成。"))
-        workspace_diff = action_result.get("workspace_diff")
-        workspace_nodes = await load_workspace_nodes(session, novel_id)
-        await append_message(session, conversation=conversation, role="assistant", content=message)
-        return AgentMessageResponse(
-            message=message,
-            context_status=[],
-            conversation_id=conversation.id,
-            confirmation=None,
-            workspace_diff=workspace_diff,
-            workspace_nodes=workspace_nodes,
-        )
 
     assembled = await assemble_context(
         session,
@@ -171,6 +147,7 @@ async def send_agent_message(
 
 @router.post("/messages/stream")
 async def stream_agent_message(
+    request: Request,
     novel_id: UUID,
     payload: AgentMessageRequest,
     current_user: Annotated[User, Depends(get_current_user)],
@@ -207,68 +184,15 @@ async def stream_agent_message(
     async def event_stream():
         try:
             async for raw_event in _stream_agent_response():
+                if await request.is_disconnected():
+                    return
                 yield raw_event
+        except asyncio.CancelledError:
+            return
         except Exception as exc:
             yield _sse({"type": "error", "message": format_agent_stream_error(exc)})
 
     async def _stream_agent_response():
-        if classify_agent_intent(payload.message, payload.selected_text) == "draft_key_memory":
-            await create_memory_item(
-                session,
-                novel_id=novel_id,
-                memory_type="key_memory",
-                title=payload.message[:60] or "关键记忆",
-                body=payload.message,
-                importance=80,
-                metadata={"source": "user_explicit"},
-            )
-            await session.commit()
-            response = "已保存到记忆。"
-            await append_message(session, conversation=conversation, role="assistant", content=response)
-            yield _sse({"type": "delta", "content": response})
-            yield _sse(
-                {
-                    "type": "done",
-                    "message": response,
-                    "context_status": ["已保存关键记忆。"],
-                    "context_detail": None,
-                    "conversation_id": str(conversation.id),
-                    "confirmation": None,
-                    "workspace_diff": None,
-                    "workspace_nodes": None,
-                }
-            )
-            return
-
-        intent = classify_agent_intent(payload.message, payload.selected_text)
-        if intent in {"organize_workspace", "cleanup_workspace"}:
-            if intent == "cleanup_workspace":
-                action_result = await cleanup_workspace_folders(
-                    session, novel_id=novel_id, message=payload.message
-                )
-            else:
-                action_result = await organize_workspace_tree(session, novel_id=novel_id)
-            message = str(action_result.get("message", "操作已完成。"))
-            workspace_diff = action_result.get("workspace_diff")
-            workspace_nodes = await load_workspace_nodes(session, novel_id)
-            await append_message(session, conversation=conversation, role="assistant", content=message)
-            yield _sse({"type": "delta", "content": message})
-            yield _sse(
-                {
-                    "type": "done",
-                    "message": message,
-                    "context_status": [],
-                    "conversation_id": str(conversation.id),
-                    "confirmation": None,
-                    "workspace_diff": workspace_diff,
-                    "workspace_nodes": [
-                        WorkspaceNodeResponse.model_validate(node).model_dump(mode="json")
-                        for node in workspace_nodes
-                    ],
-                }
-            )
-            return
-
         async for raw_event in stream_agent_events(
             session,
             novel=novel,
@@ -279,12 +203,17 @@ async def stream_agent_message(
             model_profile=model_profile,
             user_message_id=user_message.id,
         ):
+            if await request.is_disconnected():
+                return
+
             if not raw_event.startswith("data: "):
                 yield raw_event
                 continue
 
             event_payload: dict[str, Any] = json.loads(raw_event[6:].strip())
             if event_payload.get("type") == "done":
+                if await request.is_disconnected():
+                    return
                 final_message = str(event_payload.get("message", ""))
                 tool_calls = event_payload.get("tool_calls") or []
                 if final_message:

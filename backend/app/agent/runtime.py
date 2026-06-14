@@ -1,6 +1,6 @@
 from collections.abc import AsyncIterator
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,7 +14,7 @@ from app.models import ModelProfile
 def graph_invoke_config(conversation_id: UUID | None) -> dict[str, Any]:
     config: dict[str, Any] = {"recursion_limit": 25}
     if conversation_id is not None:
-        config["configurable"] = {"thread_id": str(conversation_id)}
+        config["configurable"] = {"thread_id": f"{conversation_id}:{uuid4()}"}
     return config
 
 

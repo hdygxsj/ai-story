@@ -227,3 +227,68 @@ def test_relationships_are_loaded_as_structured_context(monkeypatch) -> None:
     assert response.status_code == 200
     assert "structured_memory" in body
     assert any("共同守护灯塔" in str(message.content) for message in model_messages)
+
+
+def test_conversation_history_is_passed_as_role_messages_not_system_text(monkeypatch) -> None:
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+    model_messages = []
+
+    class FakeChatModel:
+        def bind_tools(self, tools):
+            return self
+
+        def invoke(self, messages):
+            model_messages.extend(messages)
+            return AIMessage(content="知道了。")
+
+    async def fake_search_rag(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr("app.agent.graph.build_chat_model", lambda profile, purpose="chat": FakeChatModel())
+    monkeypatch.setattr("app.services.context_assembly.search_rag_chunks", fake_search_rag)
+
+    client = TestClient(app)
+    headers = auth_headers(client)
+    novel = client.post("/novels", headers=headers, json={"title": "History Novel"}).json()
+    profile = client.post(
+        "/model-profiles",
+        headers=headers,
+        json={
+            "name": "History profile",
+            "provider_kind": "openai",
+            "api_key": "sk-test",
+            "chat_model": "gpt-4o",
+            "writing_model": "gpt-4o",
+            "summary_model": "gpt-4o-mini",
+        },
+    ).json()
+    client.patch(
+        f"/novels/{novel['id']}",
+        headers=headers,
+        json={"default_model_profile_id": profile["id"]},
+    )
+
+    first = client.post(
+        f"/novels/{novel['id']}/agent/messages",
+        headers=headers,
+        json={"message": "前四章是空的"},
+    )
+    conversation_id = first.json()["conversation_id"]
+    model_messages.clear()
+
+    second = client.post(
+        f"/novels/{novel['id']}/agent/messages",
+        headers=headers,
+        json={"message": "把它们补上", "conversation_id": conversation_id},
+    )
+
+    assert second.status_code == 200
+    assert isinstance(model_messages[0], SystemMessage)
+    assert "【对话历史】" not in str(model_messages[0].content)
+    assert isinstance(model_messages[-3], HumanMessage)
+    assert model_messages[-3].content == "前四章是空的"
+    assert isinstance(model_messages[-2], AIMessage)
+    assert model_messages[-2].content == "知道了。"
+    assert isinstance(model_messages[-1], HumanMessage)
+    assert model_messages[-1].content == "把它们补上"

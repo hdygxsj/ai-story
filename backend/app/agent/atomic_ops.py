@@ -3,7 +3,7 @@ ATOMIC_OPS_GUIDANCE = """
 不要套用固定流程；多步任务（拆分章节、批量落盘、重命名并改写）请先 list/read 获取 id 与现状，再逐步调用工具。
 
 章节与正文（原子能力）：
-- list_workspace_nodes：查看章节树与 document_id
+- list_workspace_nodes：查看章节树、document_id、has_content 和 content_chars
 - read_document：读取章节正文
 - update_workspace_node：重命名章节、移动目录、调整顺序
 - write_document_content：直接更新章节正文（立即生效）
@@ -16,6 +16,11 @@ ATOMIC_OPS_GUIDANCE = """
 写作质量：
 - 正文必须是小说散文，禁止把爽点清单/章纲/要点列表写入正文。
 - 长正文必须通过工具写入工作台，不要只在对话里展示。
+
+章节定位规则：
+- 用户点名某章或一组既有章节时，先 list_workspace_nodes 定位；已有章节必须更新原 document_id，禁止新建同名章节。
+- has_content=false 表示空章，可直接用 write_document_content 补写；修改旧章节时先 read_document，再写回原 document_id。
+- 只有目标章节确实不存在时，才使用 create_chapter_with_content。
 
 完成标准：工具成功返回后再告诉用户已完成；失败时说明原因并尝试其他原子工具组合。
 """

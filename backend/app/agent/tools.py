@@ -235,72 +235,6 @@ def draft_rewrite(selected_text: str, instruction: str) -> str:
     return f"{selected_text} The room turned tense as every sound seemed to wait for the next mistake."
 
 
-def classify_agent_intent(message: str, selected_text: str | None) -> str:
-    lowered = message.lower()
-    if selected_text and ("rewrite" in lowered or "改写" in lowered or "重写" in lowered):
-        return "rewrite_selection"
-
-    material_keywords = (
-        "素材",
-        "材料",
-        "资产",
-        "角色",
-        "世界观",
-        "时间线",
-        "人物关系",
-        "关系网",
-        "material",
-        "asset",
-    )
-    workspace_keywords = (
-        "文件夹",
-        "folder",
-        "目录",
-        "章节",
-        "chapter",
-        "正文",
-        "草稿",
-        "draft",
-        "workspace",
-        "工作台",
-    )
-    delete_keywords = ("删", "删除", "移除", "去掉", "清理", "清除", "delete", "remove", "trash", "clear")
-    organize_keywords = ("整理", "归类", "organize")
-    write_action_keywords = (
-        "写进",
-        "写入",
-        "保存到",
-        "放到工作台",
-        "落到工作台",
-        "录入",
-        "persist",
-        "save to workspace",
-    )
-    write_target_keywords = ("正文", "章节", "章", "工作台", "document", "chapter", "workspace")
-
-    if any(keyword in message for keyword in material_keywords):
-        return "chat"
-
-    if any(keyword in message for keyword in delete_keywords) and any(
-        keyword in message for keyword in workspace_keywords
-    ):
-        return "cleanup_workspace"
-
-    if any(keyword in message for keyword in organize_keywords) and any(
-        keyword in message for keyword in workspace_keywords
-    ):
-        return "organize_workspace"
-
-    if any(keyword in lowered for keyword in write_action_keywords) and any(
-        keyword in lowered for keyword in write_target_keywords
-    ):
-        return "write_chapter_content"
-
-    if "remember" in lowered or "记住" in lowered:
-        return "draft_key_memory"
-    return "chat"
-
-
 def _stub_tool(name: str, description: str, args_schema: type[BaseModel]):
     @tool(name, args_schema=args_schema)
     def _runtime_stub(**kwargs: Any) -> dict[str, Any]:
@@ -339,7 +273,7 @@ def update_novel_tool(
 
 @tool("list_workspace_nodes", args_schema=ListWorkspaceNodesArgs)
 def list_workspace_nodes_tool(novel_id: str) -> dict[str, Any]:
-    """List chapter tree nodes including folders, chapters, and trash status."""
+    """List nodes with document ids and content state; use existing document_id for old or empty chapters."""
     return {"novel_id": novel_id, "nodes": []}
 
 
@@ -361,7 +295,7 @@ def create_chapter_with_content_tool(
     content: str,
     parent_id: str | None = None,
 ) -> dict[str, Any]:
-    """Create a chapter and persist complete non-empty body text when the user asks to write or generate chapter content."""
+    """Create a new chapter only when no matching chapter exists; never duplicate an existing chapter title."""
     return {"novel_id": novel_id, "title": title, "content": content, "parent_id": parent_id}
 
 

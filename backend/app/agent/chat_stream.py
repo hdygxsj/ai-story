@@ -3,18 +3,18 @@ from collections.abc import AsyncIterator
 from typing import Any
 from uuid import UUID
 
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.graph import _build_agent_system_prompt
 from app.agent.prompts import append_agent_runtime_guidance
 from app.agent.runtime import stream_agent_graph
-from app.agent.tools import classify_agent_intent
 from app.models import ModelProfile, Novel
 from app.services.context_assembly import assemble_context
 
 
 def _sse(payload: dict[str, Any]) -> str:
-    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    return f"data: {json.dumps(jsonable_encoder(payload), ensure_ascii=False)}\n\n"
 
 
 async def stream_agent_events(
@@ -39,9 +39,7 @@ async def stream_agent_events(
         message_id=user_message_id,
     )
     pack = assembled.pack
-    intent = classify_agent_intent(message, selected_text)
-
-    if model_profile is None and intent != "rewrite_selection":
+    if model_profile is None and not selected_text:
         response = "请先在 Agent 配置中为当前小说绑定并保存可用的对话模型。"
         yield _sse({"type": "delta", "content": response})
         yield _sse(

@@ -10,7 +10,7 @@ from app.agent.atomic_ops import ATOMIC_OPS_GUIDANCE
 from app.agent.context import ContextPack
 from app.agent.model_runtime import build_chat_model
 from app.agent.state import AgentState
-from app.agent.tools import classify_agent_intent, get_agent_tools
+from app.agent.tools import get_agent_tools
 from app.models import ModelProfile
 
 _MEMORY_GUIDANCE = (
@@ -24,13 +24,14 @@ _MATERIAL_GUIDANCE = (
     "不要要求用户手动删除。修改或删除前先 list 获取 id。"
 )
 _DESTRUCTIVE_WRITE_GUIDANCE = "propose_document_update 等需用户确认；write_document_content 等原子写入会立即生效。"
-_EXPLICIT_WRITE_GUIDANCE = (
-    "当前明确写入指令优先于历史规划、讨论和待办。用户要求写入章节正文时，"
-    "不要继续规划、复述大纲或改写其他章节方案；必须调用章节或正文写入工具完成任务。"
-    "先用 list_workspace_nodes 确认目标章节：已有章节调用 read_document 后使用 "
-    "write_document_content，缺失章节使用 create_chapter_with_content。多章请求要逐章处理，"
-    "只有工具成功后才能声称已写入。"
+_CURRENT_REQUEST_GUIDANCE = (
+    "始终优先处理用户当前消息，不要被历史对话中的旧任务、旧规划或待办带偏。"
+    "根据当前需求自主规划并组合原子工具；不要套用固定业务流程。"
+    "涉及外部状态变更时，只有工具成功返回后才能声称已经完成。"
 )
+_MAX_TOOL_ROUNDS = 8
+_REPEATED_TOOL_CALL_RESPONSE = "检测到重复工具调用，已停止继续执行；上一次工具调用结果已保留。"
+_TOOL_ROUND_LIMIT_RESPONSE = "工具调用轮次已达到上限，已停止继续执行；已完成的工具结果已保留。"
 
 
 def _default_system_prompt(state: AgentState) -> str:
@@ -42,6 +43,7 @@ def _default_system_prompt(state: AgentState) -> str:
         _MEMORY_GUIDANCE,
         _MATERIAL_GUIDANCE,
         _DESTRUCTIVE_WRITE_GUIDANCE,
+        _CURRENT_REQUEST_GUIDANCE,
     ]
     if novel_id is not None:
         lines.append(f"当前小说 ID: {novel_id}")
@@ -65,6 +67,7 @@ def _build_agent_system_prompt(pack: ContextPack) -> str:
         _MEMORY_GUIDANCE,
         _MATERIAL_GUIDANCE,
         _DESTRUCTIVE_WRITE_GUIDANCE,
+        _CURRENT_REQUEST_GUIDANCE,
     ]
     for item in pack.items:
         if item.source == "user_instruction":
@@ -119,6 +122,27 @@ def _serialize_tool_result(result: Any) -> str:
     if isinstance(result, str):
         return result
     return json.dumps(result, ensure_ascii=False, default=str)
+
+
+def _tool_call_batch_signature(tool_calls: list[dict[str, Any]]) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (
+            str(tool_call.get("name", "")),
+            json.dumps(tool_call.get("args", {}), ensure_ascii=False, sort_keys=True, default=str),
+        )
+        for tool_call in tool_calls
+    )
+
+
+def _last_tool_call_batch(messages: list[Any]) -> list[dict[str, Any]]:
+    for message in reversed(messages):
+        if isinstance(message, AIMessage) and message.tool_calls:
+            return list(message.tool_calls)
+    return []
+
+
+def _completed_tool_rounds(messages: list[Any]) -> int:
+    return sum(1 for message in messages if isinstance(message, AIMessage) and message.tool_calls)
 
 
 def _remove_incomplete_tool_call_history(messages: list[Any]) -> list[Any]:
@@ -195,10 +219,8 @@ def build_agent_graph(
 
     def prepare_agent_call(state: AgentState) -> tuple[list[Any], Any, str | None]:
         prior = _remove_incomplete_tool_call_history(list(state.get("messages", [])))
-        intent = classify_agent_intent(state["message"], state.get("selected_text"))
         if (
-            intent == "rewrite_selection"
-            and state.get("selected_text")
+            state.get("selected_text")
             and state.get("document_id")
             and not any(isinstance(message, ToolMessage) for message in prior)
         ):
@@ -221,6 +243,9 @@ def build_agent_graph(
             )
             return messages, None, "rewrite"
 
+        if _completed_tool_rounds(prior) >= _MAX_TOOL_ROUNDS:
+            return prior, None, "tool_limit"
+
         model_profile = bound_model_profile
         tool_messages = [message for message in prior if isinstance(message, ToolMessage)]
         if model_profile is None:
@@ -229,15 +254,29 @@ def build_agent_graph(
             return [HumanMessage(content=state["message"])], None, "missing_model"
 
         system_prompt = state.get("system_prompt") or _default_system_prompt(state)
-        if intent == "write_chapter_content":
-            system_prompt = f"{system_prompt}\n\n{_EXPLICIT_WRITE_GUIDANCE}"
+        if _CURRENT_REQUEST_GUIDANCE not in system_prompt:
+            system_prompt = f"{system_prompt}\n\n{_CURRENT_REQUEST_GUIDANCE}"
         if not prior:
             prior = [SystemMessage(content=system_prompt), HumanMessage(content=state["message"])]
-        elif intent == "write_chapter_content":
-            prior.insert(0, SystemMessage(content=_EXPLICIT_WRITE_GUIDANCE))
 
         model = build_chat_model(model_profile, purpose="chat").bind_tools(tool_list)
         return prior, model, None
+
+    def agent_updates(prior: list[Any], ai_message: AIMessage) -> dict[str, Any]:
+        if ai_message.tool_calls:
+            previous_calls = _last_tool_call_batch(prior)
+            if previous_calls and _tool_call_batch_signature(ai_message.tool_calls) == _tool_call_batch_signature(
+                previous_calls
+            ):
+                return {
+                    "messages": [AIMessage(content=_REPEATED_TOOL_CALL_RESPONSE)],
+                    "response": _REPEATED_TOOL_CALL_RESPONSE,
+                }
+            return {"messages": [ai_message]}
+        return {
+            "messages": [ai_message],
+            "response": _message_text(ai_message.content) or "操作已完成。",
+        }
 
     def agent_node_sync(state: AgentState) -> dict[str, Any]:
         prior, model, shortcut = prepare_agent_call(state)
@@ -245,13 +284,12 @@ def build_agent_graph(
             return {"messages": prior}
         if shortcut == "done":
             return {}
+        if shortcut == "tool_limit":
+            return {"response": _TOOL_ROUND_LIMIT_RESPONSE}
         if shortcut == "missing_model":
             return {"messages": prior, "response": "请先在 Agent 配置中为当前小说绑定并保存可用的对话模型。"}
         ai_message = model.invoke(prior)
-        updates: dict[str, Any] = {"messages": [ai_message]}
-        if not ai_message.tool_calls:
-            updates["response"] = _message_text(ai_message.content) or "操作已完成。"
-        return updates
+        return agent_updates(prior, ai_message)
 
     async def agent_node_async(state: AgentState) -> dict[str, Any]:
         prior, model, shortcut = prepare_agent_call(state)
@@ -259,6 +297,8 @@ def build_agent_graph(
             return {"messages": prior}
         if shortcut == "done":
             return {}
+        if shortcut == "tool_limit":
+            return {"response": _TOOL_ROUND_LIMIT_RESPONSE}
         if shortcut == "missing_model":
             return {"messages": prior, "response": "请先在 Agent 配置中为当前小说绑定并保存可用的对话模型。"}
 
@@ -270,10 +310,7 @@ def build_agent_graph(
             ai_message = model.invoke(prior)
         if ai_message is None:
             ai_message = AIMessage(content="")
-        updates: dict[str, Any] = {"messages": [ai_message]}
-        if not ai_message.tool_calls:
-            updates["response"] = _message_text(ai_message.content) or "操作已完成。"
-        return updates
+        return agent_updates(prior, ai_message)
 
     def finalize_node(state: AgentState) -> dict[str, Any]:
         tool_messages = [message for message in state.get("messages", []) if isinstance(message, ToolMessage)]
