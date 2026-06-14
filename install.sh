@@ -22,6 +22,9 @@ usage() {
   --no-start    仅安装 Docker 并准备环境，不启动服务
   -h, --help    显示帮助
 
+环境变量:
+  NPM_REGISTRY  前端 Docker 构建使用的 npm 源（默认自动选择）
+
 启动后访问:
   前端: http://localhost:5173
   后端: http://localhost:8000
@@ -184,6 +187,34 @@ ensure_docker() {
   info "Compose 版本: $(compose_cmd version | head -n 1)"
 }
 
+detect_npm_registry() {
+  if [ -n "${NPM_REGISTRY:-}" ]; then
+    printf '%s' "$NPM_REGISTRY"
+    return
+  fi
+
+  if curl -fsSL --max-time 8 https://registry.npmjs.org/ >/dev/null 2>&1; then
+    printf '%s' "https://registry.npmjs.org"
+    return
+  fi
+
+  warn "无法稳定访问 npm 官方源，将使用国内镜像 registry.npmmirror.com"
+  printf '%s' "https://registry.npmmirror.com"
+}
+
+ensure_npm_registry() {
+  local registry
+  registry="$(detect_npm_registry)"
+
+  if grep -qE '^NPM_REGISTRY=' "$ENV_FILE"; then
+    info "npm 源: $(grep -E '^NPM_REGISTRY=' "$ENV_FILE" | cut -d= -f2-)"
+    return
+  fi
+
+  printf '\nNPM_REGISTRY=%s\n' "$registry" >>"$ENV_FILE"
+  info "已写入 npm 源: $registry"
+}
+
 prepare_env() {
   if [ ! -f "$ENV_EXAMPLE" ]; then
     error "缺少环境模板文件: $ENV_EXAMPLE"
@@ -196,6 +227,8 @@ prepare_env() {
   else
     info "使用已有环境文件: $ENV_FILE"
   fi
+
+  ensure_npm_registry
 }
 
 start_stack() {
@@ -203,6 +236,7 @@ start_stack() {
   compose="$(compose_cmd)"
 
   info "正在构建并启动服务（首次启动可能需要几分钟）..."
+  info "前端构建 npm 源: $(grep -E '^NPM_REGISTRY=' "$ENV_FILE" | cut -d= -f2- || echo https://registry.npmmirror.com)"
   # shellcheck disable=SC2086
   $compose --env-file "$ENV_FILE" up -d --build
 

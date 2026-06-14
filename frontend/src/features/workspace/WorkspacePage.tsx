@@ -308,6 +308,7 @@ export function WorkspacePage({
   const [treePanelWidth, setTreePanelWidth] = useState(initialTreePanelWidth);
   const [agentPanelWidth, setAgentPanelWidth] = useState(initialAgentPanelWidth);
   const [treePanelCollapsed, setTreePanelCollapsed] = useState(initialTreePanelCollapsed);
+  const [nodesRefreshing, setNodesRefreshing] = useState(false);
   const treeResizeStart = useRef<{ startX: number; startWidth: number } | null>(null);
   const agentResizeStart = useRef<{ startX: number; startWidth: number } | null>(null);
 
@@ -617,6 +618,17 @@ export function WorkspacePage({
   async function refreshWorkspaceNodes() {
     const loadedNodes = await listWorkspaceNodes(token, novelId);
     setNodes(loadedNodes);
+  }
+
+  async function handleRefreshWorkspaceNodes() {
+    setNodesRefreshing(true);
+    try {
+      await refreshWorkspaceNodes();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "刷新章节失败");
+    } finally {
+      setNodesRefreshing(false);
+    }
   }
 
   async function reloadActiveDocument() {
@@ -1202,7 +1214,9 @@ export function WorkspacePage({
       onRestoreNode={(nodeId) => void handleWorkspaceNodeStatus(nodeId, "draft")}
       onSelectDocument={handleSelectDocument}
       onLocatePendingWrites={locateFirstPendingWriteForDocument}
+      onRefresh={() => void handleRefreshWorkspaceNodes()}
       pendingWriteCountsByDocumentId={pendingWriteCountsByDocumentId}
+      refreshing={nodesRefreshing}
       selectedDocumentId={documentId}
       onTrashNode={(nodeId) => void handleWorkspaceNodeStatus(nodeId, "trashed")}
     />

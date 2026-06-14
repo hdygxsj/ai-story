@@ -1,4 +1,4 @@
-.PHONY: backend-bootstrap backend-test frontend-test test up down
+.PHONY: backend-bootstrap backend-test frontend-test test up down db-migrate
 
 backend-bootstrap:
 	cd backend && python3 -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"
@@ -16,3 +16,9 @@ up:
 
 down:
 	docker compose down
+
+db-migrate:
+	./scripts/db-migrate.sh
+
+db-seed:
+	./scripts/db-seed.sh

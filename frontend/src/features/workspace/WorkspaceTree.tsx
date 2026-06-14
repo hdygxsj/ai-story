@@ -1,4 +1,4 @@
-import { CaretRightOutlined, FileTextOutlined, FolderOutlined, LeftOutlined, PlusOutlined, UndoOutlined } from "@ant-design/icons";
+import { CaretRightOutlined, FileTextOutlined, FolderOutlined, LeftOutlined, PlusOutlined, ReloadOutlined, UndoOutlined } from "@ant-design/icons";
 import { Button, Dropdown, Input, Modal, Space, Tag, Tree, Typography } from "antd";
 import type { MenuProps } from "antd";
 import type { Key } from "react";
@@ -19,6 +19,8 @@ type WorkspaceTreeProps = {
   onTrashNode?: (nodeId: string) => void;
   pendingWriteCountsByDocumentId?: Record<string, number>;
   onLocatePendingWrites?: (documentId: string) => void;
+  onRefresh?: () => void;
+  refreshing?: boolean;
   selectedDocumentId?: string | null;
 };
 
@@ -287,7 +289,9 @@ export function WorkspaceTree({
   onSelectDocument,
   onTrashNode,
   onLocatePendingWrites,
+  onRefresh,
   pendingWriteCountsByDocumentId = {},
+  refreshing = false,
   selectedDocumentId = null,
 }: WorkspaceTreeProps) {
   const [renamingNode, setRenamingNode] = useState<WorkspaceNode | null>(null);
@@ -640,6 +644,16 @@ export function WorkspaceTree({
                   新建
                 </Button>
               </Dropdown>
+              {onRefresh ? (
+                <Button
+                  aria-label="刷新章节"
+                  data-testid="workspace-tree-refresh"
+                  icon={<ReloadOutlined />}
+                  loading={refreshing}
+                  onClick={onRefresh}
+                  size="small"
+                />
+              ) : null}
               {onCollapse ? (
                 <Button aria-label="收起章节" icon={<LeftOutlined />} onClick={onCollapse} size="small" type="text" />
               ) : null}

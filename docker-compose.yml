@@ -62,6 +62,7 @@ services:
     build:
       context: ./frontend
       args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
         VITE_API_BASE: ${VITE_API_BASE:-http://localhost:8000}
         VITE_OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
         VITE_OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
