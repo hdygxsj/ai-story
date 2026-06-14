@@ -6,7 +6,9 @@ import { useEffect, useState } from "react";
 import { ApiError } from "./api/http";
 import type { Novel } from "./api/novels";
 import { createNovel, exportNovel, importNovel, listNovels } from "./api/novels";
-import { AuthPage } from "./features/auth/AuthPage";
+import { LoginPage } from "./features/auth/LoginPage";
+import { RegisterPage } from "./features/auth/RegisterPage";
+import { authRouteFromPath, pushAuthPath, type AuthRoute } from "./features/auth/authRoutes";
 import { NovelList } from "./features/novels/NovelList";
 import type { WorkspaceSection } from "./features/workspace/WorkspacePage";
 import { WorkspacePage } from "./features/workspace/WorkspacePage";
@@ -80,6 +82,8 @@ export function App() {
   const [form] = Form.useForm<{ title: string }>();
   const [importForm] = Form.useForm<{ importTitle: string; content: string }>();
   const [token, setToken] = useState<string | null>(() => window.localStorage.getItem(tokenStorageKey));
+  const [authRoute, setAuthRoute] = useState<AuthRoute>(() => authRouteFromPath(window.location.pathname));
+  const [registerSuccessMessage, setRegisterSuccessMessage] = useState<string | null>(null);
   const [novelId, setNovelId] = useState<string | null>(null);
   const [novels, setNovels] = useState<Novel[]>([]);
   const [activeSection, setActiveSection] = useState<WorkspaceSection | "novels">(() => sectionFromPath(window.location.pathname));
@@ -91,12 +95,16 @@ export function App() {
 
   useEffect(() => {
     function handlePopState() {
+      if (!token) {
+        setAuthRoute(authRouteFromPath(window.location.pathname));
+        return;
+      }
       setActiveSection(sectionFromPath(window.location.pathname));
     }
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     if (!token) {
@@ -104,6 +112,13 @@ export function App() {
       setNovelId(null);
       window.localStorage.removeItem(tokenStorageKey);
       window.localStorage.removeItem(novelStorageKey);
+      const route = authRouteFromPath(window.location.pathname);
+      if (window.location.pathname !== "/login" && window.location.pathname !== "/register") {
+        pushAuthPath("login");
+        setAuthRoute("login");
+        return;
+      }
+      setAuthRoute(route);
       return;
     }
     window.localStorage.setItem(tokenStorageKey, token);
@@ -155,9 +170,32 @@ export function App() {
   function handleAuthenticated(nextToken: string) {
     window.localStorage.setItem(tokenStorageKey, nextToken);
     setToken(nextToken);
-    if (window.location.pathname === "/" || window.location.pathname === "/login") {
+    setRegisterSuccessMessage(null);
+    if (
+      window.location.pathname === "/" ||
+      window.location.pathname === "/login" ||
+      window.location.pathname === "/register"
+    ) {
       pushSectionPath("workspace");
     }
+  }
+
+  function navigateToLogin() {
+    setRegisterSuccessMessage(null);
+    pushAuthPath("login");
+    setAuthRoute("login");
+  }
+
+  function navigateToRegister() {
+    setRegisterSuccessMessage(null);
+    pushAuthPath("register");
+    setAuthRoute("register");
+  }
+
+  function handleRegistered() {
+    setRegisterSuccessMessage("注册成功，请使用邮箱或用户名登录");
+    pushAuthPath("login");
+    setAuthRoute("login");
   }
 
   function navigateSection(section: WorkspaceSection | "novels") {
@@ -433,7 +471,16 @@ export function App() {
               placeItems: token && novelId && activeSection !== "novels" ? "stretch" : "start center",
             }}
           >
-            {!token ? <AuthPage onAuthenticated={handleAuthenticated} /> : null}
+            {!token && authRoute === "login" ? (
+              <LoginPage
+                onAuthenticated={handleAuthenticated}
+                onNavigateRegister={navigateToRegister}
+                successMessage={registerSuccessMessage}
+              />
+            ) : null}
+            {!token && authRoute === "register" ? (
+              <RegisterPage onNavigateLogin={navigateToLogin} onRegistered={handleRegistered} />
+            ) : null}
             {token && (!novelId || activeSection === "novels") ? (
               <NovelList novels={novels} token={token} onNovelsChange={setNovels} onSelectNovel={handleSelectNovel} />
             ) : null}

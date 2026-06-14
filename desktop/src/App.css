@@ -1,0 +1,102 @@
+:root {
+  color: #1f2937;
+  background: #f3f4f6;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+.setup-shell {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 32px 24px 24px;
+}
+
+.setup-header h1 {
+  margin: 0 0 8px;
+  font-size: 28px;
+}
+
+.setup-header p {
+  margin: 0;
+  color: #4b5563;
+}
+
+.setup-steps {
+  list-style: none;
+  margin: 28px 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.setup-step {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  padding: 12px 14px;
+}
+
+.setup-step.is-active {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 1px #2563eb inset;
+}
+
+.setup-step.is-done {
+  border-color: #16a34a;
+}
+
+.setup-step.is-error {
+  border-color: #dc2626;
+}
+
+.setup-step-title {
+  font-weight: 600;
+}
+
+.setup-step-message {
+  margin-top: 4px;
+  color: #6b7280;
+  font-size: 14px;
+  white-space: pre-wrap;
+}
+
+.setup-error {
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.setup-error p {
+  margin: 0 0 12px;
+  color: #991b1b;
+  white-space: pre-wrap;
+}
+
+.setup-error button {
+  border: none;
+  border-radius: 8px;
+  background: #dc2626;
+  color: #fff;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.setup-error button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.setup-footer {
+  color: #6b7280;
+  font-size: 13px;
+}

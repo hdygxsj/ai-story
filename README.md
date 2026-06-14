@@ -22,6 +22,7 @@
 | 数据 | PostgreSQL、Milvus |
 | 本地模型 | Ollama |
 | 部署 | Docker Compose |
+| 桌面 | Tauri（macOS / Linux / Windows，依赖 Docker） |
 
 ## 环境要求
 
@@ -85,6 +86,19 @@ docker compose --env-file .env up -d --build
 ```
 
 默认会创建 `demo@example.com` / `demo` / `secret123`。账号已存在时会跳过。
+
+## 桌面应用（macOS / Linux / Windows）
+
+若希望以桌面应用方式使用（带环境检测与 Docker 自动安装），见 [`desktop/README.md`](desktop/README.md)。
+
+```bash
+cd desktop
+npm install
+npm run tauri:dev      # 开发
+npm run tauri:build    # 构建安装包
+```
+
+桌面版仍会启动 Docker Compose 栈；首次运行会自动检测并尝试安装 Docker Desktop。
 
 ## 数据库初始化
 
@@ -214,6 +228,7 @@ ai-story/
 │   ├── app/          # 业务代码、Agent、API 路由
 │   └── alembic/      # 数据库迁移
 ├── frontend/         # React 前端
+├── desktop/          # Tauri 桌面壳（Docker 环境检测与启动）
 ├── docker-compose.yml
 ├── install.sh        # 一键安装脚本
 ├── scripts/
