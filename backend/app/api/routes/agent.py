@@ -16,7 +16,7 @@ from app.agent.prompts import append_agent_runtime_guidance
 from app.agent.runtime import invoke_agent_graph
 from app.api.deps import get_current_user
 from app.db.session import get_session
-from app.models import Document, ModelProfile, PendingConfirmation, User
+from app.models import Conversation, Document, Message, ModelProfile, PendingConfirmation, User
 from app.schemas.agent import AgentMessageRequest, AgentMessageResponse
 from app.services.context_assembly import assemble_context
 from app.services.conversations import append_message, maybe_auto_title_conversation, resolve_conversation_for_message
@@ -25,6 +25,30 @@ from app.services.novels import get_owned_novel
 from app.services.workspace_actions import load_workspace_nodes
 
 router = APIRouter(prefix="/novels/{novel_id}/agent", tags=["agent"])
+
+
+async def persist_interrupted_assistant_message(
+    session: AsyncSession,
+    *,
+    conversation: Conversation,
+    content: str,
+    tool_calls: list[dict[str, Any]] | None = None,
+    reasoning_content: str | None = None,
+) -> Message | None:
+    if not content.strip():
+        return None
+    metadata: dict[str, Any] = {"interrupted": True}
+    if tool_calls:
+        metadata["tool_calls"] = tool_calls
+    if reasoning_content:
+        metadata["reasoning_content"] = reasoning_content
+    return await append_message(
+        session,
+        conversation=conversation,
+        role="assistant",
+        content=content,
+        metadata=metadata,
+    )
 
 
 async def _get_novel_model_profile(
@@ -189,18 +213,41 @@ async def stream_agent_message(
         content=payload.message,
     )
 
+    streamed_assistant_content = ""
+    streamed_reasoning_content = ""
+    streamed_tool_calls: list[dict[str, Any]] = []
+    assistant_message_persisted = False
+
+    async def persist_interrupted_response() -> None:
+        nonlocal assistant_message_persisted
+        if assistant_message_persisted:
+            return
+        message = await persist_interrupted_assistant_message(
+            session,
+            conversation=conversation,
+            content=streamed_assistant_content,
+            tool_calls=streamed_tool_calls,
+            reasoning_content=streamed_reasoning_content,
+        )
+        if message is not None:
+            assistant_message_persisted = True
+
     async def event_stream():
         try:
+            yield _sse({"type": "meta", "conversation_id": str(conversation.id)})
             async for raw_event in _stream_agent_response():
                 if await request.is_disconnected():
+                    await persist_interrupted_response()
                     return
                 yield raw_event
         except asyncio.CancelledError:
+            await persist_interrupted_response()
             return
         except Exception as exc:
             yield _sse({"type": "error", "message": format_agent_stream_error(exc)})
 
     async def _stream_agent_response():
+        nonlocal assistant_message_persisted, streamed_assistant_content, streamed_reasoning_content
         async for raw_event in stream_agent_events(
             session,
             novel=novel,
@@ -219,19 +266,37 @@ async def stream_agent_message(
                 continue
 
             event_payload: dict[str, Any] = json.loads(raw_event[6:].strip())
+            if event_payload.get("type") == "delta":
+                streamed_assistant_content += str(event_payload.get("content", ""))
+            elif event_payload.get("type") == "reasoning":
+                streamed_reasoning_content += str(event_payload.get("content", ""))
+            elif event_payload.get("type") == "tool_call":
+                record = {key: value for key, value in event_payload.items() if key != "type"}
+                if record:
+                    for index, existing in enumerate(streamed_tool_calls):
+                        if existing.get("id") == record.get("id"):
+                            streamed_tool_calls[index] = record
+                            break
+                    else:
+                        streamed_tool_calls.append(record)
+
             if event_payload.get("type") == "done":
-                if await request.is_disconnected():
-                    return
                 final_message = str(event_payload.get("message", ""))
                 tool_calls = event_payload.get("tool_calls") or []
                 if final_message:
+                    metadata: dict[str, Any] = {}
+                    if tool_calls:
+                        metadata["tool_calls"] = tool_calls
+                    if streamed_reasoning_content:
+                        metadata["reasoning_content"] = streamed_reasoning_content
                     await append_message(
                         session,
                         conversation=conversation,
                         role="assistant",
                         content=final_message,
-                        metadata={"tool_calls": tool_calls} if tool_calls else None,
+                        metadata=metadata or None,
                     )
+                    assistant_message_persisted = True
                 event_payload["conversation_id"] = str(conversation.id)
                 if event_payload.get("proposed_payload"):
                     confirmation = PendingConfirmation(

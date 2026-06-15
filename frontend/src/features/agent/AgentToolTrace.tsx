@@ -22,7 +22,9 @@ export const MATERIAL_REFRESH_TOOLS = new Set([
   "create_character_asset",
   "create_timeline_event",
   "create_world_rule",
+  "reorder_timeline_events",
   "update_character_state",
+  "update_timeline_event",
   "update_novel",
 ]);
 
@@ -44,6 +46,7 @@ const TOOL_LABELS: Record<string, string> = {
   propose_selection_replace: "替换选区",
   propose_version_restore: "恢复版本",
   read_document: "读取文档",
+  reorder_timeline_events: "调整时间线排序",
   restore_workspace_node: "恢复节点",
   save_key_memory: "保存记忆",
   search_memory: "检索记忆",
@@ -51,6 +54,7 @@ const TOOL_LABELS: Record<string, string> = {
   split_chapter_by_max_chars: "拆分章节",
   trash_workspace_node: "移入回收站",
   update_character_state: "更新角色状态",
+  update_timeline_event: "更新时间线事件",
   update_novel: "重命名小说",
   update_workspace_node: "更新节点",
   write_document_content: "写入正文",

@@ -33,6 +33,7 @@ from app.agent.tools import (
     ProposeSelectionReplaceArgs,
     ProposeVersionRestoreArgs,
     ReadDocumentArgs,
+    ReorderTimelineEventsArgs,
     SearchMemoryArgs,
     SearchRagArgs,
     SplitChapterByMaxCharsArgs,
@@ -78,6 +79,7 @@ from app.services.materials import (
     delete_timeline_event,
     list_material_changes,
     prepare_timeline_events,
+    reorder_timeline_events,
     update_character_state_record,
     update_creative_asset,
     update_relationship_edge,
@@ -624,7 +626,13 @@ def build_runtime_tools(
         return {
             "status": "ok",
             "events": [
-                {"id": str(event.id), "title": event.title, "event_time": event.event_time, "summary": event.summary}
+                {
+                    "id": str(event.id),
+                    "title": event.title,
+                    "event_time": event.event_time,
+                    "summary": event.summary,
+                    "position": event.position,
+                }
                 for event in prepared_events
             ],
         }
@@ -657,6 +665,7 @@ def build_runtime_tools(
         title: str | None = None,
         event_time: str | None = None,
         summary: str | None = None,
+        position: int | None = None,
     ) -> dict[str, Any]:
         """Update an existing timeline event by id."""
         event = await update_timeline_event(
@@ -666,6 +675,7 @@ def build_runtime_tools(
             title=title,
             event_time=event_time,
             summary=summary,
+            position=position,
             actor_source="agent",
         )
         if event is None:
@@ -676,6 +686,35 @@ def build_runtime_tools(
             "action_type": "update_timeline_event",
             "message": f"已更新时间线事件「{event.title}」。",
             "id": str(event.id),
+            "position": event.position,
+        }
+
+    @tool("reorder_timeline_events", args_schema=ReorderTimelineEventsArgs)
+    async def reorder_timeline_events_runtime(novel_id: str, event_ids: list[str]) -> dict[str, Any]:
+        """Reorder timeline events by providing event ids in the desired display order."""
+        events = await reorder_timeline_events(
+            session,
+            novel_id=current_novel_id(novel_id),
+            event_ids=[UUID(event_id) for event_id in event_ids],
+            actor_source="agent",
+        )
+        if events is None:
+            return {"status": "error", "message": "时间线事件不存在。"}
+        await session.commit()
+        prepared_events = prepare_timeline_events(events)
+        return {
+            "status": "ok",
+            "action_type": "reorder_timeline_events",
+            "message": f"已调整 {len(prepared_events)} 个时间线事件的显示顺序。",
+            "events": [
+                {
+                    "id": str(event.id),
+                    "title": event.title,
+                    "event_time": event.event_time,
+                    "position": event.position,
+                }
+                for event in prepared_events
+            ],
         }
 
     @tool("delete_timeline_event", args_schema=DeleteTimelineEventArgs)
@@ -950,6 +989,7 @@ def build_runtime_tools(
         "list_timeline_events": list_timeline_events_runtime,
         "create_timeline_event": create_timeline_event_runtime,
         "update_timeline_event": update_timeline_event_runtime,
+        "reorder_timeline_events": reorder_timeline_events_runtime,
         "delete_timeline_event": delete_timeline_event_runtime,
         "list_character_states": list_character_states_runtime,
         "update_character_state": update_character_state_runtime,

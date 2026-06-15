@@ -189,6 +189,57 @@
   min-height: 360px;
 }
 
+.relationship-graph-viewport {
+  flex: 1 1 auto;
+  min-height: 280px;
+  position: relative;
+  touch-action: none;
+  width: 100%;
+}
+
+.relationship-graph-viewport-panning {
+  cursor: grabbing;
+}
+
+.relationship-graph-viewport-fullscreen {
+  min-height: min(72vh, 760px);
+}
+
+.relationship-graph-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  z-index: 2;
+}
+
+.relationship-graph-toolbar .ant-btn {
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.relationship-graph-zoom-indicator {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 999px;
+  color: rgba(51, 65, 85, 0.92);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  min-width: 48px;
+  padding: 6px 10px;
+  text-align: center;
+}
+
+.relationship-graph-fullscreen {
+  min-height: 0;
+}
+
+.relationship-graph-fullscreen-modal .ant-modal-body {
+  padding-top: 12px;
+}
+
 .relationship-graph-canvas {
   background:
     radial-gradient(circle at center, rgba(255, 122, 24, 0.04) 0%, rgba(255, 255, 255, 0) 58%),
@@ -196,8 +247,9 @@
   border: 1px solid rgba(15, 23, 42, 0.06);
   border-radius: 16px;
   color: rgba(255, 122, 24, 0.88);
-  flex: 1 1 auto;
-  min-height: 280px;
+  display: block;
+  height: 100%;
+  min-height: inherit;
   width: 100%;
 }
 

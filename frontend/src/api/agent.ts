@@ -104,12 +104,18 @@ export type AgentStreamToolCallPayload = AgentToolCallRecord & {
   type: "tool_call";
 };
 
+export type AgentStreamMetaPayload = {
+  type: "meta";
+  conversation_id: string;
+};
+
 export type AgentStreamEvent =
   | AgentStreamDeltaPayload
   | AgentStreamReasoningPayload
   | AgentStreamDonePayload
   | AgentStreamErrorPayload
-  | AgentStreamToolCallPayload;
+  | AgentStreamToolCallPayload
+  | AgentStreamMetaPayload;
 
 export type AgentStreamHandlers = {
   onDelta: (content: string) => void;
@@ -117,6 +123,7 @@ export type AgentStreamHandlers = {
   onToolCall: (record: AgentToolCallRecord) => void;
   onDone: (payload: AgentStreamDonePayload) => void;
   onError: (error: Error) => void;
+  onMeta?: (payload: Omit<AgentStreamMetaPayload, "type">) => void;
   onCancelled?: () => void;
 };
 
@@ -142,6 +149,43 @@ function normalizeAgentStreamError(error: unknown): Error {
     return new Error("无法连接到服务器，请确认 API 服务已启动。");
   }
   return error;
+}
+
+export function parseAgentSseEvent(
+  event: string,
+  handlers: AgentStreamHandlers,
+  finishWithError: (message: string) => void = (message) => handlers.onError(new Error(message)),
+): boolean {
+  const line = event
+    .split("\n")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith("data: "));
+  if (!line) {
+    return false;
+  }
+  const parsed = JSON.parse(line.slice(6)) as AgentStreamEvent;
+  if (parsed.type === "meta") {
+    handlers.onMeta?.({ conversation_id: parsed.conversation_id });
+    return false;
+  }
+  if (parsed.type === "delta") {
+    handlers.onDelta(parsed.content);
+    return false;
+  }
+  if (parsed.type === "reasoning") {
+    handlers.onReasoning?.(parsed.content);
+    return false;
+  }
+  if (parsed.type === "tool_call") {
+    handlers.onToolCall(parsed);
+    return false;
+  }
+  if (parsed.type === "error") {
+    finishWithError(parsed.message);
+    return true;
+  }
+  handlers.onDone(parsed);
+  return true;
 }
 
 export async function streamAgentMessage(
@@ -199,35 +243,6 @@ export async function streamAgentMessage(
     handlers.onError(new Error(message));
   }
 
-  function parseSseEvent(event: string) {
-    const line = event
-      .split("\n")
-      .map((part) => part.trim())
-      .find((part) => part.startsWith("data: "));
-    if (!line) {
-      return;
-    }
-    const parsed = JSON.parse(line.slice(6)) as AgentStreamEvent;
-    if (parsed.type === "delta") {
-      handlers.onDelta(parsed.content);
-      return;
-    }
-    if (parsed.type === "reasoning") {
-      handlers.onReasoning?.(parsed.content);
-      return;
-    }
-    if (parsed.type === "tool_call") {
-      handlers.onToolCall(parsed);
-      return;
-    }
-    if (parsed.type === "error") {
-      finishWithError(parsed.message);
-      return;
-    }
-    completed = true;
-    handlers.onDone(parsed);
-  }
-
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -238,12 +253,12 @@ export async function streamAgentMessage(
       const events = buffer.split("\n\n");
       buffer = events.pop() ?? "";
       for (const event of events) {
-        parseSseEvent(event);
+        completed = parseAgentSseEvent(event, handlers, finishWithError) || completed;
       }
     }
     buffer += decoder.decode();
     if (buffer.trim()) {
-      parseSseEvent(buffer);
+      completed = parseAgentSseEvent(buffer, handlers, finishWithError) || completed;
     }
     if (!completed) {
       finishWithError("Agent 响应中断，请检查模型配置和网络连接。");

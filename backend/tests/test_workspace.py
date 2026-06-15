@@ -321,6 +321,39 @@ def test_export_novel_as_txt_includes_plain_chapters_in_order() -> None:
     assert "开场内容。" in response.text
 
 
+def test_export_chapter_node_as_txt_preserves_paragraph_breaks() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client, email="paragraph-export@example.com", username="paragraphexport")
+    novel = client.post("/novels", headers=headers, json={"title": "段落导出"}).json()
+    chapter = client.post(
+        f"/novels/{novel['id']}/nodes",
+        headers=headers,
+        json={"title": "第一章 雾港", "node_type": "chapter", "parent_id": None},
+    ).json()
+    client.patch(
+        f"/documents/{chapter['document_id']}",
+        headers=headers,
+        json={
+            "content": {
+                "type": "doc",
+                "content": [
+                    {"type": "paragraph", "content": [{"type": "text", "text": "第一段。"}]},
+                    {"type": "paragraph", "content": [{"type": "text", "text": "第二段。"}]},
+                ],
+            }
+        },
+    )
+
+    response = client.get(
+        f"/novels/{novel['id']}/nodes/{chapter['id']}/export?format=txt",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert "第一段。\n\n第二段。" in response.text
+    assert "第一段。 第二段。" not in response.text
+
+
 def test_export_chapter_node_as_txt() -> None:
     client = TestClient(app)
     headers = auth_headers(client, email="chapter-export@example.com", username="chapterexport")

@@ -20,6 +20,7 @@ from app.schemas.materials import (
     RelationshipEdgeResponse,
     RelationshipEdgeUpdate,
     TimelineEventCreate,
+    TimelineEventReorder,
     TimelineEventResponse,
     TimelineEventUpdate,
 )
@@ -35,6 +36,7 @@ from app.services.materials import (
     delete_timeline_event,
     list_material_changes,
     prepare_timeline_events,
+    reorder_timeline_events,
     update_character_state_record,
     update_creative_asset,
     update_relationship_edge,
@@ -137,6 +139,7 @@ async def create_timeline_event_route(
         title=payload.title,
         event_time=payload.event_time,
         summary=payload.summary,
+        position=payload.position,
         metadata=payload.metadata,
         actor_source="user",
     )
@@ -172,6 +175,7 @@ async def update_timeline_event_route(
         title=payload.title,
         event_time=payload.event_time,
         summary=payload.summary,
+        position=payload.position,
         metadata=payload.metadata,
         actor_source="user",
     )
@@ -180,6 +184,26 @@ async def update_timeline_event_route(
     await session.commit()
     await session.refresh(event)
     return event
+
+
+@router.post("/novels/{novel_id}/timeline-events/reorder", response_model=list[TimelineEventResponse])
+async def reorder_timeline_events_route(
+    novel_id: UUID,
+    payload: TimelineEventReorder,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> list[TimelineEvent]:
+    await get_owned_novel(session, current_user, novel_id)
+    events = await reorder_timeline_events(
+        session,
+        novel_id=novel_id,
+        event_ids=payload.event_ids,
+        actor_source="user",
+    )
+    if events is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="时间线事件不存在。")
+    await session.commit()
+    return prepare_timeline_events(events)
 
 
 @router.delete("/novels/{novel_id}/timeline-events/{event_id}", status_code=status.HTTP_204_NO_CONTENT)

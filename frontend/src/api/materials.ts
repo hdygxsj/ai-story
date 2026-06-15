@@ -12,6 +12,7 @@ export type TimelineEvent = {
   title: string;
   event_time: string;
   summary?: string;
+  position?: number | null;
   created_at?: string;
 };
 

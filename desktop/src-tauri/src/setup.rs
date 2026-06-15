@@ -63,7 +63,7 @@ pub fn start_setup(app: AppHandle) -> Result<(), String> {
                 if let Ok(mut guard) = state.lock() {
                     guard.running = false;
                     guard.last_error = Some(error.clone());
-                }
+                };
             }
             emit_progress(
                 &app,

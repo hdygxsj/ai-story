@@ -45,17 +45,21 @@ function timelineEventKey(event: TimelineEvent): string {
   return `${normalizeTimelineLabel(event.title)}::${normalizeTimelineLabel(event.event_time)}`;
 }
 
-function timelineSortKey(event: TimelineEvent): [number, number, number] {
+function timelineSortKey(event: TimelineEvent): [number, number, number, number] {
+  if (typeof event.position === "number") {
+    return [0, event.position, 0, 0];
+  }
+
   const combined = `${event.event_time} ${event.title}`;
   if (/(故事开始|开篇|序章|起点)/.test(combined)) {
-    return [0, 0, Date.parse(event.created_at ?? "") || 0];
+    return [1, 0, 0, Date.parse(event.created_at ?? "") || 0];
   }
 
   const titleVolume = extractVolumeNumber(event.title);
   const timeVolume = extractVolumeNumber(event.event_time);
   const primary = titleVolume ?? timeVolume ?? 999;
   const secondary = event.event_time.includes("结束后") ? 1 : 0;
-  return [primary, secondary, Date.parse(event.created_at ?? "") || 0];
+  return [1, primary, secondary, Date.parse(event.created_at ?? "") || 0];
 }
 
 export function dedupeTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
@@ -71,15 +75,14 @@ export function dedupeTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
 
 export function sortTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
   return [...events].sort((left, right) => {
-    const [leftPrimary, leftSecondary, leftCreated] = timelineSortKey(left);
-    const [rightPrimary, rightSecondary, rightCreated] = timelineSortKey(right);
-    if (leftPrimary !== rightPrimary) {
-      return leftPrimary - rightPrimary;
+    const leftKey = timelineSortKey(left);
+    const rightKey = timelineSortKey(right);
+    for (let index = 0; index < leftKey.length; index += 1) {
+      if (leftKey[index] !== rightKey[index]) {
+        return leftKey[index] - rightKey[index];
+      }
     }
-    if (leftSecondary !== rightSecondary) {
-      return leftSecondary - rightSecondary;
-    }
-    return leftCreated - rightCreated;
+    return 0;
   });
 }
 

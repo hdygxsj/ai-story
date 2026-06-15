@@ -32,6 +32,7 @@ class TimelineEventCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     event_time: str = Field(min_length=1, max_length=120)
     summary: str = Field(min_length=1)
+    position: int | None = Field(default=None, ge=1, description="Explicit display order; lower comes first")
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -81,7 +82,12 @@ class TimelineEventUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     event_time: str | None = Field(default=None, min_length=1, max_length=120)
     summary: str | None = Field(default=None, min_length=1)
+    position: int | None = Field(default=None, ge=1, description="Explicit display order; lower comes first")
     metadata: dict[str, Any] | None = None
+
+
+class TimelineEventReorder(BaseModel):
+    event_ids: list[UUID] = Field(min_length=1, description="Timeline event ids in desired display order")
 
 
 class CharacterStateUpdate(BaseModel):

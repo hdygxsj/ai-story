@@ -1,7 +1,15 @@
+import ast
+import re
+from decimal import Decimal, DivisionByZero, InvalidOperation
 from typing import Any
 
 from langchain_core.tools import BaseTool, tool
 from pydantic import BaseModel, Field
+
+MATH_CALCULATION_GUIDANCE = (
+    "遇到金额、比例、百分比、字数、时间差、年龄、等级、战力数值或其他精确计算时，"
+    "必须调用 calculate 工具取得结果；不要依赖模型心算。"
+)
 
 
 class ReadDocumentArgs(BaseModel):
@@ -18,6 +26,14 @@ class SearchRagArgs(BaseModel):
     novel_id: str = Field(description="Novel UUID to retrieve from")
     query: str = Field(description="RAG semantic query")
     limit: int = Field(default=8, ge=1, le=20)
+
+
+class CalculateArgs(BaseModel):
+    expression: str = Field(
+        min_length=1,
+        max_length=500,
+        description="Arithmetic expression. Supports +, -, *, /, **, parentheses, decimals, and percentages like 15%.",
+    )
 
 
 class UpdateNovelArgs(BaseModel):
@@ -201,6 +217,15 @@ class UpdateTimelineEventArgs(BaseModel):
     title: str | None = Field(default=None, description="Updated event title")
     event_time: str | None = Field(default=None, description="Updated event time label")
     summary: str | None = Field(default=None, description="Updated event summary")
+    position: int | None = Field(default=None, ge=1, description="Explicit display order; lower comes first")
+
+
+class ReorderTimelineEventsArgs(BaseModel):
+    novel_id: str = Field(description="Novel UUID")
+    event_ids: list[str] = Field(
+        min_length=1,
+        description="Timeline event UUIDs in desired display order. Unlisted events are appended automatically.",
+    )
 
 
 class DeleteTimelineEventArgs(BaseModel):
@@ -238,6 +263,55 @@ def draft_rewrite(selected_text: str, instruction: str) -> str:
     return f"{selected_text} The room turned tense as every sound seemed to wait for the next mistake."
 
 
+_PERCENT_PATTERN = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s*%")
+
+
+def _normalize_calculation_expression(expression: str) -> str:
+    return _PERCENT_PATTERN.sub(r"(\1/100)", expression)
+
+
+def _format_decimal_result(value: Decimal) -> str:
+    if value == value.to_integral_value():
+        return str(value.quantize(Decimal("1")))
+    formatted = format(value.normalize(), "f")
+    return formatted.rstrip("0").rstrip(".")
+
+
+def _eval_decimal_ast(node: ast.AST) -> Decimal:
+    if isinstance(node, ast.Expression):
+        return _eval_decimal_ast(node.body)
+    if isinstance(node, ast.Constant) and isinstance(node.value, int | float):
+        return Decimal(str(node.value))
+    if isinstance(node, ast.UnaryOp):
+        operand = _eval_decimal_ast(node.operand)
+        if isinstance(node.op, ast.UAdd):
+            return operand
+        if isinstance(node.op, ast.USub):
+            return -operand
+    if isinstance(node, ast.BinOp):
+        left = _eval_decimal_ast(node.left)
+        right = _eval_decimal_ast(node.right)
+        if isinstance(node.op, ast.Add):
+            return left + right
+        if isinstance(node.op, ast.Sub):
+            return left - right
+        if isinstance(node.op, ast.Mult):
+            return left * right
+        if isinstance(node.op, ast.Div):
+            return left / right
+        if isinstance(node.op, ast.Pow):
+            if right != right.to_integral_value() or abs(right) > 100:
+                raise ValueError("指数必须是 -100 到 100 之间的整数。")
+            return left ** int(right)
+    raise ValueError("表达式包含不支持的内容。")
+
+
+def evaluate_calculation(expression: str) -> Decimal:
+    normalized = _normalize_calculation_expression(expression.strip())
+    parsed = ast.parse(normalized, mode="eval")
+    return _eval_decimal_ast(parsed)
+
+
 def _stub_tool(name: str, description: str, args_schema: type[BaseModel]):
     @tool(name, args_schema=args_schema)
     def _runtime_stub(**kwargs: Any) -> dict[str, Any]:
@@ -262,6 +336,20 @@ def search_memory(novel_id: str, query: str, limit: int = 8) -> dict[str, Any]:
 def search_rag(novel_id: str, query: str, limit: int = 8) -> dict[str, Any]:
     """Search vector-indexed RAG chunks."""
     return {"novel_id": novel_id, "query": query, "limit": limit, "results": []}
+
+
+@tool("calculate", args_schema=CalculateArgs)
+def calculate(expression: str) -> dict[str, Any]:
+    """Evaluate a precise arithmetic expression before answering numeric questions."""
+    try:
+        result = evaluate_calculation(expression)
+    except (DivisionByZero, InvalidOperation, OverflowError, SyntaxError, ValueError) as exc:
+        return {"status": "error", "message": f"不支持的计算表达式：{exc}"}
+    return {
+        "status": "ok",
+        "expression": expression,
+        "result": _format_decimal_result(result),
+    }
 
 
 @tool("update_novel", args_schema=UpdateNovelArgs)
@@ -504,9 +592,16 @@ def update_timeline_event_tool(
     title: str | None = None,
     event_time: str | None = None,
     summary: str | None = None,
+    position: int | None = None,
 ) -> dict[str, Any]:
     """Update an existing timeline event by id."""
     return {"novel_id": novel_id, "event_id": event_id}
+
+
+@tool("reorder_timeline_events", args_schema=ReorderTimelineEventsArgs)
+def reorder_timeline_events_tool(novel_id: str, event_ids: list[str]) -> dict[str, Any]:
+    """Reorder timeline events by providing event ids in the desired display order."""
+    return {"novel_id": novel_id, "event_ids": event_ids}
 
 
 @tool("delete_timeline_event", args_schema=DeleteTimelineEventArgs)
@@ -562,6 +657,7 @@ def get_agent_tools() -> list[BaseTool]:
         read_document,
         search_memory,
         search_rag,
+        calculate,
         update_novel_tool,
         list_workspace_nodes_tool,
         create_workspace_node_tool,
@@ -590,6 +686,7 @@ def get_agent_tools() -> list[BaseTool]:
         list_timeline_events_tool,
         create_timeline_event,
         update_timeline_event_tool,
+        reorder_timeline_events_tool,
         delete_timeline_event_tool,
         list_character_states_tool,
         update_character_state,

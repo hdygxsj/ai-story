@@ -10,7 +10,8 @@
     "prepare:stack": "node ../scripts/prepare-desktop-stack.mjs",
     "tauri": "tauri",
     "tauri:dev": "npm run tauri dev",
-    "tauri:build": "npm run prepare:stack && npm run tauri build"
+    "tauri:build": "npm run prepare:stack && CARGO_TARGET_DIR=target npm run tauri build",
+    "tauri:build:app": "npm run prepare:stack && CARGO_TARGET_DIR=target npm run tauri build -- --bundles app"
   },
   "dependencies": {
     "react": "^19.1.0",

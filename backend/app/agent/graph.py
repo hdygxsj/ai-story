@@ -10,7 +10,7 @@ from app.agent.atomic_ops import ATOMIC_OPS_GUIDANCE
 from app.agent.context import ContextPack, estimate_tokens
 from app.agent.model_runtime import build_chat_model
 from app.agent.state import AgentState
-from app.agent.tools import get_agent_tools
+from app.agent.tools import MATH_CALCULATION_GUIDANCE, get_agent_tools
 from app.models import ModelProfile
 
 _MEMORY_GUIDANCE = (
@@ -23,7 +23,9 @@ _MATERIAL_GUIDANCE = (
     "角色状态：同一角色 + 同一 scope 只保留一条记录，更新时用 update_character_state 并传 state_id；"
     "scope=current 表示最新状态，章节快照请用 chapter_3 等独立 scope，不要重复创建。"
     "时间线：同一 title + event_time 只保留一条，更新时用 update_timeline_event 并传 event_id；"
-    "卷级节点按第一卷/第二卷顺序维护，不要重复创建同名卷节点。"
+    "调整显示顺序时先 list_timeline_events，再调用 reorder_timeline_events 传入按目标顺序排列的 event_id 列表，"
+    "也可用 update_timeline_event 设置单个事件的 position；"
+    "未设置 position 的事件仍按卷号/时间标签自动排序并排在已指定 position 的事件之后。"
     "清理旧版或重复素材时，自行调用 delete_creative_asset 或 delete_creative_assets，"
     "不要要求用户手动删除。修改或删除前先 list 获取 id。"
 )
@@ -49,6 +51,7 @@ def _default_system_prompt(state: AgentState) -> str:
         "你是 AI 小说工坊的共创 Agent，通过组合原子工具完成用户的复杂创作需求。",
         "请使用与用户相同的语言回复。",
         ATOMIC_OPS_GUIDANCE.strip(),
+        MATH_CALCULATION_GUIDANCE,
         _MEMORY_GUIDANCE,
         _MATERIAL_GUIDANCE,
         _DESTRUCTIVE_WRITE_GUIDANCE,
@@ -73,6 +76,7 @@ def _build_agent_system_prompt(pack: ContextPack) -> str:
         "你是 AI 小说工坊的共创 Agent，通过组合原子工具完成用户的复杂创作需求。",
         "请使用与用户相同的语言回复。",
         ATOMIC_OPS_GUIDANCE.strip(),
+        MATH_CALCULATION_GUIDANCE,
         _MEMORY_GUIDANCE,
         _MATERIAL_GUIDANCE,
         _DESTRUCTIVE_WRITE_GUIDANCE,

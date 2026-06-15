@@ -1,6 +1,16 @@
+from uuid import uuid4
+
+import pytest
 from fastapi.testclient import TestClient
 
+from app.api.routes.agent import persist_interrupted_assistant_message
 from app.main import app
+from app.models import Conversation
+
+
+@pytest.fixture
+def client() -> TestClient:
+    return TestClient(app)
 
 
 def auth_headers(client: TestClient) -> dict[str, str]:
@@ -170,3 +180,27 @@ def test_agent_stream_persists_messages(monkeypatch) -> None:
     assert messages[0]["content"] == "帮我规划下一幕"
     assert messages[1]["role"] == "assistant"
     assert "继续写" in messages[1]["content"]
+
+
+async def test_interrupted_agent_stream_persists_partial_assistant_message(session) -> None:
+    conversation = Conversation(
+        novel_id=uuid4(),
+        user_id=uuid4(),
+        title="Interrupted",
+    )
+    session.add(conversation)
+    await session.commit()
+    await session.refresh(conversation)
+
+    message = await persist_interrupted_assistant_message(
+        session,
+        conversation=conversation,
+        content="已经生成的半段回复",
+        tool_calls=[{"id": "run-1", "tool": "calculate", "status": "ok"}],
+    )
+
+    assert message is not None
+    assert message.role == "assistant"
+    assert message.content == "已经生成的半段回复"
+    assert message.extra_metadata["interrupted"] is True
+    assert message.extra_metadata["tool_calls"][0]["tool"] == "calculate"

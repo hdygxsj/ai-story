@@ -353,6 +353,9 @@ def test_agent_streaming_endpoint_returns_incremental_response(monkeypatch) -> N
             return ChatResult(generations=[ChatGeneration(message=AIMessage(content="我可以帮你继续写下去。"))])
 
         def _stream(self, messages, stop=None, run_manager=None, **kwargs):
+            yield ChatGenerationChunk(
+                message=AIMessageChunk(content="", additional_kwargs={"reasoning_content": "先分析场景目标。"})
+            )
             yield ChatGenerationChunk(message=AIMessageChunk(content="我可以帮你"))
             yield ChatGenerationChunk(message=AIMessageChunk(content="继续写下去。"))
 
@@ -389,8 +392,15 @@ def test_agent_streaming_endpoint_returns_incremental_response(monkeypatch) -> N
 
     assert response.status_code == 200
     assert body.count('"type": "delta"') == 2
+    assert '"type": "reasoning"' in body
     assert "我可以帮你" in body
     assert "继续写下去。" in body
+    conversations = client.get(f"/novels/{novel['id']}/conversations", headers=headers).json()
+    messages = client.get(
+        f"/novels/{novel['id']}/conversations/{conversations[0]['id']}/messages",
+        headers=headers,
+    ).json()
+    assert messages[1]["metadata"]["reasoning_content"] == "先分析场景目标。"
 
 
 def test_agent_stream_returns_error_event_when_model_call_fails(monkeypatch: pytest.MonkeyPatch) -> None:

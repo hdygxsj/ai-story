@@ -28,6 +28,7 @@ class TimelineEvent(Base):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     event_time: Mapped[str] = mapped_column(String(120), nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
+    position: Mapped[int | None] = mapped_column(nullable=True)
     extra_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 

@@ -1,9 +1,9 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, Runtime,
+    AppHandle, Manager,
 };
 
 use crate::settings::{self, AppSettings};
@@ -16,6 +16,10 @@ const MENU_STOP_ON_EXIT: &str = "stop_on_exit";
 const MENU_QUIT: &str = "quit";
 
 static APP_IS_QUITTING: AtomicBool = AtomicBool::new(false);
+
+pub struct TrayMenuState {
+    pub stop_on_exit_item: CheckMenuItem<tauri::Wry>,
+}
 
 pub fn is_quitting() -> bool {
     APP_IS_QUITTING.load(Ordering::SeqCst)
@@ -47,9 +51,9 @@ pub fn quit_app(app: &AppHandle) {
     app.exit(0);
 }
 
-pub fn create_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+pub fn create_tray(app: &AppHandle) -> Result<(), String> {
     let settings = settings::load(app);
-    let menu = build_menu(app, &settings)?;
+    let (menu, stop_on_exit_item) = build_menu(app, &settings)?;
 
     let icon = app
         .default_window_icon()
@@ -77,30 +81,32 @@ pub fn create_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         .build(app)
         .map_err(|error| error.to_string())?;
 
+    app.manage(TrayMenuState { stop_on_exit_item });
     Ok(())
 }
 
-fn build_menu<R: Runtime>(app: &AppHandle<R>, settings: &AppSettings) -> Result<Menu<R>, String> {
+fn build_menu(
+    app: &AppHandle,
+    settings: &AppSettings,
+) -> Result<(Menu<tauri::Wry>, CheckMenuItem<tauri::Wry>), String> {
     let open = MenuItem::with_id(app, MENU_OPEN, "打开 AI Story", true, None::<&str>)
         .map_err(|error| error.to_string())?;
     let stop = MenuItem::with_id(app, MENU_STOP, "停止服务", true, None::<&str>)
         .map_err(|error| error.to_string())?;
-    let stop_on_exit = MenuItem::with_id(
+    let stop_on_exit = CheckMenuItem::with_id(
         app,
         MENU_STOP_ON_EXIT,
         "退出时停止容器",
         true,
+        settings.stop_containers_on_exit,
         None::<&str>,
     )
     .map_err(|error| error.to_string())?;
-    stop_on_exit
-        .set_checked(settings.stop_containers_on_exit)
-        .map_err(|error| error.to_string())?;
     let quit = MenuItem::with_id(app, MENU_QUIT, "退出", true, None::<&str>)
         .map_err(|error| error.to_string())?;
     let separator = PredefinedMenuItem::separator(app).map_err(|error| error.to_string())?;
 
-    Menu::with_items(
+    let menu = Menu::with_items(
         app,
         &[
             &open,
@@ -111,7 +117,9 @@ fn build_menu<R: Runtime>(app: &AppHandle<R>, settings: &AppSettings) -> Result<
             &quit,
         ],
     )
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?;
+
+    Ok((menu, stop_on_exit))
 }
 
 fn handle_menu_event(app: &AppHandle, menu_id: &str) {
@@ -133,25 +141,8 @@ fn handle_menu_event(app: &AppHandle, menu_id: &str) {
 }
 
 pub fn update_stop_on_exit_checked(app: &AppHandle, checked: bool) {
-    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+    let Some(state) = app.try_state::<TrayMenuState>() else {
         return;
     };
-    let Some(menu) = tray.menu() else {
-        return;
-    };
-    let Some(item) = menu.get(MENU_STOP_ON_EXIT) else {
-        return;
-    };
-    if let Some(menu_item) = item.as_menuitem() {
-        let _ = menu_item.set_checked(checked);
-    }
-}
-
-pub fn refresh_tray_menu(app: &AppHandle) -> Result<(), String> {
-    let settings = settings::load(app);
-    let menu = build_menu(app, &settings)?;
-    let Some(tray) = app.tray_by_id(TRAY_ID) else {
-        return Ok(());
-    };
-    tray.set_menu(Some(menu)).map_err(|error| error.to_string())
+    let _ = state.stop_on_exit_item.set_checked(checked);
 }

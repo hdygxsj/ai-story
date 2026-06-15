@@ -43,4 +43,35 @@ describe("prepareTimelineEvents", () => {
       "第三卷：开宗立派（崛起期）",
     ]);
   });
+
+  it("uses explicit position when provided", () => {
+    const prepared = prepareTimelineEvents([
+      {
+        id: "late",
+        title: "第三卷",
+        event_time: "后期",
+        summary: "结局。",
+        position: 3,
+        created_at: "2026-01-03T00:00:00Z",
+      },
+      {
+        id: "early",
+        title: "第一卷",
+        event_time: "开篇",
+        summary: "起点。",
+        position: 1,
+        created_at: "2026-01-01T00:00:00Z",
+      },
+      {
+        id: "middle",
+        title: "第二卷",
+        event_time: "中期",
+        summary: "发展。",
+        position: 2,
+        created_at: "2026-01-02T00:00:00Z",
+      },
+    ]);
+
+    expect(prepared.map((item) => item.id)).toEqual(["early", "middle", "late"]);
+  });
 });

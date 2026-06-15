@@ -288,7 +288,13 @@ async def _load_conversation_history(
             history_messages.append(HumanMessage(content=item.content))
         elif item.role == "assistant":
             history_lines.append(f"助手：{item.content}")
-            history_messages.append(AIMessage(content=item.content))
+            reasoning_content = item.extra_metadata.get("reasoning_content")
+            additional_kwargs = (
+                {"reasoning_content": reasoning_content}
+                if isinstance(reasoning_content, str)
+                else {}
+            )
+            history_messages.append(AIMessage(content=item.content, additional_kwargs=additional_kwargs))
 
     return history_lines, history_messages[-10:]
 

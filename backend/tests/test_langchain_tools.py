@@ -28,6 +28,8 @@ def _empty_context_pack() -> ContextPack:
 def test_default_agent_prompt_allows_selective_automatic_memory() -> None:
     prompt = _build_agent_system_prompt(_empty_context_pack())
     assert "save_key_memory" in prompt
+    assert "calculate" in prompt
+    assert "精确计算" in prompt
     assert "write_document_content" in prompt
     assert "无需用户审批" in prompt
     assert "propose_document_update 等需用户确认" in prompt
@@ -46,6 +48,7 @@ def test_agent_tool_registry_exposes_structured_langchain_tools() -> None:
         "read_document",
         "search_memory",
         "search_rag",
+        "calculate",
         "propose_rewrite",
         "save_key_memory",
         "create_character_asset",
@@ -72,12 +75,34 @@ def test_agent_tool_registry_exposes_structured_langchain_tools() -> None:
         "delete_creative_assets",
         "list_timeline_events",
         "update_timeline_event",
+        "reorder_timeline_events",
         "delete_timeline_event",
         "delete_character_state",
         "update_relationship_edge",
         "delete_relationship_edge",
         "list_material_changes",
     }.issubset(tool_names)
+
+
+def test_calculate_tool_evaluates_decimal_math_and_percentages() -> None:
+    tools = {tool.name: tool for tool in get_agent_tools()}
+
+    result = tools["calculate"].invoke({"expression": "(19.9 * 3 + 40) * 15%"})
+
+    assert result == {
+        "status": "ok",
+        "expression": "(19.9 * 3 + 40) * 15%",
+        "result": "14.955",
+    }
+
+
+def test_calculate_tool_rejects_unsafe_expressions() -> None:
+    tools = {tool.name: tool for tool in get_agent_tools()}
+
+    result = tools["calculate"].invoke({"expression": "__import__('os').system('date')"})
+
+    assert result["status"] == "error"
+    assert "不支持" in result["message"]
 
 
 async def test_agent_can_update_and_delete_creative_asset(session, monkeypatch) -> None:

@@ -34,6 +34,7 @@ def _timeline_event_snapshot(event: TimelineEvent) -> dict[str, Any]:
         "title": event.title,
         "event_time": event.event_time,
         "summary": event.summary,
+        "position": event.position,
         "metadata": event.extra_metadata,
     }
 
@@ -83,7 +84,7 @@ def _timeline_event_key(title: str, event_time: str) -> tuple[str, str]:
     return (_normalize_timeline_label(title), _normalize_timeline_label(event_time))
 
 
-def _timeline_sort_key(event: TimelineEvent) -> tuple[int, int, str]:
+def _timeline_heuristic_sort_key(event: TimelineEvent) -> tuple[int, int, str]:
     combined = f"{event.event_time} {event.title}"
     if any(marker in combined for marker in ("故事开始", "开篇", "序章", "起点")):
         return (0, 0, event.created_at.isoformat())
@@ -93,6 +94,13 @@ def _timeline_sort_key(event: TimelineEvent) -> tuple[int, int, str]:
     primary = title_volume if title_volume is not None else (time_volume if time_volume is not None else 999)
     secondary = 1 if "结束后" in event.event_time else 0
     return (primary, secondary, event.created_at.isoformat())
+
+
+def _timeline_sort_key(event: TimelineEvent) -> tuple[int, int, int, str]:
+    if event.position is not None:
+        return (0, event.position, 0, "")
+    primary, secondary, created = _timeline_heuristic_sort_key(event)
+    return (1, primary, secondary, created)
 
 
 async def find_timeline_event_by_key(
@@ -404,6 +412,7 @@ async def create_timeline_event(
     title: str,
     event_time: str,
     summary: str,
+    position: int | None = None,
     metadata: dict[str, Any] | None = None,
     actor_source: MaterialActorSource = "user",
 ) -> TimelineEvent:
@@ -426,6 +435,7 @@ async def create_timeline_event(
             title=normalized_title,
             event_time=normalized_event_time,
             summary=normalized_summary,
+            position=position,
             metadata=metadata,
             actor_source=actor_source,
         )
@@ -436,6 +446,7 @@ async def create_timeline_event(
         title=normalized_title,
         event_time=normalized_event_time,
         summary=normalized_summary,
+        position=position,
         extra_metadata=metadata or {},
     )
     session.add(event)
@@ -468,6 +479,7 @@ async def update_timeline_event(
     title: str | None = None,
     event_time: str | None = None,
     summary: str | None = None,
+    position: int | None = None,
     metadata: dict[str, Any] | None = None,
     actor_source: MaterialActorSource = "user",
 ) -> TimelineEvent | None:
@@ -484,6 +496,8 @@ async def update_timeline_event(
         event.event_time = event_time
     if summary is not None:
         event.summary = summary
+    if position is not None:
+        event.position = position
     if metadata is not None:
         event.extra_metadata = metadata
 
@@ -506,6 +520,50 @@ async def update_timeline_event(
         after_data=_timeline_event_snapshot(event),
     )
     return event
+
+
+async def reorder_timeline_events(
+    session: AsyncSession,
+    *,
+    novel_id: UUID,
+    event_ids: list[UUID],
+    actor_source: MaterialActorSource = "user",
+) -> list[TimelineEvent] | None:
+    events = list(
+        await session.scalars(select(TimelineEvent).where(TimelineEvent.novel_id == novel_id))
+    )
+    event_by_id = {event.id: event for event in events}
+
+    ordered: list[TimelineEvent] = []
+    seen: set[UUID] = set()
+    for event_id in event_ids:
+        event = event_by_id.get(event_id)
+        if event is None:
+            return None
+        if event_id in seen:
+            continue
+        seen.add(event_id)
+        ordered.append(event)
+
+    remaining = sort_timeline_events([event for event in events if event.id not in seen])
+    full_order = ordered + remaining
+    if not full_order:
+        return []
+
+    for index, event in enumerate(full_order, start=1):
+        event.position = index
+
+    await record_material_change(
+        session,
+        novel_id=novel_id,
+        material_type="timeline_event",
+        material_id=full_order[0].id,
+        action="updated",
+        actor_source=actor_source,
+        summary="调整时间线排序",
+        after_data={"event_ids": [str(event.id) for event in full_order]},
+    )
+    return full_order
 
 
 async def delete_timeline_event(

@@ -15,6 +15,8 @@ def test_append_agent_runtime_guidance_includes_atomic_ops() -> None:
 
     assert "base prompt" in prompt
     assert ATOMIC_OPS_GUIDANCE.strip() in prompt
+    assert "calculate" in prompt
+    assert "精确计算" in prompt
     assert "write_document_content" in prompt
     assert "split_chapter_by_max_chars" in prompt
     assert str(novel_id) in prompt

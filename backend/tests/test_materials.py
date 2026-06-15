@@ -249,3 +249,36 @@ def test_list_timeline_events_sorts_by_volume_order() -> None:
         "第二卷：世界大变（成长期）",
         "第三卷：开宗立派（崛起期）",
     ]
+
+
+def test_reorder_timeline_events_sets_explicit_display_order() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client)
+    novel = client.post("/novels", headers=headers, json={"title": "Reorder Timeline"}).json()
+
+    third = client.post(
+        f"/novels/{novel['id']}/timeline-events",
+        headers=headers,
+        json={"title": "第三卷", "event_time": "后期", "summary": "结局。"},
+    ).json()
+    first = client.post(
+        f"/novels/{novel['id']}/timeline-events",
+        headers=headers,
+        json={"title": "第一卷", "event_time": "开篇", "summary": "起点。"},
+    ).json()
+    second = client.post(
+        f"/novels/{novel['id']}/timeline-events",
+        headers=headers,
+        json={"title": "第二卷", "event_time": "中期", "summary": "发展。"},
+    ).json()
+
+    response = client.post(
+        f"/novels/{novel['id']}/timeline-events/reorder",
+        headers=headers,
+        json={"event_ids": [third["id"], first["id"], second["id"]]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["title"] for item in payload] == ["第三卷", "第一卷", "第二卷"]
+    assert [item["position"] for item in payload] == [1, 2, 3]

@@ -362,6 +362,11 @@ export function AgentPanel({
         onToolCall: (record) => {
           upsertToolCallMessage(record);
         },
+        onMeta: (payload) => {
+          if (payload.conversation_id) {
+            setActiveConversationId(payload.conversation_id);
+          }
+        },
         onDone: (payload) => {
           if (payload.workspace_nodes) {
             onWorkspaceOrganized?.(payload.workspace_nodes, payload.workspace_diff);
@@ -407,6 +412,7 @@ export function AgentPanel({
           setStreaming(false);
           activeTextIdRef.current = null;
           abortControllerRef.current = null;
+          void refreshConversations().catch(() => undefined);
         },
       },
       { signal: controller.signal },

@@ -1,6 +1,9 @@
 from fastapi.testclient import TestClient
+from langchain_core.messages import AIMessage
 
 from app.main import app
+from app.models import Conversation, Message, Novel, User
+from app.services.context_assembly import assemble_context
 
 
 def auth_headers(client: TestClient) -> dict[str, str]:
@@ -292,3 +295,43 @@ def test_conversation_history_is_passed_as_role_messages_not_system_text(monkeyp
     assert model_messages[-2].content == "知道了。"
     assert isinstance(model_messages[-1], HumanMessage)
     assert model_messages[-1].content == "把它们补上"
+
+
+async def test_conversation_history_restores_stored_reasoning_content(session) -> None:
+    user = User(email="reasoning-history@example.com", username="reasoning-history", password_hash="hash")
+    session.add(user)
+    await session.flush()
+    novel = Novel(owner_id=user.id, title="Reasoning History")
+    session.add(novel)
+    await session.flush()
+    conversation = Conversation(novel_id=novel.id, user_id=user.id, title="Reasoning")
+    session.add(conversation)
+    await session.flush()
+    session.add_all(
+        [
+            Message(conversation_id=conversation.id, role="user", content="上一轮问题"),
+            Message(
+                conversation_id=conversation.id,
+                role="assistant",
+                content="上一轮回答",
+                extra_metadata={"reasoning_content": "上一轮思考"},
+            ),
+        ]
+    )
+    await session.commit()
+
+    assembled = await assemble_context(
+        session,
+        novel=novel,
+        conversation_id=conversation.id,
+        document_id=None,
+        selected_text=None,
+        user_message="继续",
+        model_profile=None,
+    )
+
+    assistant_history = [
+        message for message in assembled.history_messages if isinstance(message, AIMessage)
+    ]
+    assert assistant_history
+    assert assistant_history[-1].additional_kwargs["reasoning_content"] == "上一轮思考"

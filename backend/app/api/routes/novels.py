@@ -21,6 +21,7 @@ from app.schemas.workspace import (
 )
 from app.services.novels import get_owned_novel
 from app.services.document_actions import (
+    extract_document_plain_text,
     reject_pending_confirmations_for_document,
     restore_owned_document_version,
 )
@@ -189,7 +190,7 @@ def _collect_export_sections(
             sections.extend(_collect_export_sections(nodes, documents, node.id, export_format, depth=depth + 1))
             continue
         document = documents.get(node.document_id)
-        body = extract_text_from_prosemirror(document.content) if document else ""
+        body = extract_document_plain_text(document.content) if document else ""
         prefix = _format_export_heading(node.title, export_format, depth)
         sections.append(f"{prefix}\n\n{body}".strip())
     return sections
@@ -235,7 +236,7 @@ async def export_novel(
     sections: list[str] = []
     for node in nodes:
         document = documents.get(node.document_id)
-        body = extract_text_from_prosemirror(document.content) if document else ""
+        body = extract_document_plain_text(document.content) if document else ""
         prefix = f"# {node.title}" if export_format == "markdown" else node.title
         sections.append(f"{prefix}\n\n{body}".strip())
 
@@ -277,7 +278,7 @@ async def export_workspace_node(
         sections.extend(_collect_export_sections(all_nodes, documents, node.id, export_format, depth=1))
     else:
         document = documents.get(node.document_id)
-        body = extract_text_from_prosemirror(document.content) if document else ""
+        body = extract_document_plain_text(document.content) if document else ""
         prefix = _format_export_heading(node.title, export_format, 0)
         sections = [f"{prefix}\n\n{body}".strip()]
 
