@@ -10,7 +10,18 @@ describe("agent panel message styling", () => {
     expect(css).not.toMatch(
       /\.agent-panel-messages\s+\.ant-bubble:not\(:has\(\.agent-tool-call-card\)\)\s+\.ant-bubble-content\s*\{[^}]*background:\s*transparent[^}]*padding:\s*0[^}]*\}/s,
     );
-    expect(css).toContain(".agent-panel-messages .ant-bubble:not(:has(.agent-tool-call-card)) .ant-bubble-content");
+    expect(css).toContain(
+      ".agent-panel-messages .ant-bubble:not(:has(.agent-tool-call-card)):not(:has(.agent-thinking-indicator)) .ant-bubble-content",
+    );
     expect(css).toContain("box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08)");
+  });
+
+  it("keeps tool calls and thinking indicators in normal vertical flow", () => {
+    const css = readFileSync(resolve(__dirname, "../features/agent/agent-panel.css"), "utf8");
+
+    expect(css).not.toMatch(/\.agent-panel-messages\s+\.ant-bubble:has\(\.agent-tool-call-card\)\s+\+\s+\.ant-bubble:has\(\.agent-tool-call-card\)\s*\{[^}]*margin-top:\s*-/s);
+    expect(css).toContain(
+      ".agent-panel-messages .ant-bubble:not(:has(.agent-tool-call-card)):not(:has(.agent-thinking-indicator)) .ant-bubble-content",
+    );
   });
 });

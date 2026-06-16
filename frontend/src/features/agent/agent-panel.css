@@ -171,7 +171,15 @@
 }
 
 .agent-panel-messages .ant-bubble-list {
+  align-items: stretch;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
+}
+
+.agent-panel-messages .ant-bubble {
+  flex-shrink: 0;
+  overflow: visible;
 }
 
 .agent-panel-messages .ant-bubble:has(.agent-tool-call-card) {
@@ -197,10 +205,6 @@
   padding: 0;
 }
 
-.agent-panel-messages .ant-bubble:has(.agent-tool-call-card) + .ant-bubble:has(.agent-tool-call-card) {
-  margin-top: -6px;
-}
-
 .agent-panel-messages .ant-bubble-content {
   font-size: 13px;
   line-height: 1.65;
@@ -208,7 +212,7 @@
   word-break: break-word;
 }
 
-.agent-panel-messages .ant-bubble:not(:has(.agent-tool-call-card)) .ant-bubble-content {
+.agent-panel-messages .ant-bubble:not(:has(.agent-tool-call-card)):not(:has(.agent-thinking-indicator)) .ant-bubble-content {
   background: #fff;
   border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: 12px;
@@ -217,7 +221,7 @@
   padding: 8px 10px;
 }
 
-.agent-panel-messages .ant-bubble:not(:has(.agent-tool-call-card)) {
+.agent-panel-messages .ant-bubble:not(:has(.agent-tool-call-card)):not(:has(.agent-thinking-indicator)) {
   max-width: 86%;
 }
 
