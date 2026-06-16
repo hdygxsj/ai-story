@@ -94,7 +94,7 @@ async def send_agent_message(
         conversation=conversation,
         message=payload.message,
     )
-    await append_message(
+    user_message = await append_message(
         session,
         conversation=conversation,
         role="user",
@@ -109,6 +109,7 @@ async def send_agent_message(
         selected_text=payload.selected_text,
         user_message=payload.message,
         model_profile=model_profile,
+        message_id=user_message.id,
     )
     system_pack = ContextPack(
         items=[item for item in assembled.pack.items if item.source != "conversation_history"],

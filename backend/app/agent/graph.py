@@ -30,6 +30,10 @@ _MATERIAL_GUIDANCE = (
     "不要要求用户手动删除。修改或删除前先 list 获取 id。"
 )
 _DESTRUCTIVE_WRITE_GUIDANCE = "propose_document_update 等需用户确认；write_document_content 等原子写入会立即生效。"
+_SEARCH_GUIDANCE = (
+    "当用户要求按精确关键词、原文短语、章节标题或正文片段查找内容时，"
+    "调用 search_documents_by_keyword；需要语义相近资料时再使用 search_rag。"
+)
 _CURRENT_REQUEST_GUIDANCE = (
     "始终优先处理用户当前消息，不要被历史对话中的旧任务、旧规划或待办带偏。"
     "根据当前需求自主规划并组合原子工具；不要套用固定业务流程。"
@@ -55,6 +59,7 @@ def _default_system_prompt(state: AgentState) -> str:
         _MEMORY_GUIDANCE,
         _MATERIAL_GUIDANCE,
         _DESTRUCTIVE_WRITE_GUIDANCE,
+        _SEARCH_GUIDANCE,
         _CURRENT_REQUEST_GUIDANCE,
     ]
     if novel_id is not None:
@@ -80,6 +85,7 @@ def _build_agent_system_prompt(pack: ContextPack) -> str:
         _MEMORY_GUIDANCE,
         _MATERIAL_GUIDANCE,
         _DESTRUCTIVE_WRITE_GUIDANCE,
+        _SEARCH_GUIDANCE,
         _CURRENT_REQUEST_GUIDANCE,
     ]
     for item in pack.items:

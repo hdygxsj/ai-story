@@ -52,6 +52,7 @@ import { ollamaDefaults } from "../../config/ollama";
 import type { WorkspaceNode } from "../../api/workspace";
 import {
   createWorkspaceNode,
+  emptyWorkspaceTrash,
   exportWorkspaceNode,
   listWorkspaceNodes,
   reorderWorkspaceNodes,
@@ -1127,6 +1128,23 @@ export function WorkspacePage({
     }
   }
 
+  async function handleEmptyWorkspaceTrash() {
+    const deletedDocumentIds = new Set(
+      nodes
+        .filter((node) => node.status === "trashed")
+        .flatMap((node) => collectNodeAndDescendants(node.id))
+        .map((node) => node.document_id)
+        .filter((documentId): documentId is string => Boolean(documentId)),
+    );
+    const result = await emptyWorkspaceTrash(token, novelId);
+    const refreshedNodes = await listWorkspaceNodes(token, novelId);
+    setNodes(refreshedNodes);
+    if (documentId && deletedDocumentIds.has(documentId)) {
+      selectDocument(refreshedNodes.find((node) => node.status !== "trashed" && node.document_id)?.document_id ?? null);
+    }
+    message.success(result.deleted_count > 0 ? `已清空 ${result.deleted_count} 个回收站项目` : "回收站已经是空的");
+  }
+
   async function handleUndoWorkspaceDiff() {
     if (!workspaceDiff) {
       return;
@@ -1287,6 +1305,7 @@ export function WorkspacePage({
       onCollapse={() => setTreeCollapsed(true)}
       onCreateChapter={(parentId) => void handleCreateWorkspaceNode("chapter", parentId ?? null)}
       onCreateFolder={(parentId) => void handleCreateWorkspaceNode("folder", parentId ?? null)}
+      onEmptyTrash={() => void handleEmptyWorkspaceTrash()}
       onMoveNode={(nodeId, parentId, position) =>
         void handleUpdateWorkspaceNode(nodeId, { parent_id: parentId, position })
       }

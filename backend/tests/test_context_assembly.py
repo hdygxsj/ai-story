@@ -335,3 +335,59 @@ async def test_conversation_history_restores_stored_reasoning_content(session) -
     ]
     assert assistant_history
     assert assistant_history[-1].additional_kwargs["reasoning_content"] == "上一轮思考"
+
+
+async def test_conversation_history_excludes_current_message_by_id_not_sort_position(session) -> None:
+    from datetime import UTC, datetime
+    from uuid import UUID
+
+    user = User(email="history-order@example.com", username="history-order", password_hash="hash")
+    session.add(user)
+    await session.flush()
+    novel = Novel(owner_id=user.id, title="History Order")
+    session.add(novel)
+    await session.flush()
+    conversation = Conversation(novel_id=novel.id, user_id=user.id, title="History Order")
+    session.add(conversation)
+    await session.flush()
+
+    same_time = datetime(2026, 6, 16, tzinfo=UTC)
+    previous_user = Message(
+        id=UUID("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+        conversation_id=conversation.id,
+        role="user",
+        content="之前要求：第38章按新设定修改",
+        created_at=same_time,
+    )
+    previous_assistant = Message(
+        id=UUID("11111111-1111-1111-1111-111111111111"),
+        conversation_id=conversation.id,
+        role="assistant",
+        content="已经按第38章处理。",
+        created_at=same_time,
+    )
+    current_user = Message(
+        id=UUID("00000000-0000-0000-0000-000000000000"),
+        conversation_id=conversation.id,
+        role="user",
+        content="第40章和第49章也同步修改",
+        created_at=same_time,
+    )
+    session.add_all([previous_user, previous_assistant, current_user])
+    await session.commit()
+
+    assembled = await assemble_context(
+        session,
+        novel=novel,
+        conversation_id=conversation.id,
+        document_id=None,
+        selected_text=None,
+        user_message=current_user.content,
+        model_profile=None,
+        message_id=current_user.id,
+    )
+
+    history_contents = [message.content for message in assembled.history_messages]
+    assert "之前要求：第38章按新设定修改" in history_contents
+    assert "已经按第38章处理。" in history_contents
+    assert "第40章和第49章也同步修改" not in history_contents

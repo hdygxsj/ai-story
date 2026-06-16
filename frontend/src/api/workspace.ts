@@ -58,6 +58,13 @@ export function reorderWorkspaceNodes(token: string, novelId: string, items: Wor
   });
 }
 
+export function emptyWorkspaceTrash(token: string, novelId: string) {
+  return apiRequest<{ deleted_count: number }>(`/novels/${novelId}/nodes/trash`, {
+    method: "DELETE",
+    token,
+  });
+}
+
 export async function exportWorkspaceNode(
   token: string,
   novelId: string,

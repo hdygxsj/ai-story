@@ -208,6 +208,61 @@ def test_bulk_reorder_workspace_nodes_moves_root_item_to_top_and_into_folder() -
     assert by_id[first["id"]]["status"] == "trashed"
 
 
+def test_empty_workspace_trash_permanently_deletes_trashed_nodes_and_documents() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client, email="empty-trash@example.com", username="emptytrash")
+
+    novel = client.post("/novels", headers=headers, json={"title": "Trash Book"}).json()
+    kept = client.post(
+        f"/novels/{novel['id']}/nodes",
+        headers=headers,
+        json={"title": "保留章节", "node_type": "chapter", "parent_id": None},
+    ).json()
+    folder = client.post(
+        f"/novels/{novel['id']}/nodes",
+        headers=headers,
+        json={"title": "已删文件夹", "node_type": "folder", "parent_id": None},
+    ).json()
+    child = client.post(
+        f"/novels/{novel['id']}/nodes",
+        headers=headers,
+        json={"title": "文件夹里的章节", "node_type": "chapter", "parent_id": folder["id"]},
+    ).json()
+    trashed_chapter = client.post(
+        f"/novels/{novel['id']}/nodes",
+        headers=headers,
+        json={"title": "已删章节", "node_type": "chapter", "parent_id": None},
+    ).json()
+    client.patch(
+        f"/documents/{trashed_chapter['document_id']}",
+        headers=headers,
+        json={"content": {"type": "doc", "content": [{"type": "paragraph", "text": "will go"}]}},
+    )
+
+    move_to_trash = client.patch(
+        f"/novels/{novel['id']}/nodes/reorder",
+        headers=headers,
+        json={
+            "items": [
+                {"id": folder["id"], "parent_id": None, "position": 1, "status": "trashed"},
+                {"id": trashed_chapter["id"], "parent_id": None, "position": 2, "status": "trashed"},
+            ]
+        },
+    )
+    assert move_to_trash.status_code == 200
+
+    response = client.delete(f"/novels/{novel['id']}/nodes/trash", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted_count": 3}
+    nodes = client.get(f"/novels/{novel['id']}/nodes", headers=headers).json()
+    assert [node["id"] for node in nodes] == [kept["id"]]
+    assert client.get(f"/documents/{kept['document_id']}", headers=headers).status_code == 200
+    assert client.get(f"/documents/{trashed_chapter['document_id']}", headers=headers).status_code == 404
+    assert client.get(f"/documents/{child['document_id']}", headers=headers).status_code == 404
+    assert client.get(f"/documents/{trashed_chapter['document_id']}/versions", headers=headers).status_code == 404
+
+
 def test_bulk_reorder_normalizes_omitted_siblings_after_move() -> None:
     client = TestClient(app)
     headers = auth_headers(client, email="normalize@example.com", username="normalizeuser")

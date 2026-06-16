@@ -341,4 +341,33 @@ describe("WorkspaceTree UI", () => {
     expect(recycleBin).toHaveStyle({ flex: "0 1 auto", maxHeight: "40%", overflow: "auto" });
     expect(recycleBin.parentElement).toHaveStyle({ display: "flex", flexDirection: "column", overflow: "hidden" });
   });
+
+  it("confirms before emptying the recycle bin", async () => {
+    const user = userEvent.setup();
+    const onEmptyTrash = vi.fn();
+    render(
+      <WorkspaceTree
+        nodes={[
+          ...nodes,
+          {
+            id: "trashed-empty",
+            novel_id: "novel-1",
+            parent_id: null,
+            document_id: null,
+            title: "待清空",
+            node_type: "folder",
+            status: "trashed",
+            position: 0,
+          },
+        ]}
+        onEmptyTrash={onEmptyTrash}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "清空回收站" }));
+    expect(onEmptyTrash).not.toHaveBeenCalled();
+
+    await user.click(await screen.findByRole("button", { name: "彻底清空" }));
+    expect(onEmptyTrash).toHaveBeenCalledTimes(1);
+  });
 });

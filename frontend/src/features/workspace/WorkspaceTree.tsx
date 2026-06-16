@@ -1,4 +1,4 @@
-import { CaretRightOutlined, FileTextOutlined, FolderOutlined, LeftOutlined, PlusOutlined, ReloadOutlined, UndoOutlined } from "@ant-design/icons";
+import { CaretRightOutlined, DeleteOutlined, FileTextOutlined, FolderOutlined, LeftOutlined, PlusOutlined, ReloadOutlined, UndoOutlined } from "@ant-design/icons";
 import { Button, Dropdown, Input, Modal, Space, Tag, Tree, Typography } from "antd";
 import type { MenuProps } from "antd";
 import type { Key } from "react";
@@ -14,6 +14,7 @@ type WorkspaceTreeProps = {
   onReorderNodes?: (changes: WorkspaceNodePositionChange[]) => void;
   onRenameNode?: (nodeId: string, title: string) => void;
   onExportNode?: (nodeId: string, title: string) => void;
+  onEmptyTrash?: () => void;
   onRestoreNode?: (nodeId: string) => void;
   onSelectDocument?: (documentId: string) => void;
   onTrashNode?: (nodeId: string) => void;
@@ -288,6 +289,7 @@ const WorkspaceTreeView = memo(function WorkspaceTreeView({
   onMoveNode,
   onReorderNodes,
   onExportNode,
+  onEmptyTrash,
   onRenameNode,
   onRestoreNode,
   onSelectDocument,
@@ -626,6 +628,17 @@ const WorkspaceTreeView = memo(function WorkspaceTreeView({
     setRenamingNode(null);
   }
 
+  function confirmEmptyTrash() {
+    Modal.confirm({
+      title: "彻底清空回收站？",
+      content: "清空后，回收站内的章节、文件夹和正文版本将无法恢复。",
+      okText: "彻底清空",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: onEmptyTrash,
+    });
+  }
+
   return (
     <>
       <Dropdown menu={createContextMenu(null)} trigger={["contextMenu"]}>
@@ -748,33 +761,54 @@ const WorkspaceTreeView = memo(function WorkspaceTreeView({
                 paddingTop: 10,
               }}
             >
-              <button
-                aria-expanded={recycleBinExpanded}
-                aria-label={recycleBinExpanded ? "收起回收站" : "展开回收站"}
-                onClick={() => setRecycleBinExpanded((current) => !current)}
+              <div
                 style={{
                   alignItems: "center",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
                   display: "flex",
                   gap: 6,
-                  padding: 0,
+                  justifyContent: "space-between",
                   width: "100%",
                 }}
-                type="button"
               >
-                <CaretRightOutlined
+                <button
+                  aria-expanded={recycleBinExpanded}
+                  aria-label={recycleBinExpanded ? "收起回收站" : "展开回收站"}
+                  onClick={() => setRecycleBinExpanded((current) => !current)}
                   style={{
-                    color: "#64748b",
-                    fontSize: 12,
-                    transform: recycleBinExpanded ? "rotate(90deg)" : "rotate(0deg)",
-                    transition: "transform 0.2s ease",
+                    alignItems: "center",
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    display: "flex",
+                    flex: "1 1 auto",
+                    gap: 6,
+                    minWidth: 0,
+                    padding: 0,
                   }}
-                />
-                <Typography.Text strong>回收站</Typography.Text>
-                <Typography.Text type="secondary">({trashedNodes.length})</Typography.Text>
-              </button>
+                  type="button"
+                >
+                  <CaretRightOutlined
+                    style={{
+                      color: "#64748b",
+                      fontSize: 12,
+                      transform: recycleBinExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                      transition: "transform 0.2s ease",
+                    }}
+                  />
+                  <Typography.Text strong>回收站</Typography.Text>
+                  <Typography.Text type="secondary">({trashedNodes.length})</Typography.Text>
+                </button>
+                {onEmptyTrash ? (
+                  <Button
+                    aria-label="清空回收站"
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={confirmEmptyTrash}
+                    size="small"
+                    type="text"
+                  />
+                ) : null}
+              </div>
               {recycleBinExpanded ? (
                 <Space direction="vertical" size={4} style={{ marginTop: 8, width: "100%" }}>
                   {trashedNodes.map((node) => (

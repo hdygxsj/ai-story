@@ -267,17 +267,19 @@ async def _load_conversation_history(
     *,
     conversation_id: UUID,
     limit: int,
+    current_message_id: UUID | None = None,
 ) -> tuple[list[str], list[BaseMessage]]:
+    statement = select(Message).where(Message.conversation_id == conversation_id)
+    if current_message_id is not None:
+        statement = statement.where(Message.id != current_message_id)
+    statement = statement.order_by(Message.created_at.desc(), Message.id.desc()).limit(limit)
     messages = list(
         await session.scalars(
-            select(Message)
-            .where(Message.conversation_id == conversation_id)
-            .order_by(Message.created_at.desc(), Message.id.desc())
-            .limit(limit)
+            statement
         )
     )
     messages.reverse()
-    if messages and messages[-1].role == "user":
+    if current_message_id is None and messages and messages[-1].role == "user":
         messages = messages[:-1]
 
     history_lines: list[str] = []
@@ -366,6 +368,7 @@ async def assemble_context(
             session,
             conversation_id=conversation_id,
             limit=int(budget_settings.get("conversation_history_limit", 20)),
+            current_message_id=message_id,
         )
 
     pack = build_context_pack(

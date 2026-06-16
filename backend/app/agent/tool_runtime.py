@@ -27,13 +27,14 @@ from app.agent.tools import (
     ListTimelineEventsArgs,
     ListWorkspaceNodesArgs,
     OrganizeWorkspaceTreeArgs,
-    SaveKeyMemoryArgs,
     ProposeDocumentUpdateArgs,
     ProposeRewriteArgs,
     ProposeSelectionReplaceArgs,
     ProposeVersionRestoreArgs,
     ReadDocumentArgs,
     ReorderTimelineEventsArgs,
+    SaveKeyMemoryArgs,
+    SearchDocumentsByKeywordArgs,
     SearchMemoryArgs,
     SearchRagArgs,
     SplitChapterByMaxCharsArgs,
@@ -66,6 +67,7 @@ from app.services.document_actions import (
     get_owned_document,
     list_owned_document_versions,
 )
+from app.services.document_search import search_novel_documents
 from app.services.materials import (
     create_character_state,
     create_creative_asset,
@@ -108,23 +110,39 @@ def build_runtime_tools(
     model_profile: ModelProfile | None,
     owner_id: UUID | None = None,
     novel_id: UUID | None = None,
+    document_id: UUID | None = None,
 ) -> list[BaseTool]:
     def scoped_ids() -> tuple[UUID, UUID] | None:
         if owner_id is None or novel_id is None:
             return None
         return owner_id, novel_id
 
-    def current_novel_id(requested_novel_id: str) -> UUID:
-        return novel_id if novel_id is not None else UUID(requested_novel_id)
+    def current_novel_id(requested_novel_id: str | None = None) -> UUID:
+        if novel_id is not None:
+            return novel_id
+        if requested_novel_id is None:
+            raise ValueError("工具缺少当前小说 ID。")
+        return UUID(requested_novel_id)
+
+    def current_document_id(requested_document_id: str | None = None) -> UUID:
+        if requested_document_id:
+            return UUID(requested_document_id)
+        if document_id is None:
+            raise ValueError("工具缺少当前打开的章节 ID。")
+        return document_id
 
     @tool("search_memory", args_schema=SearchMemoryArgs)
-    async def search_memory_runtime(novel_id: str, query: str, limit: int = 8) -> dict[str, Any]:
+    async def search_memory_runtime(novel_id: str | None = None, query: str = "", limit: int = 8) -> dict[str, Any]:
         """Search approved novel memory items."""
-        results = await search_memory_items(session, novel_id=current_novel_id(novel_id), query=query, limit=limit)
+        try:
+            resolved_novel_id = current_novel_id(novel_id)
+        except ValueError as exc:
+            return {"status": "error", "message": str(exc)}
+        results = await search_memory_items(session, novel_id=resolved_novel_id, query=query, limit=limit)
         return {"status": "ok", "results": results}
 
     @tool("search_rag", args_schema=SearchRagArgs)
-    async def search_rag_runtime(novel_id: str, query: str, limit: int = 8) -> dict[str, Any]:
+    async def search_rag_runtime(novel_id: str | None = None, query: str = "", limit: int = 8) -> dict[str, Any]:
         """Search vector-indexed RAG chunks."""
         try:
             chunks = await search_rag_chunks(
@@ -142,19 +160,40 @@ def build_runtime_tools(
             results = []
         return {"status": "ok", "results": results}
 
+    @tool("search_documents_by_keyword", args_schema=SearchDocumentsByKeywordArgs)
+    async def search_documents_by_keyword_runtime(
+        novel_id: str | None = None, query: str = "", limit: int = 20
+    ) -> dict[str, Any]:
+        """Search chapter titles and bodies by exact keyword or phrase."""
+        try:
+            resolved_novel_id = current_novel_id(novel_id)
+        except ValueError as exc:
+            return {"status": "error", "message": str(exc)}
+        results = await search_novel_documents(
+            session,
+            novel_id=resolved_novel_id,
+            query=query,
+            limit=limit,
+        )
+        return {"status": "ok", "query": query, "results": results}
+
     @tool("read_document", args_schema=ReadDocumentArgs)
-    async def read_document_runtime(document_id: str) -> dict[str, Any]:
+    async def read_document_runtime(document_id: str | None = None) -> dict[str, Any]:
         """Read a document by id."""
+        try:
+            resolved_document_id = current_document_id(document_id)
+        except ValueError as exc:
+            return {"status": "error", "message": str(exc)}
         scope = scoped_ids()
         if scope is None:
-            document = await session.scalar(select(Document).where(Document.id == UUID(document_id)))
+            document = await session.scalar(select(Document).where(Document.id == resolved_document_id))
         else:
             try:
                 document = await get_owned_document(
                     session,
                     owner_id=scope[0],
                     novel_id=scope[1],
-                    document_id=UUID(document_id),
+                    document_id=resolved_document_id,
                 )
             except Exception:
                 document = None
@@ -162,22 +201,26 @@ def build_runtime_tools(
             return {"status": "error", "message": "文档不存在。"}
         return {
             "status": "ok",
-            "document_id": document_id,
+            "document_id": str(resolved_document_id),
             "content": extract_text_from_prosemirror(document.content),
         }
 
     @tool("propose_document_update", args_schema=ProposeDocumentUpdateArgs)
-    async def propose_document_update_runtime(document_id: str, content: str) -> dict[str, Any]:
+    async def propose_document_update_runtime(document_id: str | None = None, content: str = "") -> dict[str, Any]:
         """Propose a full chapter body replacement; user must confirm before it applies."""
         scope = scoped_ids()
         if scope is None:
             return {"status": "error", "message": "工具缺少当前用户或小说作用域。"}
         try:
+            resolved_document_id = current_document_id(document_id)
+        except ValueError as exc:
+            return {"status": "error", "message": str(exc)}
+        try:
             confirmation = await create_document_update_proposal(
                 session,
                 owner_id=scope[0],
                 novel_id=scope[1],
-                document_id=UUID(document_id),
+                document_id=resolved_document_id,
                 content=content,
             )
         except Exception as exc:
@@ -190,17 +233,21 @@ def build_runtime_tools(
         }
 
     @tool("write_document_content", args_schema=WriteDocumentContentArgs)
-    async def write_document_content_runtime(document_id: str, content: str) -> dict[str, Any]:
+    async def write_document_content_runtime(document_id: str | None = None, content: str = "") -> dict[str, Any]:
         """Atomically replace a chapter body and save immediately without confirmation."""
         scope = scoped_ids()
         if scope is None:
             return {"status": "error", "message": "工具缺少当前用户或小说作用域。"}
         try:
+            resolved_document_id = current_document_id(document_id)
+        except ValueError as exc:
+            return {"status": "error", "message": str(exc)}
+        try:
             result = await write_document_content(
                 session,
                 owner_id=scope[0],
                 novel_id=scope[1],
-                document_id=UUID(document_id),
+                document_id=resolved_document_id,
                 content=content,
             )
         except Exception as exc:
@@ -209,18 +256,22 @@ def build_runtime_tools(
 
     @tool("propose_selection_replace", args_schema=ProposeSelectionReplaceArgs)
     async def propose_selection_replace_runtime(
-        document_id: str, selected_text: str, replacement_text: str
+        document_id: str | None = None, selected_text: str = "", replacement_text: str = ""
     ) -> dict[str, Any]:
         """Propose replacing one unique text selection after user confirmation."""
         scope = scoped_ids()
         if scope is None:
             return {"status": "error", "message": "工具缺少当前用户或小说作用域。"}
         try:
+            resolved_document_id = current_document_id(document_id)
+        except ValueError as exc:
+            return {"status": "error", "message": str(exc)}
+        try:
             confirmation = await create_selection_replace_proposal(
                 session,
                 owner_id=scope[0],
                 novel_id=scope[1],
-                document_id=UUID(document_id),
+                document_id=resolved_document_id,
                 selected_text=selected_text,
                 replacement_text=replacement_text,
             )
@@ -234,17 +285,21 @@ def build_runtime_tools(
         }
 
     @tool("list_document_versions", args_schema=ListDocumentVersionsArgs)
-    async def list_document_versions_runtime(document_id: str) -> dict[str, Any]:
+    async def list_document_versions_runtime(document_id: str | None = None) -> dict[str, Any]:
         """List saved versions for a document in the current novel."""
         scope = scoped_ids()
         if scope is None:
             return {"status": "error", "message": "工具缺少当前用户或小说作用域。"}
         try:
+            resolved_document_id = current_document_id(document_id)
+        except ValueError as exc:
+            return {"status": "error", "message": str(exc)}
+        try:
             versions = await list_owned_document_versions(
                 session,
                 owner_id=scope[0],
                 novel_id=scope[1],
-                document_id=UUID(document_id),
+                document_id=resolved_document_id,
             )
         except Exception as exc:
             return {"status": "error", "message": getattr(exc, "detail", str(exc))}
@@ -262,17 +317,21 @@ def build_runtime_tools(
         }
 
     @tool("propose_version_restore", args_schema=ProposeVersionRestoreArgs)
-    async def propose_version_restore_runtime(document_id: str, version_id: str) -> dict[str, Any]:
+    async def propose_version_restore_runtime(document_id: str | None = None, version_id: str = "") -> dict[str, Any]:
         """Propose restoring a saved document version after user confirmation."""
         scope = scoped_ids()
         if scope is None:
             return {"status": "error", "message": "工具缺少当前用户或小说作用域。"}
         try:
+            resolved_document_id = current_document_id(document_id)
+        except ValueError as exc:
+            return {"status": "error", "message": str(exc)}
+        try:
             confirmation = await create_version_restore_proposal(
                 session,
                 owner_id=scope[0],
                 novel_id=scope[1],
-                document_id=UUID(document_id),
+                document_id=resolved_document_id,
                 version_id=UUID(version_id),
             )
         except Exception as exc:
@@ -929,15 +988,21 @@ def build_runtime_tools(
         }
 
     @tool("propose_rewrite", args_schema=ProposeRewriteArgs)
-    async def propose_rewrite_runtime(document_id: str, selected_text: str, instruction: str) -> dict[str, Any]:
+    async def propose_rewrite_runtime(
+        document_id: str | None = None, selected_text: str = "", instruction: str = ""
+    ) -> dict[str, Any]:
         """Draft a rewrite proposal without mutating the document."""
+        try:
+            resolved_document_id = current_document_id(document_id)
+        except ValueError as exc:
+            return {"status": "error", "message": str(exc)}
         scope = scoped_ids()
         if scope is not None:
             confirmation = await create_selection_replace_proposal(
                 session,
                 owner_id=scope[0],
                 novel_id=scope[1],
-                document_id=UUID(document_id),
+                document_id=resolved_document_id,
                 selected_text=selected_text,
                 replacement_text=draft_rewrite(selected_text, instruction),
                 action_type="rewrite_selection",
@@ -952,7 +1017,7 @@ def build_runtime_tools(
             "action_type": "rewrite_selection",
             "message": "我已草拟改写方案，请确认后再应用。",
             "payload": {
-                "document_id": document_id,
+                "document_id": str(resolved_document_id),
                 "selected_text": selected_text,
                 "replacement_text": draft_rewrite(selected_text, instruction),
             },
@@ -961,6 +1026,7 @@ def build_runtime_tools(
     runtime_by_name = {
         "search_memory": search_memory_runtime,
         "search_rag": search_rag_runtime,
+        "search_documents_by_keyword": search_documents_by_keyword_runtime,
         "read_document": read_document_runtime,
         "update_novel": update_novel_runtime,
         "list_workspace_nodes": list_workspace_nodes_runtime,

@@ -5,12 +5,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db.session import get_session
-from app.models import Document, DocumentVersion, ModelProfile, Novel, PendingConfirmation, User, WorkspaceNode
+from app.models import Document, DocumentVersion, ModelProfile, Novel, PendingConfirmation, RagChunk, User, WorkspaceNode
 from app.schemas.document import DocumentResponse, DocumentUpdate, DocumentVersionResponse
 from app.schemas.novel import NovelCreate, NovelImport, NovelResponse, NovelUpdate
 from app.schemas.workspace import (
@@ -396,6 +396,65 @@ def _normalize_workspace_positions(
             node.position = position
 
 
+def _collect_nodes_for_permanent_delete(nodes: list[WorkspaceNode]) -> list[WorkspaceNode]:
+    nodes_by_parent: dict[UUID | None, list[WorkspaceNode]] = {}
+    for node in nodes:
+        nodes_by_parent.setdefault(node.parent_id, []).append(node)
+
+    selected: dict[UUID, WorkspaceNode] = {}
+    stack = [node for node in nodes if node.status == "trashed"]
+    while stack:
+        node = stack.pop()
+        if node.id in selected:
+            continue
+        selected[node.id] = node
+        stack.extend(nodes_by_parent.get(node.id, []))
+    return list(selected.values())
+
+
+@router.delete("/novels/{novel_id}/nodes/trash")
+async def empty_workspace_trash(
+    novel_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, int]:
+    novel = await get_owned_novel(session, current_user, novel_id)
+    nodes = list(await session.scalars(select(WorkspaceNode).where(WorkspaceNode.novel_id == novel.id)))
+    nodes_to_delete = _collect_nodes_for_permanent_delete(nodes)
+    if not nodes_to_delete:
+        return {"deleted_count": 0}
+
+    node_ids = [node.id for node in nodes_to_delete]
+    document_ids = [node.document_id for node in nodes_to_delete if node.document_id is not None]
+    document_id_strings = {str(document_id) for document_id in document_ids}
+
+    pending_confirmations = list(
+        await session.scalars(
+            select(PendingConfirmation).where(
+                PendingConfirmation.novel_id == novel.id,
+                PendingConfirmation.status == "pending",
+            )
+        )
+    )
+    for confirmation in pending_confirmations:
+        if confirmation.payload.get("document_id") in document_id_strings:
+            await session.delete(confirmation)
+
+    if document_ids:
+        await session.execute(
+            delete(RagChunk).where(
+                RagChunk.novel_id == novel.id,
+                RagChunk.source_type == "document",
+                RagChunk.source_id.in_(document_id_strings),
+            )
+        )
+        await session.execute(delete(DocumentVersion).where(DocumentVersion.document_id.in_(document_ids)))
+        await session.execute(delete(Document).where(Document.id.in_(document_ids)))
+    await session.execute(delete(WorkspaceNode).where(WorkspaceNode.id.in_(node_ids)))
+    await session.commit()
+    return {"deleted_count": len(nodes_to_delete)}
+
+
 @router.patch("/novels/{novel_id}/nodes/reorder", response_model=list[WorkspaceNodeResponse])
 async def reorder_nodes(
     novel_id: UUID,
@@ -521,7 +580,7 @@ async def get_document(
     document = await session.scalar(select(Document).where(Document.id == document_id))
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
-    novel = await get_owned_novel(session, current_user, document.novel_id)
+    await get_owned_novel(session, current_user, document.novel_id)
     return document
 
 

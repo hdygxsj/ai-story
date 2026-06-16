@@ -33,6 +33,7 @@ async def invoke_agent_graph(
         model_profile=model_profile,
         owner_id=owner_id,
         novel_id=novel_id,
+        document_id=state.get("document_id"),
     )
     graph = build_agent_graph(
         tools=tools,
@@ -58,6 +59,7 @@ async def stream_agent_graph(
         model_profile=model_profile,
         owner_id=owner_id,
         novel_id=novel_id,
+        document_id=state.get("document_id"),
     )
     graph = build_agent_graph(tools=tools, checkpointer=checkpointer, model_profile=model_profile)
     invoke_state = {key: value for key, value in state.items() if key != "model_profile"}

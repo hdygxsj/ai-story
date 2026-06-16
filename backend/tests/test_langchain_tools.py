@@ -28,6 +28,7 @@ def _empty_context_pack() -> ContextPack:
 def test_default_agent_prompt_allows_selective_automatic_memory() -> None:
     prompt = _build_agent_system_prompt(_empty_context_pack())
     assert "save_key_memory" in prompt
+    assert "search_documents_by_keyword" in prompt
     assert "calculate" in prompt
     assert "精确计算" in prompt
     assert "write_document_content" in prompt
@@ -48,6 +49,7 @@ def test_agent_tool_registry_exposes_structured_langchain_tools() -> None:
         "read_document",
         "search_memory",
         "search_rag",
+        "search_documents_by_keyword",
         "calculate",
         "propose_rewrite",
         "save_key_memory",
@@ -84,6 +86,62 @@ def test_agent_tool_registry_exposes_structured_langchain_tools() -> None:
     }.issubset(tool_names)
 
 
+async def test_keyword_document_search_tool_searches_current_novel(session) -> None:
+    user = User(email="keyword-agent@example.com", username="keyword-agent", password_hash="hash")
+    session.add(user)
+    await session.flush()
+    novel = Novel(owner_id=user.id, title="Keyword Novel")
+    other_novel = Novel(owner_id=user.id, title="Other Keyword Novel")
+    session.add_all([novel, other_novel])
+    await session.flush()
+    document = Document(
+        novel_id=novel.id,
+        content={
+            "type": "doc",
+            "content": [
+                {"type": "paragraph", "content": [{"type": "text", "text": "灯塔钥匙藏在雾港码头下。"}]}
+            ],
+        },
+    )
+    other_document = Document(
+        novel_id=other_novel.id,
+        content={
+            "type": "doc",
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": "灯塔钥匙不该出现在这里。"}]}],
+        },
+    )
+    session.add_all([document, other_document])
+    await session.flush()
+    node = WorkspaceNode(novel_id=novel.id, title="第一章 雾港", node_type="chapter", document_id=document.id)
+    other_node = WorkspaceNode(
+        novel_id=other_novel.id,
+        title="其他章节",
+        node_type="chapter",
+        document_id=other_document.id,
+    )
+    session.add_all([node, other_node])
+    await session.commit()
+
+    tools = {
+        tool.name: tool
+        for tool in build_runtime_tools(
+            session,
+            model_profile=None,
+            owner_id=user.id,
+            novel_id=novel.id,
+        )
+    }
+
+    result = await tools["search_documents_by_keyword"].ainvoke({"query": "灯塔钥匙"})
+
+    assert result["status"] == "ok"
+    assert result["query"] == "灯塔钥匙"
+    assert len(result["results"]) == 1
+    assert result["results"][0]["document_id"] == str(document.id)
+    assert result["results"][0]["node_title"] == "第一章 雾港"
+    assert "灯塔钥匙" in result["results"][0]["snippet"]
+
+
 def test_calculate_tool_evaluates_decimal_math_and_percentages() -> None:
     tools = {tool.name: tool for tool in get_agent_tools()}
 
@@ -93,6 +151,18 @@ def test_calculate_tool_evaluates_decimal_math_and_percentages() -> None:
         "status": "ok",
         "expression": "(19.9 * 3 + 40) * 15%",
         "result": "14.955",
+    }
+
+
+def test_calculate_tool_evaluates_day_label_differences() -> None:
+    tools = {tool.name: tool for tool in get_agent_tools()}
+
+    result = tools["calculate"].invoke({"expression": "Day66 - Day53"})
+
+    assert result == {
+        "status": "ok",
+        "expression": "Day66 - Day53",
+        "result": "13",
     }
 
 

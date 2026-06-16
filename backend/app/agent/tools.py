@@ -13,19 +13,25 @@ MATH_CALCULATION_GUIDANCE = (
 
 
 class ReadDocumentArgs(BaseModel):
-    document_id: str = Field(description="Document UUID to read")
+    document_id: str | None = Field(default=None, description="Document UUID to read; defaults to current document")
 
 
 class SearchMemoryArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID to search inside")
+    novel_id: str | None = Field(default=None, description="Novel UUID to search inside; defaults to current novel")
     query: str = Field(description="Natural language memory query")
     limit: int = Field(default=8, ge=1, le=20)
 
 
 class SearchRagArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID to retrieve from")
+    novel_id: str | None = Field(default=None, description="Novel UUID to retrieve from; defaults to current novel")
     query: str = Field(description="RAG semantic query")
     limit: int = Field(default=8, ge=1, le=20)
+
+
+class SearchDocumentsByKeywordArgs(BaseModel):
+    novel_id: str | None = Field(default=None, description="Novel UUID to search inside; defaults to current novel")
+    query: str = Field(min_length=1, description="Exact keyword or phrase to find in chapter titles and bodies")
+    limit: int = Field(default=20, ge=1, le=50)
 
 
 class CalculateArgs(BaseModel):
@@ -37,57 +43,65 @@ class CalculateArgs(BaseModel):
 
 
 class UpdateNovelArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
     title: str | None = Field(default=None, description="New novel title")
     description: str | None = Field(default=None, description="New novel description")
 
 
 class ListWorkspaceNodesArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
 
 
 class CreateWorkspaceNodeArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
     title: str = Field(description="Node title")
     node_type: str = Field(description="folder, chapter, note, or draft")
     parent_id: str | None = Field(default=None, description="Parent folder UUID")
 
 
 class CreateChapterWithContentArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
     title: str = Field(description="Chapter title")
     content: str = Field(description="Complete non-empty chapter body as plain txt prose (no Markdown)")
     parent_id: str | None = Field(default=None, description="Optional parent folder UUID")
 
 
 class ProposeDocumentUpdateArgs(BaseModel):
-    document_id: str = Field(description="Document UUID in the current novel")
+    document_id: str | None = Field(
+        default=None, description="Document UUID in the current novel; defaults to current document"
+    )
     content: str = Field(description="Complete replacement chapter body as plain txt prose (no Markdown)")
 
 
 class WriteDocumentContentArgs(BaseModel):
-    document_id: str = Field(description="Document UUID to update")
+    document_id: str | None = Field(default=None, description="Document UUID to update; defaults to current document")
     content: str = Field(description="Complete chapter body as plain txt prose to save immediately (no Markdown)")
 
 
 class SplitChapterByMaxCharsArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
     node_id: str = Field(description="Chapter node UUID to split")
     max_chars: int = Field(default=3000, ge=500, le=10000, description="Maximum characters per part")
 
 
 class ProposeSelectionReplaceArgs(BaseModel):
-    document_id: str = Field(description="Document UUID in the current novel")
+    document_id: str | None = Field(
+        default=None, description="Document UUID in the current novel; defaults to current document"
+    )
     selected_text: str = Field(description="Existing uniquely matching text")
     replacement_text: str = Field(description="Replacement plain txt prose (no Markdown)")
 
 
 class ListDocumentVersionsArgs(BaseModel):
-    document_id: str = Field(description="Document UUID in the current novel")
+    document_id: str | None = Field(
+        default=None, description="Document UUID in the current novel; defaults to current document"
+    )
 
 
 class ProposeVersionRestoreArgs(BaseModel):
-    document_id: str = Field(description="Document UUID in the current novel")
+    document_id: str | None = Field(
+        default=None, description="Document UUID in the current novel; defaults to current document"
+    )
     version_id: str = Field(description="Version UUID belonging to the document")
 
 
@@ -96,7 +110,7 @@ class RestoreWorkspaceNodeArgs(BaseModel):
 
 
 class UpdateWorkspaceNodeArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
     node_id: str = Field(description="Workspace node UUID")
     title: str | None = Field(default=None, description="New title")
     parent_id: str | None = Field(default=None, description="New parent folder UUID")
@@ -104,74 +118,74 @@ class UpdateWorkspaceNodeArgs(BaseModel):
 
 
 class TrashWorkspaceNodeArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
     node_id: str = Field(description="Workspace node UUID to trash")
 
 
 class OrganizeWorkspaceTreeArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
     instruction: str = Field(default="", description="Optional natural language instruction")
 
 
 class CleanupWorkspaceFoldersArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
     instruction: str = Field(default="", description="Optional natural language instruction")
 
 
 class ListMemoryItemsArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
 
 
 class ListMemoryReviewItemsArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
 
 
 class ProposeRewriteArgs(BaseModel):
-    document_id: str = Field(description="Target document UUID")
+    document_id: str | None = Field(default=None, description="Target document UUID; defaults to current document")
     selected_text: str = Field(description="User-selected text to rewrite")
     instruction: str = Field(description="Rewrite instruction")
 
 
 class SaveKeyMemoryArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
     title: str = Field(description="Short memory title")
     body: str = Field(description="Memory body")
     importance: int = Field(default=80, ge=1, le=100)
 
 
 class ListCreativeAssetsArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
 
 
 class CreateCharacterAssetArgs(BaseModel):
-    novel_id: str
+    novel_id: str | None = None
     name: str
     summary: str
 
 
 class CreateWorldRuleArgs(BaseModel):
-    novel_id: str
+    novel_id: str | None = None
     title: str
     rule: str
 
 
 class ListTimelineEventsArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
 
 
 class CreateTimelineEventArgs(BaseModel):
-    novel_id: str
+    novel_id: str | None = None
     title: str = Field(description="Arc or milestone title, e.g. 第二卷：世界大变")
     event_time: str = Field(description="When it happens, e.g. 第一卷结束后. Same title+event_time upserts.")
     summary: str
 
 
 class ListCharacterStatesArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
 
 
 class UpdateCharacterStateArgs(BaseModel):
-    novel_id: str
+    novel_id: str | None = None
     character_name: str
     state: str
     state_id: str | None = Field(default=None, description="Existing character state UUID to update")
@@ -182,7 +196,7 @@ class UpdateCharacterStateArgs(BaseModel):
 
 
 class CreateRelationshipEdgeArgs(BaseModel):
-    novel_id: str
+    novel_id: str | None = None
     source_character: str
     target_character: str
     relationship_type: str
@@ -190,7 +204,7 @@ class CreateRelationshipEdgeArgs(BaseModel):
 
 
 class UpdateCreativeAssetArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
     asset_id: str = Field(description="Creative asset UUID")
     asset_type: str | None = Field(default=None, description="Asset type such as character or world_rule")
     name: str | None = Field(default=None, description="Updated asset name")
@@ -198,12 +212,12 @@ class UpdateCreativeAssetArgs(BaseModel):
 
 
 class DeleteCreativeAssetArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
     asset_id: str = Field(description="Creative asset UUID")
 
 
 class DeleteCreativeAssetsArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
     asset_ids: list[str] = Field(
         min_length=1,
         max_length=50,
@@ -212,7 +226,7 @@ class DeleteCreativeAssetsArgs(BaseModel):
 
 
 class UpdateTimelineEventArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
     event_id: str = Field(description="Timeline event UUID")
     title: str | None = Field(default=None, description="Updated event title")
     event_time: str | None = Field(default=None, description="Updated event time label")
@@ -221,7 +235,7 @@ class UpdateTimelineEventArgs(BaseModel):
 
 
 class ReorderTimelineEventsArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
     event_ids: list[str] = Field(
         min_length=1,
         description="Timeline event UUIDs in desired display order. Unlisted events are appended automatically.",
@@ -229,17 +243,17 @@ class ReorderTimelineEventsArgs(BaseModel):
 
 
 class DeleteTimelineEventArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
     event_id: str = Field(description="Timeline event UUID")
 
 
 class DeleteCharacterStateArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
     state_id: str = Field(description="Character state UUID")
 
 
 class UpdateRelationshipEdgeArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
     edge_id: str = Field(description="Relationship edge UUID")
     source_character: str | None = Field(default=None, description="Updated source character")
     target_character: str | None = Field(default=None, description="Updated target character")
@@ -248,12 +262,12 @@ class UpdateRelationshipEdgeArgs(BaseModel):
 
 
 class DeleteRelationshipEdgeArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
     edge_id: str = Field(description="Relationship edge UUID")
 
 
 class ListMaterialChangesArgs(BaseModel):
-    novel_id: str = Field(description="Novel UUID")
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
     material_type: str | None = Field(default=None, description="Optional material type filter")
     material_id: str | None = Field(default=None, description="Optional material UUID filter")
     limit: int = Field(default=20, ge=1, le=100)
@@ -264,10 +278,17 @@ def draft_rewrite(selected_text: str, instruction: str) -> str:
 
 
 _PERCENT_PATTERN = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s*%")
+_DAY_LABEL_PATTERN = re.compile(r"(?<![\w.])(?:days?|d)\s*(\d+(?:\.\d+)?)\b", re.IGNORECASE)
+_CHINESE_NUMBER_LABEL_PATTERN = re.compile(r"第\s*(\d+(?:\.\d+)?)\s*(?:章|天|日|周|年|级|星|阶|层)")
+_NUMBER_UNIT_PATTERN = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s*(?:章|天|日|周|年|级|星|阶|层)")
 
 
 def _normalize_calculation_expression(expression: str) -> str:
-    return _PERCENT_PATTERN.sub(r"(\1/100)", expression)
+    normalized = expression.strip()
+    normalized = _DAY_LABEL_PATTERN.sub(r"\1", normalized)
+    normalized = _CHINESE_NUMBER_LABEL_PATTERN.sub(r"\1", normalized)
+    normalized = _NUMBER_UNIT_PATTERN.sub(r"\1", normalized)
+    return _PERCENT_PATTERN.sub(r"(\1/100)", normalized)
 
 
 def _format_decimal_result(value: Decimal) -> str:
@@ -335,6 +356,12 @@ def search_memory(novel_id: str, query: str, limit: int = 8) -> dict[str, Any]:
 @tool("search_rag", args_schema=SearchRagArgs)
 def search_rag(novel_id: str, query: str, limit: int = 8) -> dict[str, Any]:
     """Search vector-indexed RAG chunks."""
+    return {"novel_id": novel_id, "query": query, "limit": limit, "results": []}
+
+
+@tool("search_documents_by_keyword", args_schema=SearchDocumentsByKeywordArgs)
+def search_documents_by_keyword(novel_id: str | None = None, query: str = "", limit: int = 20) -> dict[str, Any]:
+    """Search chapter titles and bodies by exact keyword or phrase."""
     return {"novel_id": novel_id, "query": query, "limit": limit, "results": []}
 
 
@@ -657,6 +684,7 @@ def get_agent_tools() -> list[BaseTool]:
         read_document,
         search_memory,
         search_rag,
+        search_documents_by_keyword,
         calculate,
         update_novel_tool,
         list_workspace_nodes_tool,
