@@ -72,10 +72,24 @@ const DocumentEditorView = memo(function DocumentEditorView({
   const onChangeRef = useRef(onChange);
   const onSaveRef = useRef(onSave);
   const onSelectTextRef = useRef(onSelectText);
+  const pendingScrollResetDocumentIdRef = useRef<string | null>(documentId);
+  const previousDocumentIdRef = useRef<string | null>(documentId);
   const [activeConfirmationIndex, setActiveConfirmationIndex] = useState(0);
   const [chapterTitleValue, setChapterTitleValue] = useState(chapterTitle ?? "");
   const [pendingSelection, setPendingSelection] = useState("");
   const [selectionToolbarPosition, setSelectionToolbarPosition] = useState<{ left: number; top: number } | null>(null);
+
+  function resetEditorScroll() {
+    const scrollContainer = editorShellRef.current?.closest(".ant-card-body") as HTMLElement | null;
+    if (!scrollContainer) {
+      return;
+    }
+    scrollContainer.scrollTop = 0;
+    scrollContainer.scrollLeft = 0;
+    if (typeof scrollContainer.scrollTo === "function") {
+      scrollContainer.scrollTo({ left: 0, top: 0, behavior: "auto" });
+    }
+  }
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -135,15 +149,9 @@ const DocumentEditorView = memo(function DocumentEditorView({
   }, [chapterTitle]);
 
   useEffect(() => {
-    const scrollContainer = editorShellRef.current?.closest(".ant-card-body") as HTMLElement | null;
-    if (!scrollContainer) {
-      return;
-    }
-    if (typeof scrollContainer.scrollTo === "function") {
-      scrollContainer.scrollTo({ left: 0, top: 0, behavior: "auto" });
-    } else {
-      scrollContainer.scrollTop = 0;
-      scrollContainer.scrollLeft = 0;
+    if (previousDocumentIdRef.current !== documentId) {
+      previousDocumentIdRef.current = documentId;
+      pendingScrollResetDocumentIdRef.current = documentId;
     }
   }, [documentId]);
 
@@ -162,6 +170,18 @@ const DocumentEditorView = memo(function DocumentEditorView({
       applyingExternalContent.current = false;
     });
   }, [content, editor, loading]);
+
+  useEffect(() => {
+    if (loading || pendingScrollResetDocumentIdRef.current !== documentId) {
+      return;
+    }
+    if (focusConfirmationId || focusSearchRange) {
+      pendingScrollResetDocumentIdRef.current = null;
+      return;
+    }
+    pendingScrollResetDocumentIdRef.current = null;
+    requestAnimationFrame(resetEditorScroll);
+  }, [content, documentId, focusConfirmationId, focusSearchRange, loading]);
 
   useEffect(() => {
     if (!editor) {

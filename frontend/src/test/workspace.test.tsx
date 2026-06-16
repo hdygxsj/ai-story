@@ -188,6 +188,7 @@ describe("WorkspacePage", () => {
 
   it("resets the editor scroll position when switching chapters", async () => {
     const user = userEvent.setup();
+    let resolveSecondChapter: ((response: Response) => void) | null = null;
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
@@ -215,15 +216,9 @@ describe("WorkspacePage", () => {
           );
         }
         if (url.endsWith("/documents/doc-2")) {
-          return Promise.resolve(
-            jsonResponse({
-              id: "doc-2",
-              content: {
-                type: "doc",
-                content: [{ type: "paragraph", content: [{ type: "text", text: "第二章内容" }] }],
-              },
-            }),
-          );
+          return new Promise<Response>((resolve) => {
+            resolveSecondChapter = resolve;
+          });
         }
         const conversationResponse = conversationMockResponse(url);
         if (conversationResponse) {
@@ -239,9 +234,20 @@ describe("WorkspacePage", () => {
     const editorBody = screen.getByTestId("workspace-chapter-panel").querySelector(".ant-card-body") as HTMLElement;
     editorBody.scrollTop = 640;
     await user.click(await screen.findByTestId("workspace-node-title-node-2"));
+    await waitFor(() => expect(resolveSecondChapter).toBeTruthy());
+    editorBody.scrollTop = 640;
+    resolveSecondChapter?.(
+      jsonResponse({
+        id: "doc-2",
+        content: {
+          type: "doc",
+          content: [{ type: "paragraph", content: [{ type: "text", text: "第二章内容" }] }],
+        },
+      }),
+    );
 
     await waitForDocumentEditorReady("第二章", "第二章内容");
-    expect(editorBody.scrollTop).toBe(0);
+    await waitFor(() => expect(editorBody.scrollTop).toBe(0));
   });
 
   it("restores the last agent conversation after refresh", async () => {
