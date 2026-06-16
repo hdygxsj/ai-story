@@ -1,7 +1,8 @@
 import Placeholder from "@tiptap/extension-placeholder";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { Button, Card, Input, Space, Spin, Typography } from "antd";
+import { VerticalAlignBottomOutlined, VerticalAlignTopOutlined } from "@ant-design/icons";
+import { Button, Card, Input, Space, Spin, Tooltip, Typography } from "antd";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 
 import type { DocumentBody } from "../../api/documents";
@@ -88,6 +89,18 @@ const DocumentEditorView = memo(function DocumentEditorView({
     scrollContainer.scrollLeft = 0;
     if (typeof scrollContainer.scrollTo === "function") {
       scrollContainer.scrollTo({ left: 0, top: 0, behavior: "auto" });
+    }
+  }
+
+  function scrollEditorTo(position: "top" | "bottom") {
+    const scrollContainer = editorShellRef.current?.closest(".ant-card-body") as HTMLElement | null;
+    if (!scrollContainer) {
+      return;
+    }
+    const nextTop = position === "top" ? 0 : scrollContainer.scrollHeight;
+    scrollContainer.scrollTop = nextTop;
+    if (typeof scrollContainer.scrollTo === "function") {
+      scrollContainer.scrollTo({ left: scrollContainer.scrollLeft, top: nextTop, behavior: "smooth" });
     }
   }
 
@@ -340,6 +353,22 @@ const DocumentEditorView = memo(function DocumentEditorView({
             <Button disabled={loading} onClick={onOpenVersionHistory}>
               版本历史
             </Button>
+            <Tooltip title="回到正文顶部">
+              <Button
+                aria-label="回到正文顶部"
+                disabled={loading}
+                icon={<VerticalAlignTopOutlined />}
+                onClick={() => scrollEditorTo("top")}
+              />
+            </Tooltip>
+            <Tooltip title="跳到正文底部">
+              <Button
+                aria-label="跳到正文底部"
+                disabled={loading}
+                icon={<VerticalAlignBottomOutlined />}
+                onClick={() => scrollEditorTo("bottom")}
+              />
+            </Tooltip>
             <Button disabled={loading} loading={saving} onClick={handleSave} title="快捷键：Cmd/Ctrl + S" type="primary">
               保存 Cmd/Ctrl+S
             </Button>

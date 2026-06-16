@@ -250,6 +250,55 @@ describe("WorkspacePage", () => {
     await waitFor(() => expect(editorBody.scrollTop).toBe(0));
   });
 
+  it("scrolls the document editor to the top and bottom from header buttons", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = requestUrl(input);
+        if (url.endsWith("/novels/novel-1/nodes")) {
+          return Promise.resolve(
+            jsonResponse([
+              { id: "node-1", title: "第一章", node_type: "chapter", parent_id: null, document_id: "doc-1", position: 0 },
+            ]),
+          );
+        }
+        if (url.endsWith("/documents/doc-1/versions")) {
+          return Promise.resolve(jsonResponse([]));
+        }
+        if (url.endsWith("/documents/doc-1")) {
+          return Promise.resolve(
+            jsonResponse({
+              id: "doc-1",
+              content: {
+                type: "doc",
+                content: [{ type: "paragraph", content: [{ type: "text", text: "第一章内容" }] }],
+              },
+            }),
+          );
+        }
+        const conversationResponse = conversationMockResponse(url);
+        if (conversationResponse) {
+          return Promise.resolve(conversationResponse);
+        }
+        return Promise.resolve(jsonResponse([]));
+      }),
+    );
+
+    render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
+    await waitForDocumentEditorReady("第一章", "第一章内容");
+
+    const editorBody = screen.getByTestId("workspace-chapter-panel").querySelector(".ant-card-body") as HTMLElement;
+    Object.defineProperty(editorBody, "scrollHeight", { configurable: true, value: 1800 });
+    editorBody.scrollTop = 420;
+
+    await user.click(screen.getByRole("button", { name: "回到正文顶部" }));
+    expect(editorBody.scrollTop).toBe(0);
+
+    await user.click(screen.getByRole("button", { name: "跳到正文底部" }));
+    expect(editorBody.scrollTop).toBe(1800);
+  });
+
   it("restores the last agent conversation after refresh", async () => {
     window.localStorage.setItem("ai-story-workspace-last-conversation", JSON.stringify({ "novel-1": "conv-2" }));
 
