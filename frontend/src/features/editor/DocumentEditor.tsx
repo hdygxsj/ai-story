@@ -25,6 +25,7 @@ const EDITOR_EXTENSIONS = [
 type DocumentEditorProps = {
   chapterTitle?: string | null;
   content?: DocumentBody | null;
+  documentId?: string | null;
   focusConfirmationId?: string | null;
   focusSearchRange?: { matchIndex: number; matchLength: number } | null;
   loading?: boolean;
@@ -49,6 +50,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
 const DocumentEditorView = memo(function DocumentEditorView({
   chapterTitle,
   content,
+  documentId = null,
   focusConfirmationId = null,
   focusSearchRange = null,
   loading = false,
@@ -131,6 +133,19 @@ const DocumentEditorView = memo(function DocumentEditorView({
   useEffect(() => {
     setChapterTitleValue(chapterTitle ?? "");
   }, [chapterTitle]);
+
+  useEffect(() => {
+    const scrollContainer = editorShellRef.current?.closest(".ant-card-body") as HTMLElement | null;
+    if (!scrollContainer) {
+      return;
+    }
+    if (typeof scrollContainer.scrollTo === "function") {
+      scrollContainer.scrollTo({ left: 0, top: 0, behavior: "auto" });
+    } else {
+      scrollContainer.scrollTop = 0;
+      scrollContainer.scrollLeft = 0;
+    }
+  }, [documentId]);
 
   useEffect(() => {
     if (!editor || loading) {

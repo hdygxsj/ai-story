@@ -186,6 +186,64 @@ describe("WorkspacePage", () => {
     expect(await screen.findByText("第二章内容")).toBeInTheDocument();
   });
 
+  it("resets the editor scroll position when switching chapters", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = requestUrl(input);
+        if (url.endsWith("/novels/novel-1/nodes")) {
+          return Promise.resolve(
+            jsonResponse([
+              { id: "node-1", title: "第一章", node_type: "chapter", parent_id: null, document_id: "doc-1", position: 0 },
+              { id: "node-2", title: "第二章", node_type: "chapter", parent_id: null, document_id: "doc-2", position: 1 },
+            ]),
+          );
+        }
+        if (url.endsWith("/documents/doc-1/versions") || url.endsWith("/documents/doc-2/versions")) {
+          return Promise.resolve(jsonResponse([]));
+        }
+        if (url.endsWith("/documents/doc-1")) {
+          return Promise.resolve(
+            jsonResponse({
+              id: "doc-1",
+              content: {
+                type: "doc",
+                content: [{ type: "paragraph", content: [{ type: "text", text: "第一章内容" }] }],
+              },
+            }),
+          );
+        }
+        if (url.endsWith("/documents/doc-2")) {
+          return Promise.resolve(
+            jsonResponse({
+              id: "doc-2",
+              content: {
+                type: "doc",
+                content: [{ type: "paragraph", content: [{ type: "text", text: "第二章内容" }] }],
+              },
+            }),
+          );
+        }
+        const conversationResponse = conversationMockResponse(url);
+        if (conversationResponse) {
+          return Promise.resolve(conversationResponse);
+        }
+        return Promise.resolve(jsonResponse([]));
+      }),
+    );
+
+    render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
+    await waitForDocumentEditorReady("第一章", "第一章内容");
+
+    const editorBody = screen.getByTestId("workspace-chapter-panel").querySelector(".ant-card-body") as HTMLElement;
+    editorBody.scrollTop = 640;
+    await user.click(await screen.findByTestId("workspace-node-title-node-2"));
+
+    await waitForDocumentEditorReady("第二章", "第二章内容");
+    expect(editorBody.scrollTop).toBe(0);
+  });
+
   it("restores the last agent conversation after refresh", async () => {
     window.localStorage.setItem("ai-story-workspace-last-conversation", JSON.stringify({ "novel-1": "conv-2" }));
 
@@ -237,6 +295,56 @@ describe("WorkspacePage", () => {
 
     const messageScroll = screen.getByTestId("agent-message-scroll");
     expect(messageScroll.scrollTop).toBe(messageScroll.scrollHeight);
+  });
+
+  it("continues the same agent conversation after the first streamed reply", async () => {
+    const user = userEvent.setup();
+    const requestBodies: unknown[] = [];
+    let streamCount = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const conversationResponse = conversationMockResponse(url);
+      if (conversationResponse) {
+        return Promise.resolve(conversationResponse);
+      }
+      if (url.endsWith("/novels/novel-1/agent/messages/stream")) {
+        requestBodies.push(JSON.parse(String(init?.body)));
+        streamCount += 1;
+        return Promise.resolve(
+          sseResponse([
+            { type: "meta", conversation_id: "conv-continuing" },
+            {
+              type: "delta",
+              content: streamCount === 1 ? "上一轮已处理。" : "继续处理。",
+            },
+            {
+              type: "done",
+              message: streamCount === 1 ? "上一轮已处理。" : "继续处理。",
+              context_status: [],
+              conversation_id: "conv-continuing",
+              confirmation: null,
+            },
+          ]),
+        );
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
+
+    const input = screen.getByPlaceholderText("让 Agent 规划、改写、记录记忆或检索上下文");
+    await user.type(input, "先改第38章");
+    await user.keyboard("{Enter}");
+    await screen.findByText("上一轮已处理。");
+
+    await user.type(input, "第40章和第49章也同步修改");
+    await user.keyboard("{Enter}");
+    await screen.findByText("继续处理。");
+
+    expect(requestBodies).toHaveLength(2);
+    expect(requestBodies[0]).toMatchObject({ conversation_id: null });
+    expect(requestBodies[1]).toMatchObject({ conversation_id: "conv-continuing" });
   });
 
   it("resizes and persists the Agent panel width", () => {

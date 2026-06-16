@@ -1461,6 +1461,7 @@ export function WorkspacePage({
         <DocumentEditor
           chapterTitle={currentChapterTitle}
           content={editorContent}
+          documentId={documentId}
           focusConfirmationId={focusConfirmationId}
           focusSearchRange={focusSearchRange}
           loading={editorLoading}
