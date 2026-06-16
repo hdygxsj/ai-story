@@ -412,6 +412,105 @@ async def test_save_key_memory_fails_closed_without_authenticated_scope(
 
 
 @pytest.mark.asyncio
+async def test_delete_memory_item_removes_owned_memory_and_rag_chunk(session: AsyncSession) -> None:
+    owner = User(email="delete-memory@example.com", username="delete-memory", password_hash="hash")
+    session.add(owner)
+    await session.flush()
+    novel = Novel(owner_id=owner.id, title="Delete Memory Novel")
+    session.add(novel)
+    await session.flush()
+    memory = MemoryItem(
+        novel_id=novel.id,
+        memory_type="key_memory",
+        title="要删除的记忆",
+        body="这条记忆应该被删除。",
+        importance=80,
+    )
+    session.add(memory)
+    await session.flush()
+    chunk = RagChunk(
+        novel_id=novel.id,
+        source_type="memory",
+        source_id=str(memory.id),
+        text="要删除的记忆\n这条记忆应该被删除。",
+        embedding=[1.0] + [0.0] * 63,
+    )
+    session.add(chunk)
+    await session.commit()
+
+    tools = {
+        tool.name: tool
+        for tool in build_runtime_tools(
+            session,
+            model_profile=None,
+            owner_id=owner.id,
+            novel_id=novel.id,
+        )
+    }
+
+    result = await tools["delete_memory_item"].ainvoke({"memory_item_id": str(memory.id)})
+
+    assert result == {
+        "status": "ok",
+        "action_type": "delete_memory_item",
+        "message": "已删除记忆。",
+        "memory_item_id": str(memory.id),
+    }
+    assert await session.get(MemoryItem, memory.id) is None
+    chunks = list(await session.scalars(select(RagChunk).where(RagChunk.source_type == "memory")))
+    assert chunks == []
+
+
+@pytest.mark.asyncio
+async def test_delete_memory_item_cannot_delete_other_owner_memory(session: AsyncSession) -> None:
+    owner = User(email="memory-owner@example.com", username="memory-owner", password_hash="hash")
+    other_owner = User(email="other-memory-owner@example.com", username="other-memory-owner", password_hash="hash")
+    session.add_all([owner, other_owner])
+    await session.flush()
+    novel = Novel(owner_id=owner.id, title="Owned Memory")
+    same_owner_other_novel = Novel(owner_id=owner.id, title="Same Owner Other Memory")
+    other_novel = Novel(owner_id=other_owner.id, title="Other Memory")
+    session.add_all([novel, same_owner_other_novel, other_novel])
+    await session.flush()
+    same_owner_other_memory = MemoryItem(
+        novel_id=same_owner_other_novel.id,
+        memory_type="key_memory",
+        title="同用户其他小说记忆",
+        body="当前小说工具不能删除。",
+        importance=80,
+    )
+    other_memory = MemoryItem(
+        novel_id=other_novel.id,
+        memory_type="key_memory",
+        title="别人的记忆",
+        body="当前用户不能删除。",
+        importance=80,
+    )
+    session.add_all([same_owner_other_memory, other_memory])
+    await session.commit()
+
+    tools = {
+        tool.name: tool
+        for tool in build_runtime_tools(
+            session,
+            model_profile=None,
+            owner_id=owner.id,
+            novel_id=novel.id,
+        )
+    }
+
+    result = await tools["delete_memory_item"].ainvoke({"memory_item_id": str(other_memory.id)})
+    same_owner_other_result = await tools["delete_memory_item"].ainvoke(
+        {"memory_item_id": str(same_owner_other_memory.id)}
+    )
+
+    assert result == {"status": "error", "message": "记忆不存在。"}
+    assert same_owner_other_result == {"status": "error", "message": "记忆不存在。"}
+    assert await session.get(MemoryItem, other_memory.id) is not None
+    assert await session.get(MemoryItem, same_owner_other_memory.id) is not None
+
+
+@pytest.mark.asyncio
 async def test_runtime_update_novel_renames_title(session: AsyncSession) -> None:
     owner = User(email="rename-agent@example.com", username="rename-agent", password_hash="hash")
     session.add(owner)

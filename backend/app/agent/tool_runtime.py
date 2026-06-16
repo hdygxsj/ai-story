@@ -17,6 +17,7 @@ from app.agent.tools import (
     DeleteCreativeAssetArgs,
     DeleteCreativeAssetsArgs,
     DeleteRelationshipEdgeArgs,
+    DeleteMemoryItemArgs,
     DeleteTimelineEventArgs,
     ListMaterialChangesArgs,
     ListCharacterStatesArgs,
@@ -87,7 +88,7 @@ from app.services.materials import (
     update_relationship_edge,
     update_timeline_event,
 )
-from app.services.memory import create_memory_item
+from app.services.memory import create_memory_item, delete_memory_item as delete_memory_item_service
 from app.services.memory_search import search_memory_items
 from app.services.rag import extract_text_from_prosemirror, search_rag_chunks
 from app.services.workspace_actions import (
@@ -516,6 +517,33 @@ def build_runtime_tools(
                 }
                 for item in items
             ],
+        }
+
+    @tool("delete_memory_item", args_schema=DeleteMemoryItemArgs)
+    async def delete_memory_item_runtime(memory_item_id: str) -> dict[str, Any]:
+        """Delete one approved memory item from the current novel."""
+        scope = scoped_ids()
+        if scope is None:
+            return {"status": "error", "message": "工具缺少当前用户或小说作用域。"}
+        memory_uuid = UUID(memory_item_id)
+        memory = await session.scalar(
+            select(MemoryItem).where(MemoryItem.id == memory_uuid, MemoryItem.novel_id == scope[1])
+        )
+        if memory is None:
+            return {"status": "error", "message": "记忆不存在。"}
+        deleted = await delete_memory_item_service(
+            session,
+            owner_id=scope[0],
+            item_id=memory_uuid,
+        )
+        if not deleted:
+            return {"status": "error", "message": "记忆不存在。"}
+        await session.commit()
+        return {
+            "status": "ok",
+            "action_type": "delete_memory_item",
+            "message": "已删除记忆。",
+            "memory_item_id": memory_item_id,
         }
 
     @tool("save_key_memory", args_schema=SaveKeyMemoryArgs)
@@ -1045,6 +1073,7 @@ def build_runtime_tools(
         "cleanup_workspace_folders": cleanup_workspace_folders_runtime,
         "list_memory_items": list_memory_items_runtime,
         "list_memory_review_items": list_memory_review_items_runtime,
+        "delete_memory_item": delete_memory_item_runtime,
         "save_key_memory": save_key_memory_runtime,
         "list_creative_assets": list_creative_assets_runtime,
         "create_character_asset": create_character_asset_runtime,

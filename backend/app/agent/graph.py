@@ -16,6 +16,8 @@ from app.models import ModelProfile
 _MEMORY_GUIDANCE = (
     "当对话中出现会影响后续创作的持久事实、约束、偏好、角色状态或剧情信息时，"
     "调用 save_key_memory 直接保存，无需用户审批。不要保存临时信息或重复内容。"
+    "当用户明确要求删除记忆时，先用 list_memory_items 定位 id，再调用 delete_memory_item，"
+    "不要要求用户手动删除。"
 )
 _MATERIAL_GUIDANCE = (
     "当用户要求创建、修改、删除创作资产、时间线、角色状态或人物关系时，"
@@ -26,7 +28,7 @@ _MATERIAL_GUIDANCE = (
     "调整显示顺序时先 list_timeline_events，再调用 reorder_timeline_events 传入按目标顺序排列的 event_id 列表，"
     "也可用 update_timeline_event 设置单个事件的 position；"
     "未设置 position 的事件仍按卷号/时间标签自动排序并排在已指定 position 的事件之后。"
-    "清理旧版或重复素材时，自行调用 delete_creative_asset 或 delete_creative_assets，"
+    "清理旧版或重复素材时，先 list 定位 id，再自行调用对应 delete 工具，"
     "不要要求用户手动删除。修改或删除前先 list 获取 id。"
 )
 _DESTRUCTIVE_WRITE_GUIDANCE = "propose_document_update 等需用户确认；write_document_content 等原子写入会立即生效。"

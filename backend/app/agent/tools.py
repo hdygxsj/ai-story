@@ -140,6 +140,10 @@ class ListMemoryReviewItemsArgs(BaseModel):
     novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
 
 
+class DeleteMemoryItemArgs(BaseModel):
+    memory_item_id: str = Field(description="Approved memory item UUID to delete from the current novel")
+
+
 class ProposeRewriteArgs(BaseModel):
     document_id: str | None = Field(default=None, description="Target document UUID; defaults to current document")
     selected_text: str = Field(description="User-selected text to rewrite")
@@ -505,6 +509,12 @@ def list_memory_review_items_tool(novel_id: str) -> dict[str, Any]:
     return {"novel_id": novel_id, "items": []}
 
 
+@tool("delete_memory_item", args_schema=DeleteMemoryItemArgs)
+def delete_memory_item_tool(memory_item_id: str) -> dict[str, Any]:
+    """Delete one approved memory item from the current novel."""
+    return {"memory_item_id": memory_item_id, "status": "requires_runtime_loader"}
+
+
 @tool("propose_rewrite", args_schema=ProposeRewriteArgs)
 def propose_rewrite(document_id: str, selected_text: str, instruction: str) -> dict[str, Any]:
     """Draft a rewrite proposal without mutating the document."""
@@ -703,6 +713,7 @@ def get_agent_tools() -> list[BaseTool]:
         cleanup_workspace_folders,
         list_memory_items_tool,
         list_memory_review_items_tool,
+        delete_memory_item_tool,
         propose_rewrite,
         save_key_memory,
         list_creative_assets_tool,

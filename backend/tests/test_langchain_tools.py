@@ -71,6 +71,7 @@ def test_agent_tool_registry_exposes_structured_langchain_tools() -> None:
         "organize_workspace_tree",
         "cleanup_workspace_folders",
         "list_memory_items",
+        "delete_memory_item",
         "list_creative_assets",
         "update_creative_asset",
         "delete_creative_asset",
