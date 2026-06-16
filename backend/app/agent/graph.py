@@ -36,6 +36,11 @@ _SEARCH_GUIDANCE = (
     "当用户要求按精确关键词、原文短语、章节标题或正文片段查找内容时，"
     "调用 search_documents_by_keyword；需要语义相近资料时再使用 search_rag。"
 )
+_TIME_GUIDANCE = "当用户询问当前服务器时间、今天日期、当前时间或需要绝对时间戳时，调用 get_server_time。"
+_GLOBAL_REPLACE_GUIDANCE = (
+    "当用户要求全局替换关键词时，先调用 global_replace_keyword 且 dry_run=true 生成预览，"
+    "只有用户明确确认后才允许 dry_run=false 执行。RAG 是派生索引，替换源数据后由工具重建。"
+)
 _CURRENT_REQUEST_GUIDANCE = (
     "始终优先处理用户当前消息，不要被历史对话中的旧任务、旧规划或待办带偏。"
     "根据当前需求自主规划并组合原子工具；不要套用固定业务流程。"
@@ -62,6 +67,8 @@ def _default_system_prompt(state: AgentState) -> str:
         _MATERIAL_GUIDANCE,
         _DESTRUCTIVE_WRITE_GUIDANCE,
         _SEARCH_GUIDANCE,
+        _TIME_GUIDANCE,
+        _GLOBAL_REPLACE_GUIDANCE,
         _CURRENT_REQUEST_GUIDANCE,
     ]
     if novel_id is not None:
@@ -88,6 +95,8 @@ def _build_agent_system_prompt(pack: ContextPack) -> str:
         _MATERIAL_GUIDANCE,
         _DESTRUCTIVE_WRITE_GUIDANCE,
         _SEARCH_GUIDANCE,
+        _TIME_GUIDANCE,
+        _GLOBAL_REPLACE_GUIDANCE,
         _CURRENT_REQUEST_GUIDANCE,
     ]
     for item in pack.items:

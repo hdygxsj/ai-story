@@ -19,6 +19,7 @@ from app.agent.tools import (
     DeleteRelationshipEdgeArgs,
     DeleteMemoryItemArgs,
     DeleteTimelineEventArgs,
+    GlobalReplaceKeywordArgs,
     ListMaterialChangesArgs,
     ListCharacterStatesArgs,
     ListCreativeAssetsArgs,
@@ -69,6 +70,7 @@ from app.services.document_actions import (
     list_owned_document_versions,
 )
 from app.services.document_search import search_novel_documents
+from app.services.global_replace import global_replace_keyword
 from app.services.materials import (
     create_character_state,
     create_creative_asset,
@@ -177,6 +179,29 @@ def build_runtime_tools(
             limit=limit,
         )
         return {"status": "ok", "query": query, "results": results}
+
+    @tool("global_replace_keyword", args_schema=GlobalReplaceKeywordArgs)
+    async def global_replace_keyword_runtime(
+        old_text: str,
+        new_text: str,
+        dry_run: bool = True,
+        scopes: list[str] | None = None,
+        max_occurrences: int = 200,
+    ) -> dict[str, Any]:
+        """Preview or apply exact keyword replacement across the current novel."""
+        scope = scoped_ids()
+        if scope is None:
+            return {"status": "error", "message": "工具缺少当前用户或小说作用域。"}
+        return await global_replace_keyword(
+            session,
+            novel_id=scope[1],
+            old_text=old_text,
+            new_text=new_text,
+            dry_run=dry_run,
+            scopes=scopes,
+            max_occurrences=max_occurrences,
+            model_profile=model_profile,
+        )
 
     @tool("read_document", args_schema=ReadDocumentArgs)
     async def read_document_runtime(document_id: str | None = None) -> dict[str, Any]:
@@ -1026,21 +1051,33 @@ def build_runtime_tools(
             return {"status": "error", "message": str(exc)}
         scope = scoped_ids()
         if scope is not None:
-            confirmation = await create_selection_replace_proposal(
-                session,
-                owner_id=scope[0],
-                novel_id=scope[1],
-                document_id=resolved_document_id,
-                selected_text=selected_text,
-                replacement_text=draft_rewrite(selected_text, instruction),
-                action_type="rewrite_selection",
-            )
-            return {
-                "status": "ok",
-                "action_type": "confirmation_created",
-                "confirmation_id": str(confirmation.id),
-                "message": "我已草拟改写方案，请确认后再应用。",
-            }
+            replacement_text = draft_rewrite(selected_text, instruction)
+            try:
+                confirmation = await create_selection_replace_proposal(
+                    session,
+                    owner_id=scope[0],
+                    novel_id=scope[1],
+                    document_id=resolved_document_id,
+                    selected_text=selected_text,
+                    replacement_text=replacement_text,
+                    action_type="rewrite_selection",
+                )
+                return {
+                    "status": "ok",
+                    "action_type": "confirmation_created",
+                    "confirmation_id": str(confirmation.id),
+                    "message": "我已草拟改写方案，请确认后再应用。",
+                }
+            except Exception:
+                return {
+                    "action_type": "rewrite_selection",
+                    "message": "我已草拟改写方案，请确认后再应用。",
+                    "payload": {
+                        "document_id": str(resolved_document_id),
+                        "selected_text": selected_text,
+                        "replacement_text": replacement_text,
+                    },
+                }
         return {
             "action_type": "rewrite_selection",
             "message": "我已草拟改写方案，请确认后再应用。",
@@ -1055,6 +1092,7 @@ def build_runtime_tools(
         "search_memory": search_memory_runtime,
         "search_rag": search_rag_runtime,
         "search_documents_by_keyword": search_documents_by_keyword_runtime,
+        "global_replace_keyword": global_replace_keyword_runtime,
         "read_document": read_document_runtime,
         "update_novel": update_novel_runtime,
         "list_workspace_nodes": list_workspace_nodes_runtime,

@@ -77,6 +77,55 @@ def extract_document_plain_text(content: dict[str, Any]) -> str:
     return extract_text_from_prosemirror(content)
 
 
+def _normalize_whitespace_with_spans(text: str) -> tuple[str, list[tuple[int, int]]]:
+    normalized_parts: list[str] = []
+    spans: list[tuple[int, int]] = []
+    index = 0
+    while index < len(text):
+        if text[index].isspace():
+            start = index
+            while index < len(text) and text[index].isspace():
+                index += 1
+            if normalized_parts:
+                normalized_parts.append(" ")
+                spans.append((start, index))
+            continue
+        normalized_parts.append(text[index])
+        spans.append((index, index + 1))
+        index += 1
+    if normalized_parts and normalized_parts[-1] == " ":
+        normalized_parts.pop()
+        spans.pop()
+    return "".join(normalized_parts), spans
+
+
+def _resolve_selection_text(document_plain_text: str, selected_text: str) -> str | None:
+    selected_text = selected_text.strip()
+    if document_plain_text.count(selected_text) == 1:
+        return selected_text
+
+    normalized_document, spans = _normalize_whitespace_with_spans(document_plain_text)
+    normalized_selection, _ = _normalize_whitespace_with_spans(selected_text)
+    if not normalized_selection:
+        return None
+
+    matches: list[tuple[int, int]] = []
+    start = 0
+    while True:
+        index = normalized_document.find(normalized_selection, start)
+        if index == -1:
+            break
+        matches.append((index, index + len(normalized_selection)))
+        start = index + 1
+    if len(matches) != 1:
+        return None
+
+    match_start, match_end = matches[0]
+    original_start = spans[match_start][0]
+    original_end = spans[match_end - 1][1]
+    return document_plain_text[original_start:original_end].strip()
+
+
 def confirmation_diff_texts(
     confirmation: PendingConfirmation,
     documents_by_id: dict[UUID, Document],
@@ -325,7 +374,8 @@ async def create_selection_replace_proposal(
             detail="Selected text is empty",
         )
     document_plain_text = extract_document_plain_text(document.content)
-    if document_plain_text.count(selected_text) != 1:
+    resolved_selected_text = _resolve_selection_text(document_plain_text, selected_text)
+    if resolved_selected_text is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Selected text is not uniquely present in the current document",
@@ -337,7 +387,7 @@ async def create_selection_replace_proposal(
         action_type=action_type,
         payload=_proposal_payload(
             document,
-            selected_text=selected_text,
+            selected_text=resolved_selected_text,
             replacement_text=replacement_text,
         ),
     )
@@ -468,7 +518,7 @@ def _prune_empty_text_nodes(block: dict[str, Any]) -> None:
     content = block.get("content")
     if not isinstance(content, list):
         return
-    block["content"] = [
+    pruned = [
         child
         for child in content
         if not (
@@ -477,6 +527,20 @@ def _prune_empty_text_nodes(block: dict[str, Any]) -> None:
             and not str(child.get("text", ""))
         )
     ]
+    merged: list[Any] = []
+    for child in pruned:
+        previous = merged[-1] if merged else None
+        if (
+            isinstance(previous, dict)
+            and isinstance(child, dict)
+            and previous.get("type") == "text"
+            and child.get("type") == "text"
+            and previous.get("marks") == child.get("marks")
+        ):
+            previous["text"] = str(previous.get("text", "")) + str(child.get("text", ""))
+            continue
+        merged.append(child)
+    block["content"] = merged
 
 
 def _apply_block_selection_replace(block: dict[str, Any], selected_text: str, replacement_text: str) -> bool:
@@ -500,8 +564,15 @@ def _apply_block_selection_replace(block: dict[str, Any], selected_text: str, re
         last_original = str(last_node.get("text", ""))
         first_node["text"] = first_original[:first_index] + replacement_text
         last_node["text"] = last_original[last_index + 1 :]
+        cleared_node_ids: set[int] = set()
         for node, _ in text_entries[1:-1]:
+            if node is first_node or node is last_node:
+                continue
+            node_id = id(node)
+            if node_id in cleared_node_ids:
+                continue
             node["text"] = ""
+            cleared_node_ids.add(node_id)
 
     _prune_empty_text_nodes(block)
     return True

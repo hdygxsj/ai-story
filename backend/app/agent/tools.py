@@ -1,5 +1,6 @@
 import ast
 import re
+from datetime import datetime
 from decimal import Decimal, DivisionByZero, InvalidOperation
 from typing import Any
 
@@ -34,12 +35,30 @@ class SearchDocumentsByKeywordArgs(BaseModel):
     limit: int = Field(default=20, ge=1, le=50)
 
 
+class GlobalReplaceKeywordArgs(BaseModel):
+    old_text: str = Field(min_length=1, description="Exact keyword or phrase to replace")
+    new_text: str = Field(description="Replacement text")
+    dry_run: bool = Field(default=True, description="Preview matches without changing data unless set to false")
+    scopes: list[str] | None = Field(
+        default=None,
+        description=(
+            "Optional scopes: documents, memories, creative_assets, timeline_events, "
+            "character_states, relationship_edges"
+        ),
+    )
+    max_occurrences: int = Field(default=200, ge=1, le=1000)
+
+
 class CalculateArgs(BaseModel):
     expression: str = Field(
         min_length=1,
         max_length=500,
         description="Arithmetic expression. Supports +, -, *, /, **, parentheses, decimals, and percentages like 15%.",
     )
+
+
+class GetServerTimeArgs(BaseModel):
+    pass
 
 
 class UpdateNovelArgs(BaseModel):
@@ -369,6 +388,25 @@ def search_documents_by_keyword(novel_id: str | None = None, query: str = "", li
     return {"novel_id": novel_id, "query": query, "limit": limit, "results": []}
 
 
+@tool("global_replace_keyword", args_schema=GlobalReplaceKeywordArgs)
+def global_replace_keyword_tool(
+    old_text: str,
+    new_text: str,
+    dry_run: bool = True,
+    scopes: list[str] | None = None,
+    max_occurrences: int = 200,
+) -> dict[str, Any]:
+    """Preview or apply exact keyword replacement across the current novel."""
+    return {
+        "old_text": old_text,
+        "new_text": new_text,
+        "dry_run": dry_run,
+        "scopes": scopes,
+        "max_occurrences": max_occurrences,
+        "status": "requires_runtime_loader",
+    }
+
+
 @tool("calculate", args_schema=CalculateArgs)
 def calculate(expression: str) -> dict[str, Any]:
     """Evaluate a precise arithmetic expression before answering numeric questions."""
@@ -380,6 +418,18 @@ def calculate(expression: str) -> dict[str, Any]:
         "status": "ok",
         "expression": expression,
         "result": _format_decimal_result(result),
+    }
+
+
+@tool("get_server_time", args_schema=GetServerTimeArgs)
+def get_server_time() -> dict[str, Any]:
+    """Return the current server time with timezone and Unix timestamp."""
+    now = datetime.now().astimezone()
+    return {
+        "status": "ok",
+        "iso_time": now.isoformat(),
+        "timezone": str(now.tzinfo),
+        "unix_timestamp": now.timestamp(),
     }
 
 
@@ -695,7 +745,9 @@ def get_agent_tools() -> list[BaseTool]:
         search_memory,
         search_rag,
         search_documents_by_keyword,
+        global_replace_keyword_tool,
         calculate,
+        get_server_time,
         update_novel_tool,
         list_workspace_nodes_tool,
         create_workspace_node_tool,

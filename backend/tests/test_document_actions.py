@@ -7,7 +7,6 @@ from sqlalchemy import select
 from app.models import Document, DocumentVersion, Novel, User, WorkspaceNode
 from app.services.document_actions import (
     approve_document_confirmation,
-    build_confirmation_responses,
     confirmation_diff_texts,
     create_document_update_proposal,
     create_selection_replace_proposal,
@@ -138,6 +137,45 @@ async def test_selection_replace_works_when_selected_text_spans_formatted_nodes(
 
     await session.refresh(document)
     assert extract_text_from_prosemirror(document.content) == "甲冒雨来到门前。乙留在屋内。"
+
+
+async def test_selection_replace_accepts_browser_selection_whitespace_between_paragraphs(session, monkeypatch) -> None:
+    async def fake_index_text(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.services.document_actions.index_text", fake_index_text)
+    user = User(email=f"{uuid4()}@example.com", username=str(uuid4()), password_hash="hash")
+    session.add(user)
+    await session.flush()
+    novel = Novel(owner_id=user.id, title="Paragraph Selection Novel")
+    session.add(novel)
+    await session.flush()
+    document = Document(
+        novel_id=novel.id,
+        content={
+            "type": "doc",
+            "content": [
+                {"type": "paragraph", "content": [{"type": "text", "text": "第一段结尾。"}]},
+                {"type": "paragraph", "content": [{"type": "text", "text": "第二段开头。"}]},
+            ],
+        },
+    )
+    session.add(document)
+    await session.commit()
+
+    confirmation = await create_selection_replace_proposal(
+        session,
+        owner_id=user.id,
+        novel_id=novel.id,
+        document_id=document.id,
+        selected_text="第一段结尾。\n第二段开头。",
+        replacement_text="第一段结尾。\n新的第二段开头。",
+    )
+
+    await approve_document_confirmation(session, owner_id=user.id, confirmation=confirmation)
+
+    await session.refresh(document)
+    assert extract_text_from_prosemirror(document.content) == "第一段结尾。 新的第二段开头。"
 
 
 async def test_stale_document_confirmation_is_rejected(session) -> None:

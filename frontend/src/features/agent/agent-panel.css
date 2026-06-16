@@ -178,11 +178,23 @@
   max-width: 78%;
 }
 
+.agent-panel-messages .ant-bubble:has(.agent-thinking-indicator) {
+  max-width: 78%;
+}
+
 .agent-panel-messages .ant-bubble:has(.agent-tool-call-card) .ant-bubble-content {
   border-radius: 8px;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
   min-height: 0;
   padding: 2px 6px;
+}
+
+.agent-panel-messages .ant-bubble:has(.agent-thinking-indicator) .ant-bubble-content {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  min-height: 0;
+  padding: 0;
 }
 
 .agent-panel-messages .ant-bubble:has(.agent-tool-call-card) + .ant-bubble:has(.agent-tool-call-card) {
@@ -197,21 +209,23 @@
 }
 
 .agent-panel-messages .ant-bubble:not(:has(.agent-tool-call-card)) .ant-bubble-content {
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
   min-height: 0;
-  padding: 0;
+  padding: 8px 10px;
 }
 
 .agent-panel-messages .ant-bubble:not(:has(.agent-tool-call-card)) {
-  max-width: 100%;
+  max-width: 86%;
 }
 
 .agent-panel-input .ant-sender {
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.10);
   border-radius: 14px;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.10);
 }
 
 .agent-panel-input .ant-sender-content {
@@ -304,9 +318,12 @@
   background: rgba(248, 250, 252, 0.96);
   border: 1px solid rgba(15, 23, 42, 0.06);
   border-radius: 12px;
-  margin-top: 8px;
   max-width: 78%;
   padding: 8px 10px;
+}
+
+.agent-panel-messages .agent-thinking-indicator {
+  max-width: none;
 }
 
 .agent-thinking-indicator.is-tool {

@@ -8,7 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.tool_runtime import build_runtime_tools
 from app.agent.runtime import invoke_agent_graph, stream_agent_graph
 from app.main import app
-from app.models import Document, MemoryItem, Novel, RagChunk, User, WorkspaceNode
+from app.models import CreativeAsset, Document, DocumentVersion, MemoryItem, Novel, RagChunk, TimelineEvent, User, WorkspaceNode
+from app.services.rag import extract_text_from_prosemirror
 
 
 @pytest.mark.asyncio
@@ -508,6 +509,135 @@ async def test_delete_memory_item_cannot_delete_other_owner_memory(session: Asyn
     assert same_owner_other_result == {"status": "error", "message": "记忆不存在。"}
     assert await session.get(MemoryItem, other_memory.id) is not None
     assert await session.get(MemoryItem, same_owner_other_memory.id) is not None
+
+
+@pytest.mark.asyncio
+async def test_global_replace_keyword_previews_and_applies_across_novel_sources(session: AsyncSession) -> None:
+    owner = User(email="global-replace@example.com", username="global-replace", password_hash="hash")
+    session.add(owner)
+    await session.flush()
+    novel = Novel(owner_id=owner.id, title="Global Replace")
+    session.add(novel)
+    await session.flush()
+    document = Document(
+        novel_id=novel.id,
+        content={
+            "type": "doc",
+            "content": [
+                {"type": "paragraph", "content": [{"type": "text", "text": "雾港的钟楼在雾港潮声里苏醒。"}]}
+            ],
+        },
+    )
+    memory = MemoryItem(
+        novel_id=novel.id,
+        memory_type="key_memory",
+        title="雾港规则",
+        body="雾港涨潮时会重复七分钟。",
+        importance=88,
+    )
+    asset = CreativeAsset(
+        novel_id=novel.id,
+        asset_type="location",
+        name="雾港钟楼",
+        summary="雾港时间异常的中心。",
+    )
+    event = TimelineEvent(
+        novel_id=novel.id,
+        title="雾港来信",
+        event_time="雾港凌晨",
+        summary="信件抵达雾港旧码头。",
+    )
+    session.add_all([document, memory, asset, event])
+    await session.flush()
+    session.add_all(
+        [
+            WorkspaceNode(novel_id=novel.id, title="第一章", node_type="chapter", document_id=document.id),
+            RagChunk(
+                novel_id=novel.id,
+                source_type="document",
+                source_id=str(document.id),
+                text="雾港的钟楼在雾港潮声里苏醒。",
+                embedding=[1.0] + [0.0] * 63,
+            ),
+            RagChunk(
+                novel_id=novel.id,
+                source_type="memory",
+                source_id=str(memory.id),
+                text="雾港规则\n雾港涨潮时会重复七分钟。",
+                embedding=[1.0] + [0.0] * 63,
+            ),
+            RagChunk(
+                novel_id=novel.id,
+                source_type="creative_asset",
+                source_id=str(asset.id),
+                text="location: 雾港钟楼\n雾港时间异常的中心。",
+                embedding=[1.0] + [0.0] * 63,
+            ),
+            RagChunk(
+                novel_id=novel.id,
+                source_type="timeline_event",
+                source_id=str(event.id),
+                text="雾港凌晨: 雾港来信\n信件抵达雾港旧码头。",
+                embedding=[1.0] + [0.0] * 63,
+            ),
+        ]
+    )
+    await session.commit()
+
+    tools = {
+        tool.name: tool
+        for tool in build_runtime_tools(
+            session,
+            model_profile=None,
+            owner_id=owner.id,
+            novel_id=novel.id,
+        )
+    }
+
+    preview = await tools["global_replace_keyword"].ainvoke(
+        {"old_text": "雾港", "new_text": "霜港", "dry_run": True}
+    )
+
+    await session.refresh(document)
+    await session.refresh(memory)
+    await session.refresh(asset)
+    await session.refresh(event)
+    assert preview["status"] == "ok"
+    assert preview["dry_run"] is True
+    assert preview["total_occurrences"] == 9
+    assert preview["summary"]["documents"]["items"] == 1
+    assert preview["summary"]["documents"]["occurrences"] == 2
+    assert extract_text_from_prosemirror(document.content) == "雾港的钟楼在雾港潮声里苏醒。"
+    assert memory.title == "雾港规则"
+    assert asset.name == "雾港钟楼"
+    assert event.title == "雾港来信"
+
+    applied = await tools["global_replace_keyword"].ainvoke(
+        {"old_text": "雾港", "new_text": "霜港", "dry_run": False}
+    )
+
+    await session.refresh(document)
+    await session.refresh(memory)
+    await session.refresh(asset)
+    await session.refresh(event)
+    versions = list(
+        await session.scalars(select(DocumentVersion).where(DocumentVersion.document_id == document.id))
+    )
+    rag_chunks = list(await session.scalars(select(RagChunk).where(RagChunk.novel_id == novel.id)))
+    assert applied["status"] == "ok"
+    assert applied["dry_run"] is False
+    assert applied["total_occurrences"] == 9
+    assert extract_text_from_prosemirror(document.content) == "霜港的钟楼在霜港潮声里苏醒。"
+    assert memory.title == "霜港规则"
+    assert memory.body == "霜港涨潮时会重复七分钟。"
+    assert asset.name == "霜港钟楼"
+    assert asset.summary == "霜港时间异常的中心。"
+    assert event.title == "霜港来信"
+    assert event.event_time == "霜港凌晨"
+    assert event.summary == "信件抵达霜港旧码头。"
+    assert len(versions) == 1
+    assert all("雾港" not in chunk.text for chunk in rag_chunks)
+    assert any(chunk.source_type == "document" and "霜港的钟楼" in chunk.text for chunk in rag_chunks)
 
 
 @pytest.mark.asyncio

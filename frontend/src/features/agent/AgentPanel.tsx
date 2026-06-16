@@ -474,9 +474,8 @@ export function AgentPanel({
   }, [rewriteRequest?.id]);
 
   const hiddenMessageCount = Math.max(0, messages.length - VISIBLE_MESSAGE_LIMIT);
-  const bubbleItems = useMemo(
-    () =>
-      (hiddenMessageCount > 0 ? messages.slice(-VISIBLE_MESSAGE_LIMIT) : messages)
+  const bubbleItems = useMemo(() => {
+    const items = (hiddenMessageCount > 0 ? messages.slice(-VISIBLE_MESSAGE_LIMIT) : messages)
         .filter(
           (item) =>
             !(
@@ -497,9 +496,25 @@ export function AgentPanel({
             ) : (
               item.content
             ),
-        })),
-    [hiddenMessageCount, messages, thinking],
-  );
+        }));
+
+    if (thinking) {
+      items.push({
+        key: "agent-thinking-indicator",
+        role: "ai",
+        content: (
+          <AgentThinkingIndicator
+            content={thinking.content}
+            label={thinkingLabel(thinking)}
+            startedAt={thinking.startedAt}
+            variant={thinking.phase}
+          />
+        ),
+      });
+    }
+
+    return items;
+  }, [hiddenMessageCount, messages, thinking]);
 
   return (
     <Card
@@ -584,14 +599,6 @@ export function AgentPanel({
               user: { placement: "end", variant: "filled" },
             }}
           />
-          {thinking ? (
-            <AgentThinkingIndicator
-              content={thinking.content}
-              label={thinkingLabel(thinking)}
-              startedAt={thinking.startedAt}
-              variant={thinking.phase}
-            />
-          ) : null}
         </div>
         {error ? <Alert message={error} showIcon style={{ flexShrink: 0 }} type="error" /> : null}
         {workspaceDiff ? (

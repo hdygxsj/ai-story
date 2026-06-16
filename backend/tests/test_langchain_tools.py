@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID, uuid4
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -29,6 +30,8 @@ def test_default_agent_prompt_allows_selective_automatic_memory() -> None:
     prompt = _build_agent_system_prompt(_empty_context_pack())
     assert "save_key_memory" in prompt
     assert "search_documents_by_keyword" in prompt
+    assert "get_server_time" in prompt
+    assert "global_replace_keyword" in prompt
     assert "calculate" in prompt
     assert "精确计算" in prompt
     assert "write_document_content" in prompt
@@ -50,6 +53,8 @@ def test_agent_tool_registry_exposes_structured_langchain_tools() -> None:
         "search_memory",
         "search_rag",
         "search_documents_by_keyword",
+        "get_server_time",
+        "global_replace_keyword",
         "calculate",
         "propose_rewrite",
         "save_key_memory",
@@ -85,6 +90,20 @@ def test_agent_tool_registry_exposes_structured_langchain_tools() -> None:
         "delete_relationship_edge",
         "list_material_changes",
     }.issubset(tool_names)
+
+
+def test_get_server_time_tool_returns_current_server_time() -> None:
+    tools = {tool.name: tool for tool in get_agent_tools()}
+    before = datetime.now().astimezone()
+
+    result = tools["get_server_time"].invoke({})
+
+    after = datetime.now().astimezone()
+    reported = datetime.fromisoformat(result["iso_time"])
+    assert result["status"] == "ok"
+    assert result["timezone"]
+    assert isinstance(result["unix_timestamp"], int | float)
+    assert before <= reported <= after
 
 
 async def test_keyword_document_search_tool_searches_current_novel(session) -> None:

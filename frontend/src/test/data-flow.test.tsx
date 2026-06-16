@@ -404,6 +404,7 @@ describe("frontend data flow", () => {
     });
     expect(await screen.findByLabelText("回收站")).toBeInTheDocument();
 
+    await user.click(screen.getByRole("button", { name: "展开回收站" }));
     await user.click(await screen.findByRole("button", { name: "恢复 Chapter From API" }));
     await waitFor(() => {
       const restoreCall = vi.mocked(fetch).mock.calls.find(

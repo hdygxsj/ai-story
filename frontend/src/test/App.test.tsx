@@ -18,6 +18,12 @@ function unauthorizedResponse() {
   });
 }
 
+async function submitLogin(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByLabelText("邮箱或用户名"), "tester@example.com");
+  await user.type(screen.getByLabelText("密码"), "Password123!");
+  await user.click(screen.getByRole("button", { name: /登\s*录/ }));
+}
+
 describe("App", () => {
   afterEach(() => {
     window.localStorage.clear();
@@ -57,7 +63,7 @@ describe("App", () => {
     );
 
     render(<App />);
-    await user.click(screen.getByRole("button", { name: /登\s*录/ }));
+    await submitLogin(user);
 
     expect(await screen.findByRole("menuitem", { name: "工作台" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Agent配置" })).toBeInTheDocument();
@@ -112,7 +118,7 @@ describe("App", () => {
     );
 
     render(<App />);
-    await user.click(screen.getByRole("button", { name: /登\s*录/ }));
+    await submitLogin(user);
     await user.click(await screen.findByRole("menuitem", { name: "记忆" }));
     expect(window.location.pathname).toBe("/memory");
 
@@ -191,7 +197,7 @@ describe("App", () => {
     );
 
     render(<App />);
-    await user.click(screen.getByRole("button", { name: /登\s*录/ }));
+    await submitLogin(user);
     await user.click(await screen.findByRole("button", { name: /小说切换器：海灯记/ }));
     await user.click(await screen.findByText("管理小说"));
     const importButtons = await screen.findAllByRole("button", { name: /导\s*入小说/ });
@@ -226,7 +232,7 @@ describe("App", () => {
     );
 
     render(<App />);
-    await user.click(screen.getByRole("button", { name: /登\s*录/ }));
+    await submitLogin(user);
     await screen.findByRole("menuitem", { name: "工作台" });
     await screen.findByRole("button", { name: /小说切换器：海灯记/ });
     fireEvent.mouseDown(await screen.findByRole("button", { name: "导入小说" }));
@@ -261,7 +267,7 @@ describe("App", () => {
     );
 
     render(<App />);
-    await user.click(screen.getByRole("button", { name: /登\s*录/ }));
+    await submitLogin(user);
     await user.click(await screen.findByRole("button", { name: "导出 TXT" }));
 
     expect(createObjectURL).toHaveBeenCalled();
@@ -284,7 +290,7 @@ describe("App", () => {
     );
 
     render(<App />);
-    await user.click(screen.getByRole("button", { name: /登\s*录/ }));
+    await submitLogin(user);
     await user.click(await screen.findByRole("button", { name: /小说切换器：海灯记/ }));
     await user.click(await screen.findByText("管理小说"));
     await user.click(await screen.findByRole("button", { name: /打\s*开/ }));

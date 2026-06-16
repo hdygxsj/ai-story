@@ -8,9 +8,9 @@ import { Button, Modal, Space, Tooltip } from "antd";
 import { useCallback, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import type { RelationshipEdge } from "../../api/materials";
+import { buildRelationshipNetworkNodes, type GraphNode } from "./relationshipGraphLayout";
 import {
   DEFAULT_GRAPH_VIEW_TRANSFORM,
-  GRAPH_SIZE,
   GRAPH_ZOOM_STEP,
   type GraphViewTransform,
   graphViewBox,
@@ -18,13 +18,6 @@ import {
   zoomGraphAroundCenter,
   zoomGraphAtPoint,
 } from "./relationshipGraphView";
-
-type GraphNode = {
-  id: string;
-  label: string;
-  x: number;
-  y: number;
-};
 
 type PositionedEdge = RelationshipEdge & {
   path: string;
@@ -89,28 +82,6 @@ function buildRelationshipColorMap(edges: RelationshipEdge[]): Map<string, Relat
   return new Map(
     types.map((type, index) => [type, RELATIONSHIP_COLORS[index % RELATIONSHIP_COLORS.length]!]),
   );
-}
-
-function buildNodes(edges: RelationshipEdge[]): GraphNode[] {
-  const names = new Set<string>();
-  for (const edge of edges) {
-    names.add(edge.source_character);
-    names.add(edge.target_character);
-  }
-
-  const sorted = Array.from(names).sort((left, right) => left.localeCompare(right, "zh-CN"));
-  const center = GRAPH_SIZE / 2;
-  const radius = GRAPH_SIZE * 0.34;
-
-  return sorted.map((name, index) => {
-    const angle = (2 * Math.PI * index) / sorted.length - Math.PI / 2;
-    return {
-      id: name,
-      label: name,
-      x: center + radius * Math.cos(angle),
-      y: center + radius * Math.sin(angle),
-    };
-  });
 }
 
 function edgePath(
@@ -622,7 +593,7 @@ export function RelationshipGraph({ edges }: RelationshipGraphProps) {
   const [fullscreenTransform, setFullscreenTransform] = useState<GraphViewTransform>(DEFAULT_GRAPH_VIEW_TRANSFORM);
 
   const { edges: visibleEdges, hiddenCount } = useMemo(() => dedupeRelationshipEdges(edges), [edges]);
-  const nodes = useMemo(() => buildNodes(visibleEdges), [visibleEdges]);
+  const nodes = useMemo(() => buildRelationshipNetworkNodes(visibleEdges), [visibleEdges]);
   const positionedEdges = useMemo(() => buildPositionedEdges(visibleEdges, nodes), [visibleEdges, nodes]);
   const relationshipColors = useMemo(() => buildRelationshipColorMap(visibleEdges), [visibleEdges]);
   const relationshipColorIndex = useMemo(

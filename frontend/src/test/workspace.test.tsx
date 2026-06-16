@@ -1775,6 +1775,7 @@ describe("WorkspacePage", () => {
       expect(screen.getByText("正在执行：检索上下文")).toBeInTheDocument();
     });
     expect(screen.getByTestId("agent-thinking-indicator")).toHaveAttribute("data-variant", "tool");
+    expect(screen.getByTestId("agent-thinking-indicator").closest(".ant-bubble-list")).toBeTruthy();
 
     await waitFor(() => expect(releaseReasoning).not.toBeNull());
     releaseReasoning!();
