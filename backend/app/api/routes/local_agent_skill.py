@@ -45,8 +45,29 @@ Read materials, timeline events, memories, relationships, and chapter content be
 ai-story api request GET /novels/{novel_id}/creative-assets
 ai-story api request GET /novels/{novel_id}/timeline-events
 ai-story api request GET /novels/{novel_id}/memory-items
+ai-story api request GET /novels/{novel_id}/character-states
+ai-story api request GET /novels/{novel_id}/relationship-edges
 ai-story tools run {novel_id} search_documents_by_keyword --arg query=关键词
 ```
+
+Before drafting, actively gather context with the available routes and tools:
+
+- Materials and worldbuilding: `list_creative_assets`, `/novels/{novel_id}/creative-assets`.
+- Timeline: `list_timeline_events`, `/novels/{novel_id}/timeline-events`.
+- Character state: `list_character_states`, `/novels/{novel_id}/character-states`.
+- Relationships: `/novels/{novel_id}/relationship-edges`.
+- Memory: `list_memory_items`, `search_memory`, `/novels/{novel_id}/memory-items`.
+- Existing prose: `read_document`, `search_documents_by_keyword`, `/novels/{novel_id}/search`.
+- Semantic references: `search_rag`, `/novels/{novel_id}/rag/search`.
+- Recent material edits: `list_material_changes`, `/novels/{novel_id}/material-changes`.
+
+## Local Cache
+
+Use `.store/<小说名>/` for local working caches before editing or writing:
+
+- Save chapter snapshots, downloaded materials, timeline events, memories, and draft notes there.
+- Prefer one file per chapter or material group so changes are easy to inspect and recover.
+- Treat files under `.store/<小说名>/` as disposable local cache, not as the platform source of truth.
 
 ## Write Through Platform Tools
 
