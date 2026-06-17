@@ -110,9 +110,12 @@ go build ./cmd/ai-story
 ./ai-story --help
 ./ai-story auth login --login demo@example.com --password secret123
 ./ai-story api request GET /health
+./ai-story agent manifest
 ./ai-story tools list
 ./ai-story tools run <novel-id> calculate --arg 'expression=(12 + 8) * 15%'
 ```
+
+本地 Agent 可先读取 `ai-story agent manifest` 的 JSON 输出，再调用素材、时间线、记忆、章节和 Agent tool 接口来组织上下文并写作。
 
 常用开发命令：
 

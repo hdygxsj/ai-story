@@ -1,0 +1,57 @@
+package coverage
+
+var AgentTools = []string{
+	"read_document",
+	"search_memory",
+	"search_rag",
+	"search_documents_by_keyword",
+	"global_replace_keyword",
+	"calculate",
+	"get_server_time",
+	"update_novel",
+	"list_workspace_nodes",
+	"create_workspace_node",
+	"create_chapter_with_content",
+	"write_document_content",
+	"split_chapter_by_max_chars",
+	"propose_document_update",
+	"propose_selection_replace",
+	"list_document_versions",
+	"propose_version_restore",
+	"restore_workspace_node",
+	"update_workspace_node",
+	"trash_workspace_node",
+	"organize_workspace_tree",
+	"cleanup_workspace_folders",
+	"list_memory_items",
+	"list_memory_review_items",
+	"delete_memory_item",
+	"propose_rewrite",
+	"save_key_memory",
+	"list_creative_assets",
+	"create_character_asset",
+	"create_world_rule",
+	"update_creative_asset",
+	"delete_creative_asset",
+	"delete_creative_assets",
+	"list_timeline_events",
+	"create_timeline_event",
+	"update_timeline_event",
+	"reorder_timeline_events",
+	"delete_timeline_event",
+	"list_character_states",
+	"update_character_state",
+	"delete_character_state",
+	"create_relationship_edge",
+	"update_relationship_edge",
+	"delete_relationship_edge",
+	"list_material_changes",
+}
+
+func ToolKeys() map[string]bool {
+	keys := make(map[string]bool, len(AgentTools))
+	for _, name := range AgentTools {
+		keys[name] = true
+	}
+	return keys
+}

@@ -15,7 +15,8 @@ node_modules/
 dist/
 build/
 .vite/
-coverage/
+/coverage/
+frontend/coverage/
 *.tsbuildinfo
 
 # Go / CLI

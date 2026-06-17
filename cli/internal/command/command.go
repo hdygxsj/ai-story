@@ -160,6 +160,7 @@ func NewRoot(env *Env) *Command {
 
 	agent := (&Command{Name: "agent", Summary: "Send Agent messages."}).Add(
 		&Command{Name: "ask", Summary: "Send a non-streaming Agent message.", Usage: "ai-story agent ask NOVEL_ID MESSAGE"},
+		&Command{Name: "manifest", Summary: "Print a local Agent JSON capability manifest.", Usage: "ai-story agent manifest"},
 		&Command{Name: "stream", Summary: "Send a streaming Agent message.", Usage: "ai-story agent stream NOVEL_ID MESSAGE"},
 	)
 
@@ -475,6 +476,25 @@ func executeAgent(ctx context.Context, env *Env, args []string) int {
 	if len(args) == 0 || hasHelp(args) {
 		cmd, _ := NewRoot(env).Find([]string{"agent"})
 		_, _ = fmt.Fprint(env.Stdout, cmd.Help())
+		return 0
+	}
+	if args[0] == "manifest" {
+		manifest := map[string]any{
+			"purpose": "Local agents can use these HTTP routes and Agent tools to read context, reuse materials and timeline data, and write novel chapters through AI Story.",
+			"routes":  coverage.Routes,
+			"tools":   coverage.AgentTools,
+			"examples": []string{
+				"ai-story api request GET /novels/{novel_id}/creative-assets",
+				"ai-story api request GET /novels/{novel_id}/timeline-events",
+				"ai-story api request GET /novels/{novel_id}/memory-items",
+				"ai-story tools run {novel_id} search_documents_by_keyword --arg query=关键词",
+				"ai-story tools run {novel_id} create_chapter_with_content --arg title=章节名 --arg content=正文",
+			},
+		}
+		if err := output.JSON(env.Stdout, manifest); err != nil {
+			_, _ = fmt.Fprintln(env.Stderr, err)
+			return 1
+		}
 		return 0
 	}
 	if len(args) < 3 || (args[0] != "ask" && args[0] != "stream") {
