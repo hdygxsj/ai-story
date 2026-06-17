@@ -64,6 +64,26 @@ describe("buildRelationshipNetworkNodes", () => {
     expect(distanceFromCenter(center)).toBeLessThan(96);
     expect(distanceFromCenter(leaf)).toBeGreaterThan(190);
   });
+
+  it("keeps every character node at a readable distance from the others", () => {
+    const nodes = buildRelationshipNetworkNodes([
+      edge("1", "叶尘", "王磊"),
+      edge("2", "叶尘", "赵铁"),
+      edge("3", "叶尘", "苍雷"),
+      edge("4", "叶尘", "赤血宗"),
+      edge("5", "叶尘", "郭大山"),
+      edge("6", "叶尘", "江若溪"),
+      edge("7", "叶尘", "苏念"),
+      edge("8", "叶尘", "秦上士"),
+      edge("9", "江若溪", "江浩"),
+      edge("10", "苏念", "洛川"),
+      edge("11", "赵铁", "袁晓乐"),
+      edge("12", "秦上士", "苍雷"),
+      edge("13", "洛川", "赤血宗"),
+    ]);
+
+    expect(minNodeDistance(nodes)).toBeGreaterThanOrEqual(92);
+  });
 });
 
 function edge(id: string, source: string, target: string) {
@@ -78,4 +98,16 @@ function edge(id: string, source: string, target: string) {
 
 function distanceFromCenter(node: { x: number; y: number }) {
   return Math.hypot(node.x - 260, node.y - 260);
+}
+
+function minNodeDistance(nodes: Array<{ x: number; y: number }>) {
+  let minDistance = Number.POSITIVE_INFINITY;
+  for (let leftIndex = 0; leftIndex < nodes.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < nodes.length; rightIndex += 1) {
+      const left = nodes[leftIndex]!;
+      const right = nodes[rightIndex]!;
+      minDistance = Math.min(minDistance, Math.hypot(left.x - right.x, left.y - right.y));
+    }
+  }
+  return minDistance;
 }

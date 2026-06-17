@@ -15,10 +15,17 @@ type NodeStats = {
   neighbors: Set<string>;
 };
 
+type PlacementIntent = {
+  angle: number;
+  id: string;
+  radius: number;
+};
+
 const CENTER = GRAPH_SIZE / 2;
-const INNER_RADIUS = GRAPH_SIZE * 0.27;
-const MIDDLE_RADIUS = GRAPH_SIZE * 0.36;
+const INNER_RADIUS = GRAPH_SIZE * 0.24;
+const MIDDLE_RADIUS = GRAPH_SIZE * 0.35;
 const OUTER_RADIUS = GRAPH_SIZE * 0.44;
+const MIN_NODE_DISTANCE = 92;
 
 export function buildRelationshipNetworkNodes(edges: RelationshipEdge[]): GraphNode[] {
   const stats = buildNodeStats(edges);
@@ -32,18 +39,18 @@ export function buildRelationshipNetworkNodes(edges: RelationshipEdge[]): GraphN
   const coreNodes = ranked.slice(0, coreCount);
   const coreIds = new Set(coreNodes.map((node) => node.id));
   const coreAngles = buildCoreAngles(coreNodes);
-  const positioned = new Map<string, GraphNode>();
+  const intents: PlacementIntent[] = [];
   const layoutOrder: string[] = coreNodes.map((node) => node.id);
 
   coreNodes.forEach((node, index) => {
     if (index === 0) {
-      positioned.set(node.id, nodeAt(node.id, CENTER, CENTER));
+      intents.push({ id: node.id, angle: -Math.PI / 2, radius: 0 });
       return;
     }
 
     const angle = coreAngles.get(node.id) ?? 0;
     const radius = index <= 4 ? INNER_RADIUS : MIDDLE_RADIUS;
-    positioned.set(node.id, nodeFromPolar(node.id, angle, radius));
+    intents.push({ id: node.id, angle, radius });
   });
 
   const branchGroups = new Map<string, NodeStats[]>();
@@ -68,11 +75,12 @@ export function buildRelationshipNetworkNodes(edges: RelationshipEdge[]): GraphN
       const ratio = orderedGroup.length === 1 ? 0.5 : index / (orderedGroup.length - 1);
       const angle = anchorAngle - spread / 2 + spread * ratio;
       const radius = node.neighbors.size > 1 ? MIDDLE_RADIUS : OUTER_RADIUS;
-      positioned.set(node.id, nodeFromPolar(node.id, angle, radius));
+      intents.push({ id: node.id, angle, radius });
       layoutOrder.push(node.id);
     });
   }
 
+  const positioned = resolveReadablePositions(intents);
   return layoutOrder.map((id) => positioned.get(id) ?? nodeAt(id, CENTER, CENTER));
 }
 
@@ -155,6 +163,84 @@ function compareByNetworkImportance(left: NodeStats, right: NodeStats): number {
 
 function nodeFromPolar(id: string, angle: number, radius: number): GraphNode {
   return nodeAt(id, CENTER + radius * Math.cos(angle), CENTER + radius * Math.sin(angle));
+}
+
+function resolveReadablePositions(intents: PlacementIntent[]): Map<string, GraphNode> {
+  const positioned = new Map<string, GraphNode>();
+  const slots = buildReadableSlots(Math.max(0, intents.length - 1));
+
+  for (const intent of intents) {
+    if (intent.radius === 0) {
+      positioned.set(intent.id, nodeAt(intent.id, CENTER, CENTER));
+      continue;
+    }
+
+    const slot = chooseReadableSlot(intent, slots, Array.from(positioned.values()));
+    positioned.set(intent.id, nodeFromPolar(intent.id, slot.angle, slot.radius));
+  }
+
+  return positioned;
+}
+
+function buildReadableSlots(nodeCount: number): Array<{ angle: number; radius: number }> {
+  const slots: Array<{ angle: number; radius: number }> = [];
+  const ringSpecs = [
+    { count: 6, radius: INNER_RADIUS },
+    { count: 10, radius: MIDDLE_RADIUS },
+    { count: 14, radius: OUTER_RADIUS },
+  ];
+
+  for (const ring of ringSpecs) {
+    for (let index = 0; index < ring.count; index += 1) {
+      slots.push({
+        angle: (2 * Math.PI * index) / ring.count - Math.PI / 2,
+        radius: ring.radius,
+      });
+    }
+  }
+
+  if (nodeCount <= slots.length) {
+    return slots;
+  }
+
+  const extraCount = nodeCount - slots.length;
+  for (let index = 0; index < extraCount; index += 1) {
+    slots.push({
+      angle: (2 * Math.PI * index) / Math.max(extraCount, 1) - Math.PI / 2,
+      radius: OUTER_RADIUS,
+    });
+  }
+
+  return slots;
+}
+
+function chooseReadableSlot(
+  intent: PlacementIntent,
+  slots: Array<{ angle: number; radius: number }>,
+  existingNodes: GraphNode[],
+): { angle: number; radius: number } {
+  const candidates = slots
+    .filter((slot) => isReadableSlot(slot, existingNodes))
+    .sort((left, right) => slotScore(left, intent) - slotScore(right, intent));
+
+  const slot = candidates[0] ?? slots.sort((left, right) => slotScore(left, intent) - slotScore(right, intent))[0];
+  slots.splice(slots.indexOf(slot!), 1);
+  return slot!;
+}
+
+function isReadableSlot(slot: { angle: number; radius: number }, existingNodes: GraphNode[]): boolean {
+  const x = CENTER + slot.radius * Math.cos(slot.angle);
+  const y = CENTER + slot.radius * Math.sin(slot.angle);
+  return existingNodes.every((node) => Math.hypot(node.x - x, node.y - y) >= MIN_NODE_DISTANCE);
+}
+
+function slotScore(slot: { angle: number; radius: number }, intent: PlacementIntent): number {
+  return angleDistance(slot.angle, intent.angle) * 120 + Math.abs(slot.radius - intent.radius);
+}
+
+function angleDistance(left: number, right: number): number {
+  const delta = Math.abs(left - right) % (2 * Math.PI);
+  return Math.min(delta, 2 * Math.PI - delta);
 }
 
 function nodeAt(id: string, x: number, y: number): GraphNode {
