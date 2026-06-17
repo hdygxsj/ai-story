@@ -10,6 +10,7 @@ class AgentState(TypedDict, total=False):
     novel_id: UUID
     document_id: UUID | None
     message: str
+    message_id: UUID | str | None
     selected_text: str | None
     history_messages: list[Any]
     system_prompt: str | None

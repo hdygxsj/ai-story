@@ -129,6 +129,7 @@ async def send_agent_message(
             "novel_id": novel_id,
             "document_id": payload.document_id,
             "message": payload.message,
+            "message_id": user_message.id,
             "selected_text": payload.selected_text,
             "history_messages": assembled.history_messages,
             "system_prompt": system_prompt,

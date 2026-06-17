@@ -1,6 +1,6 @@
 from collections.abc import AsyncIterator
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,8 +14,24 @@ from app.models import ModelProfile
 def graph_invoke_config(conversation_id: UUID | None) -> dict[str, Any]:
     config: dict[str, Any] = {"recursion_limit": 150}
     if conversation_id is not None:
-        config["configurable"] = {"thread_id": f"{conversation_id}:{uuid4()}"}
+        config["configurable"] = {"thread_id": f"conversation:v2:{conversation_id}"}
     return config
+
+
+def _checkpoint_safe_value(value: Any) -> Any:
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, list):
+        return [_checkpoint_safe_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_checkpoint_safe_value(item) for item in value)
+    if isinstance(value, dict):
+        return {key: _checkpoint_safe_value(item) for key, item in value.items()}
+    return value
+
+
+def _checkpoint_safe_state(state: dict[str, Any]) -> dict[str, Any]:
+    return {key: _checkpoint_safe_value(value) for key, value in state.items() if key != "model_profile"}
 
 
 async def invoke_agent_graph(
@@ -40,7 +56,7 @@ async def invoke_agent_graph(
         checkpointer=checkpointer,
         model_profile=model_profile,
     )
-    invoke_state = {key: value for key, value in state.items() if key != "model_profile"}
+    invoke_state = _checkpoint_safe_state(state)
     return await graph.ainvoke(invoke_state, graph_invoke_config(conversation_id))
 
 
@@ -62,7 +78,7 @@ async def stream_agent_graph(
         document_id=state.get("document_id"),
     )
     graph = build_agent_graph(tools=tools, checkpointer=checkpointer, model_profile=model_profile)
-    invoke_state = {key: value for key, value in state.items() if key != "model_profile"}
+    invoke_state = _checkpoint_safe_state(state)
     final_result: dict[str, Any] | None = None
     tool_calls: list[dict[str, Any]] = []
     tool_calls_by_id: dict[str, dict[str, Any]] = {}

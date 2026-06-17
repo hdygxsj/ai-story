@@ -54,6 +54,7 @@ _CONTEXT_COMPRESSION_GUIDANCE = (
 _MIN_FULL_TOOL_ROUNDS = 3
 _TOOL_RESULT_TRUNCATE_TOKENS = 120
 _RESPONSE_TOKEN_RESERVE = 4096
+_SYSTEM_MESSAGE_ID = "agent_system_context"
 
 
 def _default_system_prompt(state: AgentState) -> str:
@@ -260,6 +261,37 @@ def _inject_context_compression_guidance(messages: list[Any]) -> list[Any]:
     ]
 
 
+def _refresh_system_message(messages: list[Any], system_prompt: str) -> list[Any]:
+    remaining = list(messages)
+    if remaining and isinstance(remaining[0], SystemMessage):
+        remaining = remaining[1:]
+    return [SystemMessage(content=system_prompt, id=_SYSTEM_MESSAGE_ID), *remaining]
+
+
+def _current_request_is_present(messages: list[Any], state: AgentState) -> bool:
+    message_id = state.get("message_id")
+    current_message = state.get("message")
+    for message in reversed(messages):
+        if not isinstance(message, HumanMessage):
+            continue
+        stored_message_id = message.additional_kwargs.get("agent_message_id")
+        if message_id is not None and stored_message_id == str(message_id):
+            return True
+        if message_id is None and message.content == current_message:
+            return True
+        return False
+    return False
+
+
+def _current_human_message(state: AgentState) -> HumanMessage:
+    message_id = state.get("message_id")
+    additional_kwargs = {"agent_message_id": str(message_id)} if message_id is not None else {}
+    message = HumanMessage(content=state["message"], additional_kwargs=additional_kwargs)
+    if message_id is not None:
+        message.id = f"agent_user:{message_id}"
+    return message
+
+
 def _remove_incomplete_tool_call_history(messages: list[Any]) -> list[Any]:
     cleaned: list[Any] = []
     index = 0
@@ -368,11 +400,15 @@ def build_agent_graph(
         system_prompt = state.get("system_prompt") or _default_system_prompt(state)
         if _CURRENT_REQUEST_GUIDANCE not in system_prompt:
             system_prompt = f"{system_prompt}\n\n{_CURRENT_REQUEST_GUIDANCE}"
-        if not prior:
+        if prior:
+            prior = _refresh_system_message(prior, system_prompt)
+            if not _current_request_is_present(prior, state):
+                prior.append(_current_human_message(state))
+        else:
             prior = [
-                SystemMessage(content=system_prompt),
+                SystemMessage(content=system_prompt, id=_SYSTEM_MESSAGE_ID),
                 *list(state.get("history_messages", [])),
-                HumanMessage(content=state["message"]),
+                _current_human_message(state),
             ]
 
         prior, compressed = _compress_tool_round_history(
@@ -385,19 +421,28 @@ def build_agent_graph(
         model = build_chat_model(model_profile, purpose="chat").bind_tools(tool_list)
         return prior, model, None
 
-    def agent_updates(prior: list[Any], ai_message: AIMessage) -> dict[str, Any]:
+    def agent_updates(state: AgentState, prior: list[Any], ai_message: AIMessage) -> dict[str, Any]:
+        existing_messages = list(state.get("messages", []))
+        messages_to_add: list[Any] = []
+        if not existing_messages:
+            messages_to_add.extend(prior)
+        elif prior and isinstance(prior[0], SystemMessage):
+            messages_to_add.append(prior[0])
+            if not _current_request_is_present(existing_messages, state):
+                messages_to_add.append(_current_human_message(state))
+
         if ai_message.tool_calls:
             previous_calls = _last_tool_call_batch(prior)
             if previous_calls and _tool_call_batch_signature(ai_message.tool_calls) == _tool_call_batch_signature(
                 previous_calls
             ):
                 return {
-                    "messages": [AIMessage(content=_REPEATED_TOOL_CALL_RESPONSE)],
+                    "messages": [*messages_to_add, AIMessage(content=_REPEATED_TOOL_CALL_RESPONSE)],
                     "response": _REPEATED_TOOL_CALL_RESPONSE,
                 }
-            return {"messages": [ai_message]}
+            return {"messages": [*messages_to_add, ai_message]}
         return {
-            "messages": [ai_message],
+            "messages": [*messages_to_add, ai_message],
             "response": _message_text(ai_message.content) or "操作已完成。",
         }
 
@@ -410,7 +455,7 @@ def build_agent_graph(
         if shortcut == "missing_model":
             return {"messages": prior, "response": "请先在 Agent 配置中为当前小说绑定并保存可用的对话模型。"}
         ai_message = model.invoke(prior)
-        return agent_updates(prior, ai_message)
+        return agent_updates(state, prior, ai_message)
 
     async def agent_node_async(state: AgentState) -> dict[str, Any]:
         prior, model, shortcut = prepare_agent_call(state)
@@ -429,7 +474,7 @@ def build_agent_graph(
             ai_message = model.invoke(prior)
         if ai_message is None:
             ai_message = AIMessage(content="")
-        return agent_updates(prior, ai_message)
+        return agent_updates(state, prior, ai_message)
 
     def finalize_node(state: AgentState) -> dict[str, Any]:
         tool_messages = [message for message in state.get("messages", []) if isinstance(message, ToolMessage)]

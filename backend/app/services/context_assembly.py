@@ -79,6 +79,88 @@ def _truncate_text(text: str, max_tokens: int) -> str:
     return text[:max_chars].rstrip() + "…"
 
 
+def _tool_call_summary_lines(metadata: dict) -> tuple[list[str], list[str]]:
+    tool_lines: list[str] = []
+    tool_summaries: list[str] = []
+    calls = metadata.get("tool_calls")
+    if not isinstance(calls, list):
+        return tool_lines, tool_summaries
+
+    for call in calls:
+        if not isinstance(call, dict):
+            continue
+        tool_name = str(call.get("tool") or call.get("name") or "tool")
+        summary = call.get("summary") or call.get("message")
+        if not isinstance(summary, str) or not summary.strip():
+            continue
+        clean_summary = _truncate_text(summary.strip(), 80)
+        tool_lines.append(f"工具 {tool_name}: {clean_summary}")
+        tool_summaries.append(f"{tool_name}: {clean_summary}")
+    return tool_lines, tool_summaries
+
+
+def _assistant_history_text(content: str, metadata: dict) -> tuple[str, list[str]]:
+    tool_lines, tool_summaries = _tool_call_summary_lines(metadata)
+    parts = [content, *tool_lines] if content else tool_lines
+    return "\n".join(part for part in parts if part), tool_summaries
+
+
+def _build_rag_query(
+    *,
+    user_message: str,
+    selected_text: str | None,
+    conversation_lines: list[str],
+) -> str:
+    query_parts = [f"当前问题：{user_message}"]
+    if selected_text:
+        query_parts.append(f"当前选区：{_truncate_text(selected_text, 160)}")
+    if conversation_lines:
+        recent_context = "\n".join(conversation_lines[-6:])
+        query_parts.append(f"近期上下文：{_truncate_text(recent_context, 260)}")
+    return "\n".join(query_parts)
+
+
+def _estimate_raw_context_tokens(
+    *,
+    user_message: str,
+    current_document: str,
+    selected_text: str | None,
+    key_memories: list[str],
+    structured: list[str],
+    neighbors: list[str],
+    rag_results: list[str],
+    conversation_lines: list[str],
+) -> int:
+    texts = [
+        user_message,
+        current_document,
+        selected_text or "",
+        *key_memories,
+        *structured,
+        *neighbors,
+        *rag_results,
+        "\n".join(conversation_lines),
+    ]
+    return sum(estimate_tokens(text) for text in texts if text)
+
+
+def _build_snapshot_summary(
+    *,
+    user_message: str,
+    conversation_lines: list[str],
+    tool_result_summaries: list[str],
+) -> str:
+    parts = [
+        "对话压缩快照",
+        f"当前目标：{user_message}",
+    ]
+    if conversation_lines:
+        parts.append("近期对话：\n" + _truncate_text("\n".join(conversation_lines[-10:]), 260))
+    if tool_result_summaries:
+        parts.append("已检索/工具结果：\n" + "\n".join(tool_result_summaries[-12:]))
+    return _truncate_text("\n\n".join(parts), 420)
+
+
 def _compress_pack(pack: ContextPack, budget: ContextBudget) -> tuple[ContextPack, set[str]]:
     compressed: set[str] = set()
     available = max(0, budget.max_tokens - budget.response_tokens)
@@ -131,13 +213,21 @@ async def _create_context_snapshot(
     conversation_id: UUID,
     pack: ContextPack,
     user_message: str,
+    conversation_lines: list[str],
+    tool_result_summaries: list[str],
 ) -> ContextSnapshot:
+    summary = _build_snapshot_summary(
+        user_message=user_message,
+        conversation_lines=conversation_lines,
+        tool_result_summaries=tool_result_summaries,
+    )
     facts = {
         "open_questions": [],
         "recent_goal": user_message,
         "included_sources": [item.source for item in pack.items],
+        "recent_context": conversation_lines[-10:],
+        "tool_results": tool_result_summaries[-12:],
     }
-    summary = f"对话上下文快照：{user_message[:200]}"
     snapshot = ContextSnapshot(
         novel_id=novel_id,
         conversation_id=conversation_id,
@@ -268,7 +358,7 @@ async def _load_conversation_history(
     conversation_id: UUID,
     limit: int,
     current_message_id: UUID | None = None,
-) -> tuple[list[str], list[BaseMessage]]:
+) -> tuple[list[str], list[BaseMessage], list[str]]:
     statement = select(Message).where(Message.conversation_id == conversation_id)
     if current_message_id is not None:
         statement = statement.where(Message.id != current_message_id)
@@ -284,21 +374,24 @@ async def _load_conversation_history(
 
     history_lines: list[str] = []
     history_messages: list[BaseMessage] = []
+    tool_result_summaries: list[str] = []
     for item in messages[-20:]:
         if item.role == "user":
             history_lines.append(f"用户：{item.content}")
             history_messages.append(HumanMessage(content=item.content))
         elif item.role == "assistant":
-            history_lines.append(f"助手：{item.content}")
+            assistant_text, item_tool_summaries = _assistant_history_text(item.content, item.extra_metadata)
+            tool_result_summaries.extend(item_tool_summaries)
+            history_lines.append(f"助手：{assistant_text}")
             reasoning_content = item.extra_metadata.get("reasoning_content")
             additional_kwargs = (
                 {"reasoning_content": reasoning_content}
                 if isinstance(reasoning_content, str)
                 else {}
             )
-            history_messages.append(AIMessage(content=item.content, additional_kwargs=additional_kwargs))
+            history_messages.append(AIMessage(content=assistant_text, additional_kwargs=additional_kwargs))
 
-    return history_lines, history_messages[-10:]
+    return history_lines, history_messages[-10:], tool_result_summaries
 
 
 async def assemble_context(
@@ -341,13 +434,28 @@ async def assemble_context(
             count=int(budget_settings.get("recent_chapters_count", 3)),
         )
 
+    conversation_lines: list[str] = []
+    history_messages: list[BaseMessage] = []
+    tool_result_summaries: list[str] = []
+    if sources.get("conversation_history", True):
+        conversation_lines, history_messages, tool_result_summaries = await _load_conversation_history(
+            session,
+            conversation_id=conversation_id,
+            limit=int(budget_settings.get("conversation_history_limit", 20)),
+            current_message_id=message_id,
+        )
+
     rag_results: list[str] = []
     if sources.get("rag_search", True):
         try:
             chunks = await search_rag_chunks(
                 session,
                 novel_id=novel.id,
-                query=user_message,
+                query=_build_rag_query(
+                    user_message=user_message,
+                    selected_text=selected_text if sources.get("selected_text", True) else None,
+                    conversation_lines=conversation_lines,
+                ),
                 limit=8,
                 model_profile=model_profile,
                 excluded_source_types={
@@ -360,16 +468,6 @@ async def assemble_context(
             rag_results = [chunk.text for chunk in chunks]
         except Exception:
             rag_results = []
-
-    conversation_lines: list[str] = []
-    history_messages: list[BaseMessage] = []
-    if sources.get("conversation_history", True):
-        conversation_lines, history_messages = await _load_conversation_history(
-            session,
-            conversation_id=conversation_id,
-            limit=int(budget_settings.get("conversation_history_limit", 20)),
-            current_message_id=message_id,
-        )
 
     pack = build_context_pack(
         user_instruction=user_message,
@@ -385,14 +483,27 @@ async def assemble_context(
 
     compressed_sources: set[str] = set()
     snapshot_id: UUID | None = None
+    raw_estimated_tokens = _estimate_raw_context_tokens(
+        user_message=user_message,
+        current_document=current_document,
+        selected_text=selected_text if sources.get("selected_text", True) else None,
+        key_memories=key_memories,
+        structured=structured,
+        neighbors=neighbors,
+        rag_results=rag_results,
+        conversation_lines=conversation_lines,
+    )
+    raw_usage_ratio = raw_estimated_tokens / max_tokens if max_tokens else 1
 
-    if pack.usage_ratio >= 0.95:
+    if max(pack.usage_ratio, raw_usage_ratio) >= 0.95:
         snapshot = await _create_context_snapshot(
             session,
             novel_id=novel.id,
             conversation_id=conversation_id,
             pack=pack,
             user_message=user_message,
+            conversation_lines=conversation_lines,
+            tool_result_summaries=tool_result_summaries,
         )
         snapshot_id = snapshot.id
         snapshot_text = f"上下文快照：{snapshot.summary}"

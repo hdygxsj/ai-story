@@ -77,6 +77,7 @@ async def stream_agent_events(
             "novel_id": novel.id,
             "document_id": document_id,
             "message": message,
+            "message_id": user_message_id,
             "selected_text": selected_text,
             "history_messages": assembled.history_messages,
             "system_prompt": system_prompt,

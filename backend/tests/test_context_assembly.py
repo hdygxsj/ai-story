@@ -1,9 +1,11 @@
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
+from sqlalchemy import select
 
 from app.main import app
-from app.models import Conversation, Message, Novel, User
+from app.models import ContextSnapshot, Conversation, Message, Novel, User
 from app.services.context_assembly import assemble_context
+from app.services.context_settings import update_context_settings
 
 
 def auth_headers(client: TestClient) -> dict[str, str]:
@@ -391,3 +393,156 @@ async def test_conversation_history_excludes_current_message_by_id_not_sort_posi
     assert "之前要求：第38章按新设定修改" in history_contents
     assert "已经按第38章处理。" in history_contents
     assert "第40章和第49章也同步修改" not in history_contents
+
+
+async def test_conversation_history_includes_tool_call_summaries_for_model_context(session) -> None:
+    user = User(email="tool-history@example.com", username="tool-history", password_hash="hash")
+    session.add(user)
+    await session.flush()
+    novel = Novel(owner_id=user.id, title="Tool History")
+    session.add(novel)
+    await session.flush()
+    conversation = Conversation(novel_id=novel.id, user_id=user.id, title="Tool History")
+    session.add(conversation)
+    await session.flush()
+    session.add_all(
+        [
+            Message(conversation_id=conversation.id, role="user", content="帮我查灯塔资料"),
+            Message(
+                conversation_id=conversation.id,
+                role="assistant",
+                content="查到了。",
+                extra_metadata={
+                    "tool_calls": [
+                        {"tool": "search_rag", "status": "ok", "summary": "命中：钥匙藏在镜片下。"},
+                        {"tool": "search_memory", "status": "ok", "summary": "记忆：守灯人害怕涨潮。"},
+                    ]
+                },
+            ),
+        ]
+    )
+    await session.commit()
+
+    assembled = await assemble_context(
+        session,
+        novel=novel,
+        conversation_id=conversation.id,
+        document_id=None,
+        selected_text=None,
+        user_message="刚才查到了什么？",
+        model_profile=None,
+    )
+
+    conversation_history = next(item.text for item in assembled.pack.items if item.source == "conversation_history")
+    assert "工具 search_rag: 命中：钥匙藏在镜片下。" in conversation_history
+    assert "工具 search_memory: 记忆：守灯人害怕涨潮。" in conversation_history
+
+    assistant_history = [message for message in assembled.history_messages if isinstance(message, AIMessage)]
+    assert assistant_history
+    assert "工具 search_rag: 命中：钥匙藏在镜片下。" in str(assistant_history[-1].content)
+
+
+async def test_context_snapshot_captures_recent_messages_and_tool_results_when_context_is_large(session) -> None:
+    user = User(email="snapshot-rich@example.com", username="snapshot-rich", password_hash="hash")
+    session.add(user)
+    await session.flush()
+    novel = Novel(owner_id=user.id, title="Rich Snapshot")
+    session.add(novel)
+    await session.flush()
+    conversation = Conversation(novel_id=novel.id, user_id=user.id, title="Rich Snapshot")
+    session.add(conversation)
+    await session.flush()
+    await update_context_settings(
+        session,
+        novel=novel,
+        sources={
+            "current_document": False,
+            "selected_text": False,
+            "key_memories": False,
+            "structured_assets": False,
+            "neighboring_chapters": False,
+            "rag_search": False,
+            "conversation_history": True,
+        },
+        budget={"max_context_tokens": 120, "response_reserve": 0, "conversation_history_limit": 20},
+    )
+    session.add_all(
+        [
+            Message(conversation_id=conversation.id, role="user", content="扩写第七章，核心是旧码头密钥。"),
+            Message(
+                conversation_id=conversation.id,
+                role="assistant",
+                content="我检索了旧码头线索。" + " 长上下文" * 120,
+                extra_metadata={
+                    "tool_calls": [
+                        {"tool": "search_documents_by_keyword", "status": "ok", "summary": "命中：密钥藏在灯塔镜片下。"}
+                    ]
+                },
+            ),
+        ]
+    )
+    await session.commit()
+
+    assembled = await assemble_context(
+        session,
+        novel=novel,
+        conversation_id=conversation.id,
+        document_id=None,
+        selected_text=None,
+        user_message="继续根据刚才的线索写。",
+        model_profile=None,
+    )
+
+    assert assembled.context_detail.snapshot_id is not None
+    snapshot = await session.scalar(select(ContextSnapshot).where(ContextSnapshot.id == assembled.context_detail.snapshot_id))
+    assert snapshot is not None
+    assert "扩写第七章" in snapshot.summary
+    assert "密钥藏在灯塔镜片下" in snapshot.summary
+    assert snapshot.facts["tool_results"] == ["search_documents_by_keyword: 命中：密钥藏在灯塔镜片下。"]
+
+
+async def test_rag_query_uses_current_request_selection_and_recent_context(session, monkeypatch) -> None:
+    captured_queries: list[str] = []
+
+    async def fake_search_rag(*args, **kwargs):
+        captured_queries.append(kwargs["query"])
+        return []
+
+    monkeypatch.setattr("app.services.context_assembly.search_rag_chunks", fake_search_rag)
+
+    user = User(email="rag-query-context@example.com", username="rag-query-context", password_hash="hash")
+    session.add(user)
+    await session.flush()
+    novel = Novel(owner_id=user.id, title="RAG Query Context")
+    session.add(novel)
+    await session.flush()
+    conversation = Conversation(novel_id=novel.id, user_id=user.id, title="RAG Query Context")
+    session.add(conversation)
+    await session.flush()
+    session.add_all(
+        [
+            Message(conversation_id=conversation.id, role="user", content="查一下旧码头密码。"),
+            Message(
+                conversation_id=conversation.id,
+                role="assistant",
+                content="查到了。",
+                extra_metadata={"tool_calls": [{"tool": "search_rag", "status": "ok", "summary": "旧码头密码与潮汐钟有关。"}]},
+            ),
+        ]
+    )
+    await session.commit()
+
+    await assemble_context(
+        session,
+        novel=novel,
+        conversation_id=conversation.id,
+        document_id=None,
+        selected_text="他看向灯塔，等待潮水退去。",
+        user_message="继续写它",
+        model_profile=None,
+    )
+
+    assert captured_queries
+    assert "继续写它" in captured_queries[-1]
+    assert "他看向灯塔" in captured_queries[-1]
+    assert "旧码头密码与潮汐钟有关" in captured_queries[-1]
