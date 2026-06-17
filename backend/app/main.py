@@ -10,6 +10,7 @@ from app.api.routes import (
     auth_router,
     conversations_router,
     confirmations_router,
+    local_agent_skill_router,
     memory_router,
     materials_router,
     model_profiles_router,
@@ -45,6 +46,7 @@ app.include_router(agent_router)
 app.include_router(agent_tools_router)
 app.include_router(conversations_router)
 app.include_router(confirmations_router)
+app.include_router(local_agent_skill_router)
 app.include_router(rag_router)
 app.include_router(search_router)
 

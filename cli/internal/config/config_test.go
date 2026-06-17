@@ -28,6 +28,20 @@ func TestConfigBaseURLPriority(t *testing.T) {
 	}
 }
 
+func TestConfigTokenPriority(t *testing.T) {
+	t.Setenv("AI_STORY_ACCESS_TOKEN", "env-token")
+	cfg := config.Config{Token: "saved-token"}
+
+	if got := cfg.ResolveToken(); got != "env-token" {
+		t.Fatalf("env token = %q", got)
+	}
+
+	t.Setenv("AI_STORY_ACCESS_TOKEN", "")
+	if got := cfg.ResolveToken(); got != "saved-token" {
+		t.Fatalf("saved token = %q", got)
+	}
+}
+
 func TestConfigSaveLoadRoundTrip(t *testing.T) {
 	path := t.TempDir() + "/config.json"
 	cfg := config.Config{BaseURL: "http://local.test", Token: "token-123"}

@@ -465,6 +465,27 @@ describe("WorkspacePage", () => {
     expect(screen.getByLabelText("章节名称")).toHaveValue("第一章");
   });
 
+  it("copies a local Agent setup prompt from the Agent panel header", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
+
+    await user.click(screen.getByRole("button", { name: "复制本地 Agent 接入提示" }));
+
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const copied = writeText.mock.calls[0][0] as string;
+    expect(copied).toContain("/local-agent-skill/SKILL.md");
+    expect(copied).toContain("AI_STORY_ACCESS_TOKEN=test-token");
+    expect(copied).toContain("ai-story agent manifest");
+    expect(copied).toContain("ai-story tools run");
+    expect(await screen.findByText("已复制本地 Agent 接入提示")).toBeInTheDocument();
+  });
+
   it("renames the current chapter directly above the editor", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {

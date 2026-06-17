@@ -1,11 +1,12 @@
 import Bubble from "@ant-design/x/es/bubble";
 import Sender from "@ant-design/x/es/sender";
-import { CloseOutlined, PushpinOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Flex, Space, Tag, Typography } from "antd";
+import { CloseOutlined, CopyOutlined, PushpinOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Flex, Space, Tag, Tooltip, Typography } from "antd";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentConfirmation, AgentStreamDonePayload, AgentToolCallRecord, ContextDetail, WorkspaceDiff } from "../../api/agent";
 import { streamAgentMessage } from "../../api/agent";
+import { API_BASE } from "../../api/http";
 import type { Conversation } from "../../api/conversations";
 import {
   createConversation,
@@ -52,6 +53,7 @@ type AgentPanelProps = {
 
 const WELCOME_MESSAGE = "告诉我你想创建、改写、记录或检索什么。";
 const VISIBLE_MESSAGE_LIMIT = 120;
+const LOCAL_AGENT_SKILL_PATH = "/local-agent-skill/SKILL.md";
 
 type ThinkingState = {
   startedAt: number;
@@ -69,6 +71,27 @@ function thinkingLabel(state: ThinkingState): string {
 
 function welcomeMessages(): ChatMessage[] {
   return [{ id: createMessageId("assistant"), role: "assistant", content: WELCOME_MESSAGE }];
+}
+
+function buildLocalAgentPrompt(apiBase: string, accessToken: string, novelId: string) {
+  const normalizedApiBase = apiBase.replace(/\/$/, "");
+  return [
+    "请连接我的 AI Story 平台，下载并使用平台提供的本地 Agent skill，然后通过 ai-story CLI 复用素材、时间线、记忆和章节工具来写小说。",
+    "",
+    `平台地址：${normalizedApiBase}`,
+    `小说 ID：${novelId}`,
+    `Skill 下载地址：${normalizedApiBase}${LOCAL_AGENT_SKILL_PATH}`,
+    "",
+    "请按下面步骤执行：",
+    `1. 下载 skill：curl -fsS ${normalizedApiBase}${LOCAL_AGENT_SKILL_PATH}`,
+    "2. 安装或加载这个 skill，按 skill 说明使用 ai-story CLI。",
+    `3. 设置连接环境：AI_STORY_API_BASE=${normalizedApiBase} AI_STORY_ACCESS_TOKEN=${accessToken}`,
+    "4. 先运行 ai-story agent manifest，读取可用接口和 Agent 工具。",
+    "5. 写作前读取 creative-assets、timeline-events、memory-items 和章节正文。",
+    "6. 写入时优先使用 ai-story tools run，例如 create_chapter_with_content、save_key_memory、create_timeline_event。",
+    "",
+    "不要直接写数据库；通过 CLI 和平台 API 连接。",
+  ].join("\n");
 }
 
 export function AgentPanel({
@@ -98,6 +121,7 @@ export function AgentPanel({
   const [thinking, setThinking] = useState<ThinkingState | null>(null);
   const [contextDetail, setContextDetail] = useState<ContextDetail | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [localAgentPromptCopied, setLocalAgentPromptCopied] = useState(false);
   const activeTextIdRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
@@ -465,6 +489,17 @@ export function AgentPanel({
     }
   }
 
+  async function handleCopyLocalAgentPrompt() {
+    const prompt = buildLocalAgentPrompt(API_BASE, token, novelId);
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setLocalAgentPromptCopied(true);
+      window.setTimeout(() => setLocalAgentPromptCopied(false), 2200);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "无法复制本地 Agent 接入提示。");
+    }
+  }
+
   useEffect(() => {
     if (!rewriteRequest?.text) {
       return;
@@ -524,6 +559,16 @@ export function AgentPanel({
           <Typography.Title className="agent-panel-header-title" data-testid="agent-panel-header" level={4} style={{ margin: 0 }}>
             执笔
           </Typography.Title>
+          <Tooltip title="复制给本地 Agent">
+            <Button
+              aria-label="复制本地 Agent 接入提示"
+              className="agent-panel-local-agent-button"
+              icon={<CopyOutlined />}
+              onClick={() => void handleCopyLocalAgentPrompt()}
+              size="small"
+              type="text"
+            />
+          </Tooltip>
           <ConversationSidebar
             activeConversationId={activeConversationId}
             conversations={conversations}
@@ -579,6 +624,11 @@ export function AgentPanel({
         />
       ) : null}
       <div className="agent-panel-chat">
+        {localAgentPromptCopied ? (
+          <Typography.Text className="agent-panel-copy-status" type="secondary">
+            已复制本地 Agent 接入提示
+          </Typography.Text>
+        ) : null}
         <ContextStatusBar detail={contextDetail} />
         <div
           className="agent-panel-messages"

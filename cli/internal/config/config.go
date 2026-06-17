@@ -27,6 +27,13 @@ func (c Config) ResolveBaseURL(flagValue string) string {
 	return DefaultBaseURL
 }
 
+func (c Config) ResolveToken() string {
+	if envValue := os.Getenv("AI_STORY_ACCESS_TOKEN"); envValue != "" {
+		return envValue
+	}
+	return c.Token
+}
+
 func DefaultPath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {

@@ -241,7 +241,7 @@ func withoutHelp(args []string) []string {
 }
 
 func newClient(env *Env) *client.Client {
-	c := client.New(env.Config.ResolveBaseURL(env.BaseURL), env.Config.Token)
+	c := client.New(env.Config.ResolveBaseURL(env.BaseURL), env.Config.ResolveToken())
 	if env.HTTPClient != nil {
 		c.HTTPClient = env.HTTPClient
 	}

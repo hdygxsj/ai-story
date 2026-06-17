@@ -73,6 +73,7 @@ var Routes = []Route{
 	{"GET", "/novels/{novel_id}/search", "search"},
 	{"POST", "/novels/{novel_id}/agent/messages", "agent"},
 	{"POST", "/novels/{novel_id}/agent/messages/stream", "agent"},
+	{"GET", "/local-agent-skill/SKILL.md", "local-agent"},
 	{"GET", "/agent-tools", "tools"},
 	{"GET", "/agent-tools/{tool_name}", "tools"},
 	{"POST", "/novels/{novel_id}/agent/tools/{tool_name}", "tools"},

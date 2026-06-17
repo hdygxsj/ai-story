@@ -39,6 +39,22 @@
   flex-shrink: 0;
 }
 
+.agent-panel-local-agent-button {
+  flex: 0 0 auto;
+}
+
+.agent-panel-copy-status {
+  background: rgba(22, 119, 255, 0.08);
+  border: 1px solid rgba(22, 119, 255, 0.16);
+  border-radius: 8px;
+  color: #1677ff;
+  display: block;
+  flex-shrink: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 4px 8px;
+}
+
 .agent-panel-toolbar-header {
   border-bottom: none;
   flex: 1;
