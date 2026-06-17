@@ -18,6 +18,10 @@ build/
 coverage/
 *.tsbuildinfo
 
+# Go / CLI
+.gocache/
+cli/ai-story
+
 # Local editor and OS files
 .DS_Store
 .idea/

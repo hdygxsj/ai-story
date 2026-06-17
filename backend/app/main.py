@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.agent.checkpoint import close_checkpointer
 from app.api.routes import (
     agent_router,
+    agent_tools_router,
     auth_router,
     conversations_router,
     confirmations_router,
@@ -41,6 +42,7 @@ app.include_router(novels_router)
 app.include_router(memory_router)
 app.include_router(materials_router)
 app.include_router(agent_router)
+app.include_router(agent_tools_router)
 app.include_router(conversations_router)
 app.include_router(confirmations_router)
 app.include_router(rag_router)

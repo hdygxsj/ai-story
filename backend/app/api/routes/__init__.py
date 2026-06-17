@@ -1,4 +1,5 @@
 from app.api.routes.agent import router as agent_router
+from app.api.routes.agent_tools import router as agent_tools_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.conversations import router as conversations_router
 from app.api.routes.confirmations import router as confirmations_router
@@ -11,6 +12,7 @@ from app.api.routes.search import router as search_router
 
 __all__ = [
     "agent_router",
+    "agent_tools_router",
     "auth_router",
     "conversations_router",
     "confirmations_router",

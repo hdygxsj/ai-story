@@ -100,6 +100,27 @@ npm run tauri:build    # 构建安装包
 
 桌面版仍会启动 Docker Compose 栈；首次运行会自动检测并尝试安装 Docker Desktop。支持系统托盘、可选退出时停止容器，Windows 安装包由 GitHub Actions 构建。
 
+## 命令行工具
+
+仓库包含 Go 编写的 `ai-story` CLI，用于从终端调用后端 HTTP 接口和 Agent runtime 工具。CLI 默认连接 `http://localhost:8000`，也可以通过 `--base-url` 或 `AI_STORY_API_BASE` 指定后端地址。
+
+```bash
+cd cli
+go build ./cmd/ai-story
+./ai-story --help
+./ai-story auth login --login demo@example.com --password secret123
+./ai-story api request GET /health
+./ai-story tools list
+./ai-story tools run <novel-id> calculate --arg 'expression=(12 + 8) * 15%'
+```
+
+常用开发命令：
+
+```bash
+make cli-test
+make cli-build
+```
+
 ## 数据库初始化
 
 后端容器启动时会自动执行 `alembic upgrade head`（见 `backend/docker-entrypoint.sh`）。
@@ -158,6 +179,8 @@ Makefile 快捷方式：
 make up          # 前台启动
 make down        # 停止
 make db-migrate  # 数据库迁移
+make cli-test    # 运行 CLI 测试
+make cli-build   # 构建 CLI
 make test        # 运行前后端测试
 ```
 
@@ -203,6 +226,9 @@ cd backend && source .venv/bin/activate && pytest -v
 
 # 前端
 cd frontend && npm test
+
+# CLI
+cd cli && go test ./...
 ```
 
 ## 配置说明
@@ -228,6 +254,7 @@ ai-story/
 │   ├── app/          # 业务代码、Agent、API 路由
 │   └── alembic/      # 数据库迁移
 ├── frontend/         # React 前端
+├── cli/              # Go 命令行客户端
 ├── desktop/          # Tauri 桌面壳（Docker 环境检测与启动）
 ├── docker-compose.yml
 ├── install.sh        # 一键安装脚本
