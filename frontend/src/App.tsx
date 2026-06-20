@@ -441,16 +441,25 @@ export function App() {
                     flexShrink: 1,
                     height: 42,
                     marginLeft: "auto",
-                    maxWidth: 234,
+                    maxWidth: 340,
                     minWidth: 0,
                     padding: "4px 12px 4px 6px",
-                    width: "min(234px, 28vw)",
+                    width: "min(340px, 36vw)",
                   }}
                 >
-                  <Flex align="center" gap={10} justify="space-between">
-                    <Flex align="center" gap={8} style={{ minWidth: 0 }}>
+                  <Flex align="center" gap={10} justify="space-between" style={{ width: "100%" }}>
+                    <Flex align="center" gap={8} style={{ flex: "1 1 auto", minWidth: 0 }}>
                       <Avatar icon={<BookOutlined />} size={28} style={{ background: "#fff7ed", color: "#ff7a18" }} />
-                      <span style={{ color: "#111827", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis" }}>
+                      <span
+                        style={{
+                          color: "#111827",
+                          display: "block",
+                          fontWeight: 600,
+                          minWidth: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
                         {selectedNovel?.title ?? "未选择小说"}
                       </span>
                     </Flex>

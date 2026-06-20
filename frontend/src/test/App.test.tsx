@@ -81,7 +81,10 @@ describe("App", () => {
     ]);
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
 
-    expect(screen.getByRole("button", { name: /小说切换器：海灯记/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /小说切换器：海灯记/ })).toHaveStyle({
+      maxWidth: "340px",
+      width: "min(340px, 36vw)",
+    });
     expect(screen.getByRole("button", { name: "导入小说" })).toHaveStyle({
       alignItems: "center",
       display: "inline-flex",
