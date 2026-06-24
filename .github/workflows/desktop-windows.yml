@@ -3,6 +3,10 @@ name: Desktop Windows Build
 on:
   push:
     branches: [master, main]
+    tags:
+      - "v*"
+      - "desktop-v*"
+      - "*.*.*"
     paths:
       - "desktop/**"
       - "scripts/prepare-desktop-stack.mjs"
