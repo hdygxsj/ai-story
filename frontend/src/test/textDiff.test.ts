@@ -18,4 +18,14 @@ describe("textDiff", () => {
     expect(hasDiffChanges(segments)).toBe(true);
     expect(segments.some((segment) => segment.kind === "insert" || segment.kind === "modify")).toBe(true);
   });
+
+  it("keeps matching sentences as context instead of replacing the whole text", () => {
+    const segments = diffText("共同开头。旧中段。共同结尾。", "共同开头。新中段。共同结尾。");
+
+    expect(segments).toEqual([
+      { kind: "equal", text: "共同开头。" },
+      { kind: "modify", before: "旧中段。", after: "新中段。" },
+      { kind: "equal", text: "共同结尾。" },
+    ]);
+  });
 });

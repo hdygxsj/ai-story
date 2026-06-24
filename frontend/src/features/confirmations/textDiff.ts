@@ -16,7 +16,8 @@ function splitDiffLines(text: string): string[] {
   if (text.includes("\n")) {
     return text.split("\n");
   }
-  return [text];
+  const sentenceLines = text.match(/[^。！？!?；;.!?]+[。！？!?；;.!?]?/g);
+  return sentenceLines && sentenceLines.length > 1 ? sentenceLines : [text];
 }
 
 function diffLineArrays(beforeLines: string[], afterLines: string[]): DiffLine[] {

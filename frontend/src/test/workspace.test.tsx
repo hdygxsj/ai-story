@@ -659,6 +659,75 @@ describe("WorkspacePage", () => {
     });
   });
 
+  it("compares a saved version with the current document in version history", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/novels/novel-1/nodes")) {
+        return Promise.resolve(
+          jsonResponse([
+            { id: "node-1", title: "第一章", node_type: "chapter", parent_id: null, document_id: "doc-1", position: 0 },
+          ]),
+        );
+      }
+      if (url.endsWith("/documents/doc-1/versions")) {
+        return Promise.resolve(
+          jsonResponse([
+            {
+              id: "version-1",
+              document_id: "doc-1",
+              source: "user",
+              created_at: "2026-06-14T10:00:00.000Z",
+              content: {
+                type: "doc",
+                content: [
+                  { type: "paragraph", content: [{ type: "text", text: "共同开头" }] },
+                  { type: "paragraph", content: [{ type: "text", text: "旧中段" }] },
+                  { type: "paragraph", content: [{ type: "text", text: "共同结尾" }] },
+                ],
+              },
+            },
+          ]),
+        );
+      }
+      if (url.endsWith("/documents/doc-1")) {
+        return Promise.resolve(
+          jsonResponse({
+            id: "doc-1",
+            content: {
+              type: "doc",
+              content: [
+                { type: "paragraph", content: [{ type: "text", text: "共同开头" }] },
+                { type: "paragraph", content: [{ type: "text", text: "新中段" }] },
+                { type: "paragraph", content: [{ type: "text", text: "共同结尾" }] },
+              ],
+            },
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
+    await screen.findByText("新中段");
+    await user.click(screen.getByRole("button", { name: "版本历史" }));
+    await user.click(await screen.findByRole("button", { name: "对比当前" }));
+
+    expect(await screen.findByText("版本对比")).toBeInTheDocument();
+    const dialog = screen.getByTestId("version-diff-modal");
+    expect(within(dialog).getByText("历史版本")).toBeInTheDocument();
+    expect(within(dialog).getByText("当前正文")).toBeInTheDocument();
+    expect(screen.queryByTestId("confirmation-diff-view")).not.toBeInTheDocument();
+
+    const rows = within(dialog).getAllByTestId("version-diff-row");
+    expect(rows).toHaveLength(3);
+    expect(within(rows[0]).getAllByText("共同开头")).toHaveLength(2);
+    expect(within(rows[1]).getByText("旧中段")).toBeInTheDocument();
+    expect(within(rows[1]).getByText("新中段")).toBeInTheDocument();
+    expect(within(rows[2]).getAllByText("共同结尾")).toHaveLength(2);
+  });
+
   it("refreshes document versions after approving a confirmation", async () => {
     const user = userEvent.setup();
     let versionCalls = 0;

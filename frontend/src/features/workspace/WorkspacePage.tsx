@@ -1661,6 +1661,7 @@ export function WorkspacePage({
         />
       </div>
       <DocumentVersionHistory
+        currentContent={editorContent}
         onClose={() => setVersionHistoryOpen(false)}
         onRestore={(versionId) => void handleRestoreDocumentVersion(versionId)}
         open={versionHistoryOpen}
