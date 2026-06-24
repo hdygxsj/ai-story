@@ -20,10 +20,14 @@ _MEMORY_GUIDANCE = (
     "不要要求用户手动删除。"
 )
 _MATERIAL_GUIDANCE = (
-    "当用户要求创建、修改、删除创作资产、时间线、角色状态或人物关系时，"
+    "当用户要求创建、修改、删除创作资产、时间线、角色状态、人物属性、背包、地图或人物关系时，"
     "必须直接调用相应 list/create/update/delete 工具，无需用户确认。"
     "角色状态：同一角色 + 同一 scope 只保留一条记录，更新时用 update_character_state 并传 state_id；"
     "scope=current 表示最新状态，章节快照请用 chapter_3 等独立 scope，不要重复创建。"
+    "人物属性：等级、属性、资源、当前位置等可计算字段用 list_character_attributes 和 upsert_character_attribute，"
+    "数值必须作为 JSON 数字传入，不要写进纯文本。"
+    "背包：物品数量、单位、持有者和存放地点用 list_inventory_items 和 upsert_inventory_item 维护。"
+    "地图：地点、区域、坐标和相邻关系用 list_map_locations 和 upsert_map_location 维护。"
     "时间线：同一 title + event_time 只保留一条，更新时用 update_timeline_event 并传 event_id；"
     "调整显示顺序时先 list_timeline_events，再调用 reorder_timeline_events 传入按目标顺序排列的 event_id 列表，"
     "也可用 update_timeline_event 设置单个事件的 position；"
