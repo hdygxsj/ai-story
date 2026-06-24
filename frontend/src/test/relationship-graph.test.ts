@@ -4,21 +4,23 @@ import { dedupeRelationshipEdges } from "../features/workspace/RelationshipGraph
 import { buildRelationshipNetworkNodes } from "../features/workspace/relationshipGraphLayout";
 
 describe("dedupeRelationshipEdges", () => {
-  it("keeps one edge per source-target-type combination", () => {
+  it("keeps the latest relationship for a character pair by timeline order", () => {
     const result = dedupeRelationshipEdges([
       {
         id: "edge-1",
         source_character: "苏念",
         target_character: "叶尘",
-        relationship_type: "恋人/守护",
-        description: "旧说明",
+        relationship_type: "旧盟友",
+        description: "第一卷的旧关系",
+        metadata: { timeline_event_id: "vol1" },
       },
       {
         id: "edge-2",
         source_character: "苏念",
         target_character: "叶尘",
         relationship_type: "恋人/守护",
-        description: "更完整的说明",
+        description: "第二卷后的最新关系",
+        metadata: { timeline_event_id: "vol2" },
       },
       {
         id: "edge-3",
@@ -27,11 +29,14 @@ describe("dedupeRelationshipEdges", () => {
         relationship_type: "挚友/生死兄弟",
         description: "",
       },
+    ], [
+      timelineEvent("vol2", "第二卷：世界大变", "第一卷结束后", 2),
+      timelineEvent("vol1", "第一卷：觉醒前夜", "故事开始", 1),
     ]);
 
     expect(result.hiddenCount).toBe(1);
     expect(result.edges).toHaveLength(2);
-    expect(result.edges.find((edge) => edge.id === "edge-2")?.description).toBe("更完整的说明");
+    expect(result.edges.find((edge) => edge.source_character === "苏念")?.id).toBe("edge-2");
   });
 });
 
@@ -93,6 +98,15 @@ function edge(id: string, source: string, target: string) {
     target_character: target,
     relationship_type: "关系",
     description: "",
+  };
+}
+
+function timelineEvent(id: string, title: string, eventTime: string, position: number) {
+  return {
+    id,
+    title,
+    event_time: eventTime,
+    position,
   };
 }
 

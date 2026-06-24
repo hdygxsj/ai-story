@@ -2,7 +2,7 @@ import { BookOutlined, DeleteOutlined, EditOutlined, HistoryOutlined, SearchOutl
 import { Button, Card, Empty, Form, Input, Modal, Popconfirm, Select, Tabs, Tag, Timeline, Typography } from "antd";
 import { useMemo, useState } from "react";
 
-import type { CharacterState, CreativeAsset, MaterialChange, RelationshipEdge } from "../../api/materials";
+import type { CharacterState, CreativeAsset, MaterialChange, RelationshipEdge, TimelineEvent } from "../../api/materials";
 import { dedupeCharacterStates } from "./characterStatePresentation";
 import { RelationshipGraph } from "./RelationshipGraph";
 
@@ -12,6 +12,7 @@ type MaterialsPanelProps = {
   creativeAssets: CreativeAsset[];
   characterStates: CharacterState[];
   relationshipEdges: RelationshipEdge[];
+  timelineEvents: TimelineEvent[];
   materialChanges: MaterialChange[];
   onDeleteCreativeAsset?: (assetId: string) => Promise<void>;
   onUpdateCreativeAsset?: (
@@ -294,7 +295,15 @@ function CharacterStateGrid({
   );
 }
 
-function RelationshipView({ edges, searchQuery }: { edges: RelationshipEdge[]; searchQuery: string }) {
+function RelationshipView({
+  edges,
+  searchQuery,
+  timelineEvents,
+}: {
+  edges: RelationshipEdge[];
+  searchQuery: string;
+  timelineEvents: TimelineEvent[];
+}) {
   const filteredEdges = useMemo(
     () =>
       edges.filter((edge) =>
@@ -330,7 +339,7 @@ function RelationshipView({ edges, searchQuery }: { edges: RelationshipEdge[]; s
     );
   }
 
-  return <RelationshipGraph edges={filteredEdges} />;
+  return <RelationshipGraph edges={filteredEdges} timelineEvents={timelineEvents} />;
 }
 
 function formatChangeTime(value: string) {
@@ -411,6 +420,7 @@ export function MaterialsPanel({
   creativeAssets,
   characterStates,
   relationshipEdges,
+  timelineEvents,
   materialChanges,
   onDeleteCreativeAsset,
   onUpdateCreativeAsset,
@@ -495,7 +505,7 @@ export function MaterialsPanel({
                 <TeamOutlined /> 人物关系 ({relationshipEdges.length})
               </span>
             ),
-            children: <RelationshipView edges={relationshipEdges} searchQuery={searchQuery} />,
+            children: <RelationshipView edges={relationshipEdges} searchQuery={searchQuery} timelineEvents={timelineEvents} />,
           },
           {
             key: "changes",

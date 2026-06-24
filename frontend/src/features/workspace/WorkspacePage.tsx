@@ -1866,6 +1866,7 @@ export function WorkspacePage({
       onDeleteCreativeAsset={handleDeleteCreativeAsset}
       onUpdateCreativeAsset={handleUpdateCreativeAsset}
       relationshipEdges={relationshipEdges}
+      timelineEvents={visibleTimelineEvents}
     />
   );
 

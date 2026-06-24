@@ -78,6 +78,15 @@ def test_agent_tool_registry_exposes_structured_langchain_tools() -> None:
         "list_memory_items",
         "delete_memory_item",
         "list_creative_assets",
+        "list_character_attributes",
+        "upsert_character_attribute",
+        "delete_character_attribute",
+        "list_inventory_items",
+        "upsert_inventory_item",
+        "delete_inventory_item",
+        "list_map_locations",
+        "upsert_map_location",
+        "delete_map_location",
         "update_creative_asset",
         "delete_creative_asset",
         "delete_creative_assets",
@@ -282,6 +291,86 @@ async def test_agent_can_batch_delete_creative_assets(session, monkeypatch) -> N
     assert len(result["deleted_ids"]) == 2
     assert len(result["missing_ids"]) == 1
     assert assets == []
+
+
+async def test_agent_can_manage_structured_story_state(session) -> None:
+    user = User(email="structured-agent@example.com", username="structured-agent", password_hash="hash")
+    session.add(user)
+    await session.flush()
+    novel = Novel(owner_id=user.id, title="Structured Agent Novel")
+    session.add(novel)
+    await session.commit()
+
+    tools = {
+        tool.name: tool
+        for tool in build_runtime_tools(
+            session,
+            model_profile=None,
+            owner_id=user.id,
+            novel_id=novel.id,
+        )
+    }
+
+    attribute = await tools["upsert_character_attribute"].ainvoke(
+        {
+            "novel_id": str(novel.id),
+            "character_name": "叶尘",
+            "attribute_key": "level",
+            "value": 3,
+            "unit": "级",
+            "scope": "current",
+        }
+    )
+    updated_attribute = await tools["upsert_character_attribute"].ainvoke(
+        {
+            "novel_id": str(novel.id),
+            "character_name": "叶尘",
+            "attribute_key": "level",
+            "value": 4,
+            "unit": "级",
+            "scope": "current",
+        }
+    )
+    attributes = await tools["list_character_attributes"].ainvoke({"novel_id": str(novel.id)})
+
+    item = await tools["upsert_inventory_item"].ainvoke(
+        {
+            "novel_id": str(novel.id),
+            "owner_name": "叶尘",
+            "item_name": "灵石",
+            "quantity": 12.5,
+            "unit": "枚",
+            "location_name": "青石镇",
+        }
+    )
+    items = await tools["list_inventory_items"].ainvoke({"novel_id": str(novel.id), "owner_name": "叶尘"})
+
+    location = await tools["upsert_map_location"].ainvoke(
+        {
+            "novel_id": str(novel.id),
+            "name": "青石镇",
+            "location_type": "town",
+            "summary": "叶尘觉醒前居住的小镇。",
+            "coordinates": {"x": 12, "y": -3},
+            "adjacent_location_names": ["黑风岭"],
+        }
+    )
+    locations = await tools["list_map_locations"].ainvoke({"novel_id": str(novel.id)})
+
+    changes = await list_material_changes(session, novel_id=novel.id)
+    assert attribute["status"] == "ok"
+    assert updated_attribute["id"] == attribute["id"]
+    assert attributes["attributes"][0]["value"] == 4
+    assert item["status"] == "ok"
+    assert items["items"][0]["quantity"] == 12.5
+    assert location["status"] == "ok"
+    assert locations["locations"][0]["coordinates"] == {"x": 12, "y": -3}
+    assert {change.material_type for change in changes} >= {
+        "character_attribute",
+        "inventory_item",
+        "map_location",
+    }
+    assert all(change.actor_source == "agent" for change in changes)
 
 
 async def test_create_chapter_with_content_persists_workspace_document(session, monkeypatch) -> None:

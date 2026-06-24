@@ -7,8 +7,9 @@ import {
 import { Button, Modal, Space, Tooltip } from "antd";
 import { useCallback, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
-import type { RelationshipEdge } from "../../api/materials";
+import type { RelationshipEdge, TimelineEvent } from "../../api/materials";
 import { buildRelationshipNetworkNodes, type GraphNode } from "./relationshipGraphLayout";
+import { prepareTimelineEvents } from "./timelinePresentation";
 import {
   DEFAULT_GRAPH_VIEW_TRANSFORM,
   GRAPH_ZOOM_STEP,
@@ -51,23 +52,94 @@ const RELATIONSHIP_COLORS: RelationshipColor[] = [
 const DIMMED_STROKE = "rgba(148, 163, 184, 0.28)";
 const DIMMED_LABEL = "rgba(100, 116, 139, 0.72)";
 
+function normalizeRelationshipLabel(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
 function relationshipEdgeKey(edge: RelationshipEdge) {
-  return `${edge.source_character}\0${edge.target_character}\0${edge.relationship_type}`;
+  const source = normalizeRelationshipLabel(edge.source_character);
+  const target = normalizeRelationshipLabel(edge.target_character);
+  return [source, target].sort((left, right) => left.localeCompare(right, "zh-CN")).join("\0");
+}
+
+function metadataString(edge: RelationshipEdge, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = edge.metadata?.[key];
+    if (typeof value === "string" && value.trim()) {
+      return normalizeRelationshipLabel(value);
+    }
+  }
+  return null;
+}
+
+function buildTimelineRankMap(timelineEvents: TimelineEvent[]): Map<string, number> {
+  const rankMap = new Map<string, number>();
+  prepareTimelineEvents(timelineEvents).forEach((event, index) => {
+    rankMap.set(`id:${event.id}`, index);
+    rankMap.set(`title:${normalizeRelationshipLabel(event.title)}`, index);
+    rankMap.set(`time:${normalizeRelationshipLabel(event.event_time)}`, index);
+    rankMap.set(
+      `title-time:${normalizeRelationshipLabel(event.title)}\0${normalizeRelationshipLabel(event.event_time)}`,
+      index,
+    );
+  });
+  return rankMap;
+}
+
+function relationshipTimelineRank(edge: RelationshipEdge, timelineRankMap: Map<string, number>): number {
+  const timelineEventId = metadataString(edge, ["timeline_event_id", "timelineEventId"]);
+  const timelineTitle = metadataString(edge, ["timeline_title", "timelineTitle", "title"]);
+  const timelineTime = metadataString(edge, ["timeline_event_time", "timelineEventTime", "event_time", "eventTime"]);
+
+  if (timelineEventId && timelineRankMap.has(`id:${timelineEventId}`)) {
+    return timelineRankMap.get(`id:${timelineEventId}`)!;
+  }
+  if (timelineTitle && timelineTime && timelineRankMap.has(`title-time:${timelineTitle}\0${timelineTime}`)) {
+    return timelineRankMap.get(`title-time:${timelineTitle}\0${timelineTime}`)!;
+  }
+  if (timelineTime && timelineRankMap.has(`time:${timelineTime}`)) {
+    return timelineRankMap.get(`time:${timelineTime}`)!;
+  }
+  if (timelineTitle && timelineRankMap.has(`title:${timelineTitle}`)) {
+    return timelineRankMap.get(`title:${timelineTitle}`)!;
+  }
+  return -1;
 }
 
 export function dedupeRelationshipEdges(edges: RelationshipEdge[]): {
   edges: RelationshipEdge[];
   hiddenCount: number;
+};
+export function dedupeRelationshipEdges(edges: RelationshipEdge[], timelineEvents: TimelineEvent[]): {
+  edges: RelationshipEdge[];
+  hiddenCount: number;
+};
+export function dedupeRelationshipEdges(edges: RelationshipEdge[], timelineEvents: TimelineEvent[] = []): {
+  edges: RelationshipEdge[];
+  hiddenCount: number;
 } {
+  const timelineRankMap = buildTimelineRankMap(timelineEvents);
   const byKey = new Map<string, RelationshipEdge>();
+  const ranksByKey = new Map<string, number>();
   for (const edge of edges) {
     const key = relationshipEdgeKey(edge);
     const existing = byKey.get(key);
-    if (!existing || (edge.description?.length ?? 0) >= (existing.description?.length ?? 0)) {
+    const rank = relationshipTimelineRank(edge, timelineRankMap);
+    const existingRank = ranksByKey.get(key) ?? -1;
+    if (!existing || rank > existingRank || rank === existingRank) {
       byKey.set(key, edge);
+      ranksByKey.set(key, rank);
     }
   }
-  const uniqueEdges = Array.from(byKey.values());
+  const uniqueEdges = Array.from(byKey.values()).sort((left, right) => {
+    const leftRank = relationshipTimelineRank(left, timelineRankMap);
+    const rightRank = relationshipTimelineRank(right, timelineRankMap);
+    return (
+      leftRank - rightRank ||
+      normalizeRelationshipLabel(left.source_character).localeCompare(normalizeRelationshipLabel(right.source_character), "zh-CN") ||
+      normalizeRelationshipLabel(left.target_character).localeCompare(normalizeRelationshipLabel(right.target_character), "zh-CN")
+    );
+  });
   return {
     edges: uniqueEdges,
     hiddenCount: Math.max(0, edges.length - uniqueEdges.length),
@@ -583,16 +655,20 @@ function RelationshipGraphBody({
 
 type RelationshipGraphProps = {
   edges: RelationshipEdge[];
+  timelineEvents?: TimelineEvent[];
 };
 
-export function RelationshipGraph({ edges }: RelationshipGraphProps) {
+export function RelationshipGraph({ edges, timelineEvents = [] }: RelationshipGraphProps) {
   const [activeEdgeId, setActiveEdgeId] = useState<string | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [viewTransform, setViewTransform] = useState<GraphViewTransform>(DEFAULT_GRAPH_VIEW_TRANSFORM);
   const [fullscreenOpen, setFullscreenOpen] = useState(false);
   const [fullscreenTransform, setFullscreenTransform] = useState<GraphViewTransform>(DEFAULT_GRAPH_VIEW_TRANSFORM);
 
-  const { edges: visibleEdges, hiddenCount } = useMemo(() => dedupeRelationshipEdges(edges), [edges]);
+  const { edges: visibleEdges, hiddenCount } = useMemo(
+    () => dedupeRelationshipEdges(edges, timelineEvents),
+    [edges, timelineEvents],
+  );
   const nodes = useMemo(() => buildRelationshipNetworkNodes(visibleEdges), [visibleEdges]);
   const positionedEdges = useMemo(() => buildPositionedEdges(visibleEdges, nodes), [visibleEdges, nodes]);
   const relationshipColors = useMemo(() => buildRelationshipColorMap(visibleEdges), [visibleEdges]);

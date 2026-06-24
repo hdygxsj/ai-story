@@ -1,11 +1,13 @@
-import { Button, Space, Typography } from "antd";
+import { Button, Space, Tag, Typography } from "antd";
 import type { Editor } from "@tiptap/react";
 import type { RefObject } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Confirmation } from "../../api/confirmations";
 import { createAnimationFrameScheduler } from "../../utils/schedule";
+import { ConfirmationDiffView } from "../confirmations/ConfirmationDiffView";
 import { confirmationAnchorText } from "../confirmations/confirmationLocation";
+import { confirmationActionLabel } from "../confirmations/confirmationPresentation";
 import { documentStartPos, findTextRangeInEditor } from "./editorTextPosition";
 
 import "./document-editor-confirmations.css";
@@ -34,6 +36,16 @@ function resolveAnchorPos(editor: Editor, confirmation: Confirmation): number {
     }
   }
   return documentStartPos(editor);
+}
+
+function measureConfirmationTop(editor: Editor, shell: HTMLDivElement, anchorPos: number): number {
+  const shellRect = shell.getBoundingClientRect();
+  try {
+    const coords = editor.view.coordsAtPos(anchorPos);
+    return coords.top - shellRect.top + shell.scrollTop;
+  } catch {
+    return shell.scrollTop;
+  }
 }
 
 export function DocumentEditorConfirmations({
@@ -79,13 +91,11 @@ export function DocumentEditorConfirmations({
       return;
     }
 
-    const shellRect = shell.getBoundingClientRect();
     const nextPositions = sortedConfirmations.map((confirmation) => {
       const anchorPos = resolveCachedAnchorPos(editor, confirmation);
-      const coords = editor.view.coordsAtPos(anchorPos);
       return {
         confirmation,
-        top: coords.top - shellRect.top + shell.scrollTop,
+        top: measureConfirmationTop(editor, shell, anchorPos),
       };
     });
     setPositions(nextPositions);
@@ -99,14 +109,12 @@ export function DocumentEditorConfirmations({
         return;
       }
       anchorCacheRef.current.clear();
-      const shellRect = shell.getBoundingClientRect();
       setPositions(
         sortedConfirmations.map((confirmation) => {
           const anchorPos = resolveCachedAnchorPos(editor, confirmation);
-          const coords = editor.view.coordsAtPos(anchorPos);
           return {
             confirmation,
-            top: coords.top - shellRect.top + shell.scrollTop,
+            top: measureConfirmationTop(editor, shell, anchorPos),
           };
         }),
       );
@@ -144,11 +152,22 @@ export function DocumentEditorConfirmations({
         >
           <div className="document-inline-confirmation-card">
             <div className="document-inline-confirmation-card-header">
-              <span className="document-inline-confirmation-card-title">待确认写入</span>
+              <Space size={8} wrap>
+                <Tag color="processing">待确认</Tag>
+                <span className="document-inline-confirmation-card-title">
+                  {confirmationActionLabel(confirmation.action_type)}
+                </span>
+              </Space>
             </div>
+            <Typography.Text className="document-inline-confirmation-chapter" type="secondary">
+              {confirmation.chapter_title ? `章节：${confirmation.chapter_title}` : "未关联章节"}
+            </Typography.Text>
             <Typography.Paragraph className="document-inline-confirmation-preview">
-              {confirmation.after_text?.trim() || "Agent 建议写入正文"}
+              {confirmation.before_text?.trim()
+                ? `原内容：${confirmation.before_text.trim()}`
+                : confirmation.after_text?.trim() || "Agent 建议写入正文"}
             </Typography.Paragraph>
+            <ConfirmationDiffView confirmation={confirmation} />
             <Space size={6}>
               <Button
                 data-testid={`inline-confirmation-approve-${confirmation.id}`}

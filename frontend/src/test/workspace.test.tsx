@@ -1591,12 +1591,13 @@ describe("WorkspacePage", () => {
           jsonResponse([
             {
               id: "confirmation-pending",
-              action_type: "document_update",
+              action_type: "selection_replace",
               status: "pending",
-              payload: { content: "等待确认的新正文" },
+              payload: { replacement_text: "倒计时：~22天。北郊裂缝E级Boss——约九天后完全显现。" },
               document_id: "doc-1",
-              before_text: "旧正文",
-              after_text: "等待确认的新正文",
+              before_text: "倒计时：28天。北郊裂缝E级Boss——约九天后完全显现。",
+              after_text: "倒计时：~22天。北郊裂缝E级Boss——约九天后完全显现。",
+              chapter_title: "第一章",
             },
           ]),
         );
@@ -1608,7 +1609,12 @@ describe("WorkspacePage", () => {
     render(<WorkspacePage activeSection="workspace" token="test-token" novelId="novel-1" />);
 
     expect(await screen.findByTestId("document-inline-confirmation-layer")).toBeInTheDocument();
-    expect(screen.getByText("等待确认的新正文")).toBeInTheDocument();
+    const inlineConfirmation = screen.getByTestId("inline-confirmation-confirmation-pending");
+    expect(within(inlineConfirmation).getByText("选区替换")).toBeInTheDocument();
+    expect(within(inlineConfirmation).getByText("章节：第一章")).toBeInTheDocument();
+    expect(within(inlineConfirmation).getAllByText("修改").length).toBeGreaterThan(0);
+    expect(within(inlineConfirmation).getByText("倒计时：28天。北郊裂缝E级Boss——约九天后完全显现。")).toBeInTheDocument();
+    expect(within(inlineConfirmation).getByText("倒计时：~22天。北郊裂缝E级Boss——约九天后完全显现。")).toBeInTheDocument();
     expect(screen.getByTestId("workspace-node-pending-write-node-1")).toHaveTextContent("1 处待确认");
     expect(screen.queryByText("等待写入确认")).not.toBeInTheDocument();
   });

@@ -28,3 +28,4 @@ cli/ai-story
 .DS_Store
 .idea/
 .vscode/
+.story

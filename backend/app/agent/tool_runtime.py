@@ -13,13 +13,19 @@ from app.agent.tools import (
     CreateTimelineEventArgs,
     CreateWorldRuleArgs,
     CreateWorkspaceNodeArgs,
+    DeleteCharacterAttributeArgs,
     DeleteCharacterStateArgs,
     DeleteCreativeAssetArgs,
     DeleteCreativeAssetsArgs,
+    DeleteInventoryItemArgs,
+    DeleteMapLocationArgs,
     DeleteRelationshipEdgeArgs,
     DeleteMemoryItemArgs,
     DeleteTimelineEventArgs,
     GlobalReplaceKeywordArgs,
+    ListCharacterAttributesArgs,
+    ListInventoryItemsArgs,
+    ListMapLocationsArgs,
     ListMaterialChangesArgs,
     ListCharacterStatesArgs,
     ListCreativeAssetsArgs,
@@ -49,13 +55,19 @@ from app.agent.tools import (
     UpdateTimelineEventArgs,
     UpdateNovelArgs,
     UpdateWorkspaceNodeArgs,
+    UpsertCharacterAttributeArgs,
+    UpsertInventoryItemArgs,
+    UpsertMapLocationArgs,
     draft_rewrite,
     get_agent_tools,
 )
 from app.models import (
+    CharacterAttribute,
     CharacterState,
     CreativeAsset,
     Document,
+    InventoryItem,
+    MapLocation,
     MemoryItem,
     MemoryReviewItem,
     ModelProfile,
@@ -77,18 +89,30 @@ from app.services.materials import (
     create_relationship_edge,
     create_timeline_event,
     deduplicate_character_states,
+    delete_character_attribute,
     delete_character_state,
     delete_creative_asset,
     delete_creative_assets,
+    delete_inventory_item,
+    delete_map_location,
     delete_relationship_edge,
     delete_timeline_event,
+    list_character_attributes,
+    list_inventory_items,
+    list_map_locations,
     list_material_changes,
     prepare_timeline_events,
     reorder_timeline_events,
+    update_character_attribute,
     update_character_state_record,
     update_creative_asset,
+    update_inventory_item,
+    update_map_location,
     update_relationship_edge,
     update_timeline_event,
+    upsert_character_attribute,
+    upsert_inventory_item,
+    upsert_map_location,
 )
 from app.services.memory import create_memory_item, delete_memory_item as delete_memory_item_service
 from app.services.memory_search import search_memory_items
@@ -105,6 +129,60 @@ from app.services.workspace_actions import (
     update_workspace_node,
     write_document_content,
 )
+
+
+def relationship_timeline_metadata(
+    *,
+    timeline_event_id: str | None,
+    timeline_event_time: str | None,
+    timeline_title: str | None,
+) -> dict[str, str]:
+    metadata: dict[str, str] = {}
+    if timeline_event_id:
+        metadata["timeline_event_id"] = timeline_event_id
+    if timeline_event_time:
+        metadata["timeline_event_time"] = timeline_event_time
+    if timeline_title:
+        metadata["timeline_title"] = timeline_title
+    return metadata
+
+
+def character_attribute_payload(attribute: CharacterAttribute) -> dict[str, Any]:
+    return {
+        "id": str(attribute.id),
+        "character_name": attribute.character_name,
+        "attribute_key": attribute.attribute_key,
+        "value": attribute.value,
+        "unit": attribute.unit,
+        "scope": attribute.scope,
+        "metadata": attribute.extra_metadata,
+    }
+
+
+def inventory_item_payload(item: InventoryItem) -> dict[str, Any]:
+    return {
+        "id": str(item.id),
+        "owner_name": item.owner_name,
+        "item_name": item.item_name,
+        "quantity": item.quantity,
+        "unit": item.unit,
+        "location_name": item.location_name,
+        "description": item.description,
+        "metadata": item.extra_metadata,
+    }
+
+
+def map_location_payload(location: MapLocation) -> dict[str, Any]:
+    return {
+        "id": str(location.id),
+        "name": location.name,
+        "location_type": location.location_type,
+        "summary": location.summary,
+        "parent_name": location.parent_name,
+        "coordinates": location.coordinates,
+        "adjacent_location_names": location.adjacent_location_names,
+        "metadata": location.extra_metadata,
+    }
 
 
 def build_runtime_tools(
@@ -932,6 +1010,202 @@ def build_runtime_tools(
             "id": state_id,
         }
 
+    @tool("list_character_attributes", args_schema=ListCharacterAttributesArgs)
+    async def list_character_attributes_runtime(
+        novel_id: str | None = None,
+        character_name: str | None = None,
+        scope: str | None = None,
+    ) -> dict[str, Any]:
+        """List structured character attributes for calculation and continuity."""
+        attributes = await list_character_attributes(
+            session,
+            novel_id=current_novel_id(novel_id),
+            character_name=character_name,
+            scope=scope,
+        )
+        return {"status": "ok", "attributes": [character_attribute_payload(attribute) for attribute in attributes]}
+
+    @tool("upsert_character_attribute", args_schema=UpsertCharacterAttributeArgs)
+    async def upsert_character_attribute_runtime(
+        novel_id: str | None = None,
+        character_name: str = "",
+        attribute_key: str = "",
+        value: Any = None,
+        unit: str = "",
+        scope: str = "current",
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create or update one structured character attribute."""
+        attribute = await upsert_character_attribute(
+            session,
+            novel_id=current_novel_id(novel_id),
+            character_name=character_name,
+            attribute_key=attribute_key,
+            value=value,
+            unit=unit,
+            scope=scope,
+            metadata=metadata,
+            actor_source="agent",
+        )
+        await session.commit()
+        return {
+            "status": "ok",
+            "action_type": "upsert_character_attribute",
+            "message": f"已记录角色「{attribute.character_name}」属性 {attribute.attribute_key}。",
+            **character_attribute_payload(attribute),
+        }
+
+    @tool("delete_character_attribute", args_schema=DeleteCharacterAttributeArgs)
+    async def delete_character_attribute_runtime(novel_id: str | None = None, attribute_id: str = "") -> dict[str, Any]:
+        """Delete a structured character attribute by id."""
+        deleted = await delete_character_attribute(
+            session,
+            novel_id=current_novel_id(novel_id),
+            attribute_id=UUID(attribute_id),
+            actor_source="agent",
+        )
+        if not deleted:
+            return {"status": "error", "message": "角色属性不存在。"}
+        await session.commit()
+        return {
+            "status": "ok",
+            "action_type": "delete_character_attribute",
+            "message": "已删除角色属性。",
+            "id": attribute_id,
+        }
+
+    @tool("list_inventory_items", args_schema=ListInventoryItemsArgs)
+    async def list_inventory_items_runtime(
+        novel_id: str | None = None,
+        owner_name: str | None = None,
+        location_name: str | None = None,
+    ) -> dict[str, Any]:
+        """List structured inventory items with calculable quantities."""
+        items = await list_inventory_items(
+            session,
+            novel_id=current_novel_id(novel_id),
+            owner_name=owner_name,
+            location_name=location_name,
+        )
+        return {"status": "ok", "items": [inventory_item_payload(item) for item in items]}
+
+    @tool("upsert_inventory_item", args_schema=UpsertInventoryItemArgs)
+    async def upsert_inventory_item_runtime(
+        novel_id: str | None = None,
+        owner_name: str = "",
+        item_name: str = "",
+        quantity: float = 0,
+        unit: str = "",
+        location_name: str | None = None,
+        description: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create or update one inventory item. Same owner+item+location upserts."""
+        item = await upsert_inventory_item(
+            session,
+            novel_id=current_novel_id(novel_id),
+            owner_name=owner_name,
+            item_name=item_name,
+            quantity=quantity,
+            unit=unit,
+            location_name=location_name,
+            description=description,
+            metadata=metadata,
+            actor_source="agent",
+        )
+        await session.commit()
+        return {
+            "status": "ok",
+            "action_type": "upsert_inventory_item",
+            "message": f"已记录「{item.owner_name}」背包物品「{item.item_name}」。",
+            **inventory_item_payload(item),
+        }
+
+    @tool("delete_inventory_item", args_schema=DeleteInventoryItemArgs)
+    async def delete_inventory_item_runtime(novel_id: str | None = None, item_id: str = "") -> dict[str, Any]:
+        """Delete an inventory item by id."""
+        deleted = await delete_inventory_item(
+            session,
+            novel_id=current_novel_id(novel_id),
+            item_id=UUID(item_id),
+            actor_source="agent",
+        )
+        if not deleted:
+            return {"status": "error", "message": "背包物品不存在。"}
+        await session.commit()
+        return {
+            "status": "ok",
+            "action_type": "delete_inventory_item",
+            "message": "已删除背包物品。",
+            "id": item_id,
+        }
+
+    @tool("list_map_locations", args_schema=ListMapLocationsArgs)
+    async def list_map_locations_runtime(
+        novel_id: str | None = None,
+        location_type: str | None = None,
+        parent_name: str | None = None,
+    ) -> dict[str, Any]:
+        """List structured map locations, regions, coordinates, and adjacency."""
+        locations = await list_map_locations(
+            session,
+            novel_id=current_novel_id(novel_id),
+            location_type=location_type,
+            parent_name=parent_name,
+        )
+        return {"status": "ok", "locations": [map_location_payload(location) for location in locations]}
+
+    @tool("upsert_map_location", args_schema=UpsertMapLocationArgs)
+    async def upsert_map_location_runtime(
+        novel_id: str | None = None,
+        name: str = "",
+        location_type: str = "location",
+        summary: str = "",
+        parent_name: str | None = None,
+        coordinates: dict[str, Any] | None = None,
+        adjacent_location_names: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create or update one structured map location."""
+        location = await upsert_map_location(
+            session,
+            novel_id=current_novel_id(novel_id),
+            name=name,
+            location_type=location_type,
+            summary=summary,
+            parent_name=parent_name,
+            coordinates=coordinates,
+            adjacent_location_names=adjacent_location_names,
+            metadata=metadata,
+            actor_source="agent",
+        )
+        await session.commit()
+        return {
+            "status": "ok",
+            "action_type": "upsert_map_location",
+            "message": f"已记录地图地点「{location.name}」。",
+            **map_location_payload(location),
+        }
+
+    @tool("delete_map_location", args_schema=DeleteMapLocationArgs)
+    async def delete_map_location_runtime(novel_id: str | None = None, location_id: str = "") -> dict[str, Any]:
+        """Delete a map location by id."""
+        deleted = await delete_map_location(
+            session,
+            novel_id=current_novel_id(novel_id),
+            location_id=UUID(location_id),
+            actor_source="agent",
+        )
+        if not deleted:
+            return {"status": "error", "message": "地图地点不存在。"}
+        await session.commit()
+        return {
+            "status": "ok",
+            "action_type": "delete_map_location",
+            "message": "已删除地图地点。",
+            "id": location_id,
+        }
+
     @tool("create_relationship_edge", args_schema=CreateRelationshipEdgeArgs)
     async def create_relationship_edge_runtime(
         novel_id: str,
@@ -939,8 +1213,16 @@ def build_runtime_tools(
         target_character: str,
         relationship_type: str,
         description: str = "",
+        timeline_event_id: str | None = None,
+        timeline_event_time: str | None = None,
+        timeline_title: str | None = None,
     ) -> dict[str, Any]:
         """Create a relationship edge between characters."""
+        metadata = relationship_timeline_metadata(
+            timeline_event_id=timeline_event_id,
+            timeline_event_time=timeline_event_time,
+            timeline_title=timeline_title,
+        )
         edge = await create_relationship_edge(
             session,
             novel_id=current_novel_id(novel_id),
@@ -948,6 +1230,7 @@ def build_runtime_tools(
             target_character=target_character,
             relationship_type=relationship_type,
             description=description,
+            metadata=metadata,
             actor_source="agent",
         )
         await session.commit()
@@ -966,8 +1249,16 @@ def build_runtime_tools(
         target_character: str | None = None,
         relationship_type: str | None = None,
         description: str | None = None,
+        timeline_event_id: str | None = None,
+        timeline_event_time: str | None = None,
+        timeline_title: str | None = None,
     ) -> dict[str, Any]:
         """Update an existing relationship edge by id."""
+        metadata = relationship_timeline_metadata(
+            timeline_event_id=timeline_event_id,
+            timeline_event_time=timeline_event_time,
+            timeline_title=timeline_title,
+        )
         edge = await update_relationship_edge(
             session,
             novel_id=current_novel_id(novel_id),
@@ -976,6 +1267,7 @@ def build_runtime_tools(
             target_character=target_character,
             relationship_type=relationship_type,
             description=description,
+            metadata=metadata or None,
             actor_source="agent",
         )
         if edge is None:
@@ -1127,6 +1419,15 @@ def build_runtime_tools(
         "list_character_states": list_character_states_runtime,
         "update_character_state": update_character_state_runtime,
         "delete_character_state": delete_character_state_runtime,
+        "list_character_attributes": list_character_attributes_runtime,
+        "upsert_character_attribute": upsert_character_attribute_runtime,
+        "delete_character_attribute": delete_character_attribute_runtime,
+        "list_inventory_items": list_inventory_items_runtime,
+        "upsert_inventory_item": upsert_inventory_item_runtime,
+        "delete_inventory_item": delete_inventory_item_runtime,
+        "list_map_locations": list_map_locations_runtime,
+        "upsert_map_location": upsert_map_location_runtime,
+        "delete_map_location": delete_map_location_runtime,
         "create_relationship_edge": create_relationship_edge_runtime,
         "update_relationship_edge": update_relationship_edge_runtime,
         "delete_relationship_edge": delete_relationship_edge_runtime,

@@ -6,8 +6,11 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
+    CharacterAttribute,
     CharacterState,
     CreativeAsset,
+    InventoryItem,
+    MapLocation,
     MaterialChange,
     RagChunk,
     RelationshipEdge,
@@ -145,6 +148,44 @@ def _character_state_snapshot(state: CharacterState) -> dict[str, Any]:
     }
 
 
+def _character_attribute_snapshot(attribute: CharacterAttribute) -> dict[str, Any]:
+    return {
+        "id": str(attribute.id),
+        "character_name": attribute.character_name,
+        "attribute_key": attribute.attribute_key,
+        "value": attribute.value,
+        "unit": attribute.unit,
+        "scope": attribute.scope,
+        "metadata": attribute.extra_metadata,
+    }
+
+
+def _inventory_item_snapshot(item: InventoryItem) -> dict[str, Any]:
+    return {
+        "id": str(item.id),
+        "owner_name": item.owner_name,
+        "item_name": item.item_name,
+        "quantity": item.quantity,
+        "unit": item.unit,
+        "location_name": item.location_name,
+        "description": item.description,
+        "metadata": item.extra_metadata,
+    }
+
+
+def _map_location_snapshot(location: MapLocation) -> dict[str, Any]:
+    return {
+        "id": str(location.id),
+        "name": location.name,
+        "location_type": location.location_type,
+        "summary": location.summary,
+        "parent_name": location.parent_name,
+        "coordinates": location.coordinates,
+        "adjacent_location_names": location.adjacent_location_names,
+        "metadata": location.extra_metadata,
+    }
+
+
 def _normalize_character_state_name(character_name: str) -> str:
     return character_name.strip()
 
@@ -152,6 +193,10 @@ def _normalize_character_state_name(character_name: str) -> str:
 def _normalize_character_state_scope(scope: str) -> str:
     normalized = scope.strip()
     return normalized or "current"
+
+
+def _normalize_story_label(value: str) -> str:
+    return " ".join(value.split())
 
 
 def _normalize_character_state_text(state: str) -> str:
@@ -742,6 +787,570 @@ async def delete_character_state(
         before_data=before,
     )
     await session.delete(character_state)
+    return True
+
+
+async def find_character_attribute_by_key(
+    session: AsyncSession,
+    *,
+    novel_id: UUID,
+    character_name: str,
+    attribute_key: str,
+    scope: str,
+) -> CharacterAttribute | None:
+    return await session.scalar(
+        select(CharacterAttribute).where(
+            CharacterAttribute.novel_id == novel_id,
+            CharacterAttribute.character_name == _normalize_story_label(character_name),
+            CharacterAttribute.attribute_key == _normalize_story_label(attribute_key),
+            CharacterAttribute.scope == _normalize_story_label(scope),
+        )
+    )
+
+
+async def list_character_attributes(
+    session: AsyncSession,
+    *,
+    novel_id: UUID,
+    character_name: str | None = None,
+    scope: str | None = None,
+) -> list[CharacterAttribute]:
+    query = select(CharacterAttribute).where(CharacterAttribute.novel_id == novel_id)
+    if character_name is not None:
+        query = query.where(CharacterAttribute.character_name == _normalize_story_label(character_name))
+    if scope is not None:
+        query = query.where(CharacterAttribute.scope == _normalize_story_label(scope))
+    query = query.order_by(CharacterAttribute.character_name, CharacterAttribute.attribute_key, CharacterAttribute.created_at)
+    return list(await session.scalars(query))
+
+
+async def upsert_character_attribute(
+    session: AsyncSession,
+    *,
+    novel_id: UUID,
+    character_name: str,
+    attribute_key: str,
+    value: Any,
+    unit: str = "",
+    scope: str = "current",
+    metadata: dict[str, Any] | None = None,
+    actor_source: MaterialActorSource = "user",
+) -> CharacterAttribute:
+    normalized_name = _normalize_story_label(character_name)
+    normalized_key = _normalize_story_label(attribute_key)
+    normalized_scope = _normalize_story_label(scope) or "current"
+    existing = await find_character_attribute_by_key(
+        session,
+        novel_id=novel_id,
+        character_name=normalized_name,
+        attribute_key=normalized_key,
+        scope=normalized_scope,
+    )
+    if existing is not None:
+        updated = await update_character_attribute(
+            session,
+            novel_id=novel_id,
+            attribute_id=existing.id,
+            value=value,
+            unit=unit,
+            metadata=metadata,
+            actor_source=actor_source,
+        )
+        return updated or existing
+
+    attribute = CharacterAttribute(
+        novel_id=novel_id,
+        character_name=normalized_name,
+        attribute_key=normalized_key,
+        value=value,
+        unit=unit,
+        scope=normalized_scope,
+        extra_metadata=metadata or {},
+    )
+    session.add(attribute)
+    await session.flush()
+    await index_text(
+        session,
+        novel_id=novel_id,
+        source_type="character_attribute",
+        source_id=str(attribute.id),
+        text=f"{attribute.character_name} [{attribute.scope}] {attribute.attribute_key} = {attribute.value} {attribute.unit}".strip(),
+    )
+    await record_material_change(
+        session,
+        novel_id=novel_id,
+        material_type="character_attribute",
+        material_id=attribute.id,
+        action="created",
+        actor_source=actor_source,
+        summary=f"记录角色「{attribute.character_name}」属性 {attribute.attribute_key}",
+        after_data=_character_attribute_snapshot(attribute),
+    )
+    return attribute
+
+
+async def update_character_attribute(
+    session: AsyncSession,
+    *,
+    novel_id: UUID,
+    attribute_id: UUID,
+    character_name: str | None = None,
+    attribute_key: str | None = None,
+    value: Any | None = None,
+    unit: str | None = None,
+    scope: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    actor_source: MaterialActorSource = "user",
+) -> CharacterAttribute | None:
+    attribute = await session.scalar(
+        select(CharacterAttribute).where(CharacterAttribute.id == attribute_id, CharacterAttribute.novel_id == novel_id)
+    )
+    if attribute is None:
+        return None
+
+    before = _character_attribute_snapshot(attribute)
+    if character_name is not None:
+        attribute.character_name = _normalize_story_label(character_name)
+    if attribute_key is not None:
+        attribute.attribute_key = _normalize_story_label(attribute_key)
+    if value is not None:
+        attribute.value = value
+    if unit is not None:
+        attribute.unit = unit
+    if scope is not None:
+        attribute.scope = _normalize_story_label(scope) or "current"
+    if metadata is not None:
+        attribute.extra_metadata = metadata
+
+    await index_text(
+        session,
+        novel_id=novel_id,
+        source_type="character_attribute",
+        source_id=str(attribute.id),
+        text=f"{attribute.character_name} [{attribute.scope}] {attribute.attribute_key} = {attribute.value} {attribute.unit}".strip(),
+    )
+    await record_material_change(
+        session,
+        novel_id=novel_id,
+        material_type="character_attribute",
+        material_id=attribute.id,
+        action="updated",
+        actor_source=actor_source,
+        summary=f"更新角色「{attribute.character_name}」属性 {attribute.attribute_key}",
+        before_data=before,
+        after_data=_character_attribute_snapshot(attribute),
+    )
+    return attribute
+
+
+async def delete_character_attribute(
+    session: AsyncSession,
+    *,
+    novel_id: UUID,
+    attribute_id: UUID,
+    actor_source: MaterialActorSource = "user",
+) -> bool:
+    attribute = await session.scalar(
+        select(CharacterAttribute).where(CharacterAttribute.id == attribute_id, CharacterAttribute.novel_id == novel_id)
+    )
+    if attribute is None:
+        return False
+
+    before = _character_attribute_snapshot(attribute)
+    await _remove_rag_chunk(
+        session,
+        novel_id=novel_id,
+        source_type="character_attribute",
+        source_id=str(attribute.id),
+    )
+    await record_material_change(
+        session,
+        novel_id=novel_id,
+        material_type="character_attribute",
+        material_id=attribute.id,
+        action="deleted",
+        actor_source=actor_source,
+        summary=f"删除角色「{attribute.character_name}」属性 {attribute.attribute_key}",
+        before_data=before,
+    )
+    await session.delete(attribute)
+    return True
+
+
+async def find_inventory_item_by_key(
+    session: AsyncSession,
+    *,
+    novel_id: UUID,
+    owner_name: str,
+    item_name: str,
+    location_name: str | None,
+) -> InventoryItem | None:
+    normalized_location = _normalize_story_label(location_name) if location_name else None
+    return await session.scalar(
+        select(InventoryItem).where(
+            InventoryItem.novel_id == novel_id,
+            InventoryItem.owner_name == _normalize_story_label(owner_name),
+            InventoryItem.item_name == _normalize_story_label(item_name),
+            InventoryItem.location_name == normalized_location,
+        )
+    )
+
+
+async def list_inventory_items(
+    session: AsyncSession,
+    *,
+    novel_id: UUID,
+    owner_name: str | None = None,
+    location_name: str | None = None,
+) -> list[InventoryItem]:
+    query = select(InventoryItem).where(InventoryItem.novel_id == novel_id)
+    if owner_name is not None:
+        query = query.where(InventoryItem.owner_name == _normalize_story_label(owner_name))
+    if location_name is not None:
+        query = query.where(InventoryItem.location_name == _normalize_story_label(location_name))
+    query = query.order_by(InventoryItem.owner_name, InventoryItem.item_name, InventoryItem.created_at)
+    return list(await session.scalars(query))
+
+
+async def upsert_inventory_item(
+    session: AsyncSession,
+    *,
+    novel_id: UUID,
+    owner_name: str,
+    item_name: str,
+    quantity: float,
+    unit: str = "",
+    location_name: str | None = None,
+    description: str = "",
+    metadata: dict[str, Any] | None = None,
+    actor_source: MaterialActorSource = "user",
+) -> InventoryItem:
+    normalized_owner = _normalize_story_label(owner_name)
+    normalized_item = _normalize_story_label(item_name)
+    normalized_location = _normalize_story_label(location_name) if location_name else None
+    existing = await find_inventory_item_by_key(
+        session,
+        novel_id=novel_id,
+        owner_name=normalized_owner,
+        item_name=normalized_item,
+        location_name=normalized_location,
+    )
+    if existing is not None:
+        updated = await update_inventory_item(
+            session,
+            novel_id=novel_id,
+            item_id=existing.id,
+            quantity=quantity,
+            unit=unit,
+            description=description,
+            metadata=metadata,
+            actor_source=actor_source,
+        )
+        return updated or existing
+
+    item = InventoryItem(
+        novel_id=novel_id,
+        owner_name=normalized_owner,
+        item_name=normalized_item,
+        quantity=quantity,
+        unit=unit,
+        location_name=normalized_location,
+        description=description,
+        extra_metadata=metadata or {},
+    )
+    session.add(item)
+    await session.flush()
+    await index_text(
+        session,
+        novel_id=novel_id,
+        source_type="inventory_item",
+        source_id=str(item.id),
+        text=f"{item.owner_name} 持有 {item.quantity:g}{item.unit} {item.item_name} @ {item.location_name or '未知位置'}\n{item.description}",
+    )
+    await record_material_change(
+        session,
+        novel_id=novel_id,
+        material_type="inventory_item",
+        material_id=item.id,
+        action="created",
+        actor_source=actor_source,
+        summary=f"记录「{item.owner_name}」背包物品「{item.item_name}」",
+        after_data=_inventory_item_snapshot(item),
+    )
+    return item
+
+
+async def update_inventory_item(
+    session: AsyncSession,
+    *,
+    novel_id: UUID,
+    item_id: UUID,
+    owner_name: str | None = None,
+    item_name: str | None = None,
+    quantity: float | None = None,
+    unit: str | None = None,
+    location_name: str | None = None,
+    description: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    actor_source: MaterialActorSource = "user",
+) -> InventoryItem | None:
+    item = await session.scalar(
+        select(InventoryItem).where(InventoryItem.id == item_id, InventoryItem.novel_id == novel_id)
+    )
+    if item is None:
+        return None
+
+    before = _inventory_item_snapshot(item)
+    if owner_name is not None:
+        item.owner_name = _normalize_story_label(owner_name)
+    if item_name is not None:
+        item.item_name = _normalize_story_label(item_name)
+    if quantity is not None:
+        item.quantity = quantity
+    if unit is not None:
+        item.unit = unit
+    if location_name is not None:
+        item.location_name = _normalize_story_label(location_name)
+    if description is not None:
+        item.description = description
+    if metadata is not None:
+        item.extra_metadata = metadata
+
+    await index_text(
+        session,
+        novel_id=novel_id,
+        source_type="inventory_item",
+        source_id=str(item.id),
+        text=f"{item.owner_name} 持有 {item.quantity:g}{item.unit} {item.item_name} @ {item.location_name or '未知位置'}\n{item.description}",
+    )
+    await record_material_change(
+        session,
+        novel_id=novel_id,
+        material_type="inventory_item",
+        material_id=item.id,
+        action="updated",
+        actor_source=actor_source,
+        summary=f"更新「{item.owner_name}」背包物品「{item.item_name}」",
+        before_data=before,
+        after_data=_inventory_item_snapshot(item),
+    )
+    return item
+
+
+async def delete_inventory_item(
+    session: AsyncSession,
+    *,
+    novel_id: UUID,
+    item_id: UUID,
+    actor_source: MaterialActorSource = "user",
+) -> bool:
+    item = await session.scalar(
+        select(InventoryItem).where(InventoryItem.id == item_id, InventoryItem.novel_id == novel_id)
+    )
+    if item is None:
+        return False
+
+    before = _inventory_item_snapshot(item)
+    await _remove_rag_chunk(
+        session,
+        novel_id=novel_id,
+        source_type="inventory_item",
+        source_id=str(item.id),
+    )
+    await record_material_change(
+        session,
+        novel_id=novel_id,
+        material_type="inventory_item",
+        material_id=item.id,
+        action="deleted",
+        actor_source=actor_source,
+        summary=f"删除「{item.owner_name}」背包物品「{item.item_name}」",
+        before_data=before,
+    )
+    await session.delete(item)
+    return True
+
+
+async def find_map_location_by_name(
+    session: AsyncSession,
+    *,
+    novel_id: UUID,
+    name: str,
+) -> MapLocation | None:
+    return await session.scalar(
+        select(MapLocation).where(
+            MapLocation.novel_id == novel_id,
+            MapLocation.name == _normalize_story_label(name),
+        )
+    )
+
+
+async def list_map_locations(
+    session: AsyncSession,
+    *,
+    novel_id: UUID,
+    location_type: str | None = None,
+    parent_name: str | None = None,
+) -> list[MapLocation]:
+    query = select(MapLocation).where(MapLocation.novel_id == novel_id)
+    if location_type is not None:
+        query = query.where(MapLocation.location_type == _normalize_story_label(location_type))
+    if parent_name is not None:
+        query = query.where(MapLocation.parent_name == _normalize_story_label(parent_name))
+    query = query.order_by(MapLocation.parent_name, MapLocation.name, MapLocation.created_at)
+    return list(await session.scalars(query))
+
+
+async def upsert_map_location(
+    session: AsyncSession,
+    *,
+    novel_id: UUID,
+    name: str,
+    location_type: str = "location",
+    summary: str = "",
+    parent_name: str | None = None,
+    coordinates: dict[str, Any] | None = None,
+    adjacent_location_names: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+    actor_source: MaterialActorSource = "user",
+) -> MapLocation:
+    normalized_name = _normalize_story_label(name)
+    existing = await find_map_location_by_name(session, novel_id=novel_id, name=normalized_name)
+    if existing is not None:
+        updated = await update_map_location(
+            session,
+            novel_id=novel_id,
+            location_id=existing.id,
+            location_type=location_type,
+            summary=summary,
+            parent_name=parent_name,
+            coordinates=coordinates,
+            adjacent_location_names=adjacent_location_names,
+            metadata=metadata,
+            actor_source=actor_source,
+        )
+        return updated or existing
+
+    location = MapLocation(
+        novel_id=novel_id,
+        name=normalized_name,
+        location_type=_normalize_story_label(location_type) or "location",
+        summary=summary,
+        parent_name=_normalize_story_label(parent_name) if parent_name else None,
+        coordinates=coordinates or {},
+        adjacent_location_names=adjacent_location_names or [],
+        extra_metadata=metadata or {},
+    )
+    session.add(location)
+    await session.flush()
+    await index_text(
+        session,
+        novel_id=novel_id,
+        source_type="map_location",
+        source_id=str(location.id),
+        text=f"{location.location_type}: {location.name}\n{location.summary}\n相邻: {', '.join(location.adjacent_location_names)}",
+    )
+    await record_material_change(
+        session,
+        novel_id=novel_id,
+        material_type="map_location",
+        material_id=location.id,
+        action="created",
+        actor_source=actor_source,
+        summary=f"记录地图地点「{location.name}」",
+        after_data=_map_location_snapshot(location),
+    )
+    return location
+
+
+async def update_map_location(
+    session: AsyncSession,
+    *,
+    novel_id: UUID,
+    location_id: UUID,
+    name: str | None = None,
+    location_type: str | None = None,
+    summary: str | None = None,
+    parent_name: str | None = None,
+    coordinates: dict[str, Any] | None = None,
+    adjacent_location_names: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+    actor_source: MaterialActorSource = "user",
+) -> MapLocation | None:
+    location = await session.scalar(
+        select(MapLocation).where(MapLocation.id == location_id, MapLocation.novel_id == novel_id)
+    )
+    if location is None:
+        return None
+
+    before = _map_location_snapshot(location)
+    if name is not None:
+        location.name = _normalize_story_label(name)
+    if location_type is not None:
+        location.location_type = _normalize_story_label(location_type) or "location"
+    if summary is not None:
+        location.summary = summary
+    if parent_name is not None:
+        location.parent_name = _normalize_story_label(parent_name)
+    if coordinates is not None:
+        location.coordinates = coordinates
+    if adjacent_location_names is not None:
+        location.adjacent_location_names = adjacent_location_names
+    if metadata is not None:
+        location.extra_metadata = metadata
+
+    await index_text(
+        session,
+        novel_id=novel_id,
+        source_type="map_location",
+        source_id=str(location.id),
+        text=f"{location.location_type}: {location.name}\n{location.summary}\n相邻: {', '.join(location.adjacent_location_names)}",
+    )
+    await record_material_change(
+        session,
+        novel_id=novel_id,
+        material_type="map_location",
+        material_id=location.id,
+        action="updated",
+        actor_source=actor_source,
+        summary=f"更新地图地点「{location.name}」",
+        before_data=before,
+        after_data=_map_location_snapshot(location),
+    )
+    return location
+
+
+async def delete_map_location(
+    session: AsyncSession,
+    *,
+    novel_id: UUID,
+    location_id: UUID,
+    actor_source: MaterialActorSource = "user",
+) -> bool:
+    location = await session.scalar(
+        select(MapLocation).where(MapLocation.id == location_id, MapLocation.novel_id == novel_id)
+    )
+    if location is None:
+        return False
+
+    before = _map_location_snapshot(location)
+    await _remove_rag_chunk(
+        session,
+        novel_id=novel_id,
+        source_type="map_location",
+        source_id=str(location.id),
+    )
+    await record_material_change(
+        session,
+        novel_id=novel_id,
+        material_type="map_location",
+        material_id=location.id,
+        action="deleted",
+        actor_source=actor_source,
+        summary=f"删除地图地点「{location.name}」",
+        before_data=before,
+    )
+    await session.delete(location)
     return True
 
 

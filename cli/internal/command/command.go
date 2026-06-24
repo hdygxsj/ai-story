@@ -136,7 +136,7 @@ func NewRoot(env *Env) *Command {
 		&Command{Name: "context-settings", Summary: "Context settings HTTP API commands."},
 		&Command{Name: "conversations", Summary: "Conversation HTTP API commands."},
 		&Command{Name: "documents", Summary: "Document HTTP API commands."},
-		&Command{Name: "materials", Summary: "Material HTTP API commands."},
+		&Command{Name: "materials", Summary: "Materials and structured story-state HTTP API commands."},
 		&Command{Name: "memory", Summary: "Memory HTTP API commands."},
 		&Command{Name: "model-profiles", Summary: "Model profile HTTP API commands."},
 		&Command{Name: "novels", Summary: "Novel HTTP API commands."},
@@ -480,14 +480,20 @@ func executeAgent(ctx context.Context, env *Env, args []string) int {
 	}
 	if args[0] == "manifest" {
 		manifest := map[string]any{
-			"purpose": "Local agents can use these HTTP routes and Agent tools to read context, reuse materials and timeline data, and write novel chapters through AI Story.",
+			"purpose": "Local agents can use these HTTP routes and Agent tools to read context, manage materials, character attributes, inventory, maps, timeline data, and write novel chapters through AI Story.",
 			"routes":  coverage.Routes,
 			"tools":   coverage.AgentTools,
 			"examples": []string{
 				"ai-story api request GET /novels/{novel_id}/creative-assets",
 				"ai-story api request GET /novels/{novel_id}/timeline-events",
+				"ai-story api request GET /novels/{novel_id}/character-attributes",
+				"ai-story api request GET /novels/{novel_id}/inventory-items",
+				"ai-story api request GET /novels/{novel_id}/map-locations",
 				"ai-story api request GET /novels/{novel_id}/memory-items",
 				"ai-story tools run {novel_id} search_documents_by_keyword --arg query=关键词",
+				"ai-story tools run {novel_id} upsert_character_attribute --arg character_name=叶尘 --arg attribute_key=level --json-arg value=3 --arg unit=级",
+				"ai-story tools run {novel_id} upsert_inventory_item --arg owner_name=叶尘 --arg item_name=灵石 --json-arg quantity=12",
+				"ai-story tools run {novel_id} upsert_map_location --arg name=青石镇 --arg location_type=town --arg summary=叶尘觉醒前居住的小镇",
 				"ai-story tools run {novel_id} create_chapter_with_content --arg title=章节名 --arg content=正文",
 			},
 		}

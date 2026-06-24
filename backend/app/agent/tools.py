@@ -224,6 +224,9 @@ class CreateRelationshipEdgeArgs(BaseModel):
     target_character: str
     relationship_type: str
     description: str = ""
+    timeline_event_id: str | None = Field(default=None, description="Timeline event UUID this relationship state belongs to")
+    timeline_event_time: str | None = Field(default=None, description="Timeline event time label, not update time")
+    timeline_title: str | None = Field(default=None, description="Timeline event title this relationship state belongs to")
 
 
 class UpdateCreativeAssetArgs(BaseModel):
@@ -275,6 +278,71 @@ class DeleteCharacterStateArgs(BaseModel):
     state_id: str = Field(description="Character state UUID")
 
 
+class ListCharacterAttributesArgs(BaseModel):
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
+    character_name: str | None = Field(default=None, description="Optional character filter")
+    scope: str | None = Field(default=None, description="Optional scope filter such as current or chapter_3")
+
+
+class UpsertCharacterAttributeArgs(BaseModel):
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
+    character_name: str = Field(description="Character name")
+    attribute_key: str = Field(description="Structured attribute key, e.g. level, hp, strength, location")
+    value: Any = Field(description="Typed attribute value. Use JSON numbers for calculable values.")
+    unit: str = Field(default="", description="Optional unit, e.g. 级, 点, 枚")
+    scope: str = Field(default="current", description="Scope label. Same character+key+scope upserts.")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DeleteCharacterAttributeArgs(BaseModel):
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
+    attribute_id: str = Field(description="Character attribute UUID")
+
+
+class ListInventoryItemsArgs(BaseModel):
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
+    owner_name: str | None = Field(default=None, description="Optional character, faction, or container owner")
+    location_name: str | None = Field(default=None, description="Optional location filter")
+
+
+class UpsertInventoryItemArgs(BaseModel):
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
+    owner_name: str = Field(description="Character, faction, or container that owns the item")
+    item_name: str = Field(description="Item name")
+    quantity: float = Field(description="Calculable item quantity")
+    unit: str = Field(default="", description="Quantity unit")
+    location_name: str | None = Field(default=None, description="Where the item currently is")
+    description: str = Field(default="", description="Short context or constraints")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DeleteInventoryItemArgs(BaseModel):
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
+    item_id: str = Field(description="Inventory item UUID")
+
+
+class ListMapLocationsArgs(BaseModel):
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
+    location_type: str | None = Field(default=None, description="Optional type filter, e.g. town, region, dungeon")
+    parent_name: str | None = Field(default=None, description="Optional parent region filter")
+
+
+class UpsertMapLocationArgs(BaseModel):
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
+    name: str = Field(description="Location name. Same name upserts.")
+    location_type: str = Field(default="location", description="Location type, e.g. town, region, dungeon")
+    summary: str = Field(description="Location description and durable facts")
+    parent_name: str | None = Field(default=None, description="Parent region or area")
+    coordinates: dict[str, Any] = Field(default_factory=dict, description="Optional structured coordinates")
+    adjacent_location_names: list[str] = Field(default_factory=list, description="Known neighboring locations")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DeleteMapLocationArgs(BaseModel):
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
+    location_id: str = Field(description="Map location UUID")
+
+
 class UpdateRelationshipEdgeArgs(BaseModel):
     novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
     edge_id: str = Field(description="Relationship edge UUID")
@@ -282,6 +350,9 @@ class UpdateRelationshipEdgeArgs(BaseModel):
     target_character: str | None = Field(default=None, description="Updated target character")
     relationship_type: str | None = Field(default=None, description="Updated relationship type")
     description: str | None = Field(default=None, description="Updated relationship description")
+    timeline_event_id: str | None = Field(default=None, description="Timeline event UUID this relationship state belongs to")
+    timeline_event_time: str | None = Field(default=None, description="Timeline event time label, not update time")
+    timeline_title: str | None = Field(default=None, description="Timeline event title this relationship state belongs to")
 
 
 class DeleteRelationshipEdgeArgs(BaseModel):
@@ -648,6 +719,98 @@ def delete_character_state_tool(novel_id: str, state_id: str) -> dict[str, Any]:
     return {"novel_id": novel_id, "state_id": state_id}
 
 
+@tool("list_character_attributes", args_schema=ListCharacterAttributesArgs)
+def list_character_attributes_tool(
+    novel_id: str,
+    character_name: str | None = None,
+    scope: str | None = None,
+) -> dict[str, Any]:
+    """List structured character attributes for calculation and continuity."""
+    return {"novel_id": novel_id, "character_name": character_name, "scope": scope, "attributes": []}
+
+
+@tool("upsert_character_attribute", args_schema=UpsertCharacterAttributeArgs)
+def upsert_character_attribute_tool(
+    novel_id: str,
+    character_name: str,
+    attribute_key: str,
+    value: Any,
+    unit: str = "",
+    scope: str = "current",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create or update one structured character attribute."""
+    return {"action_type": "upsert_character_attribute", "payload": locals()}
+
+
+@tool("delete_character_attribute", args_schema=DeleteCharacterAttributeArgs)
+def delete_character_attribute_tool(novel_id: str, attribute_id: str) -> dict[str, Any]:
+    """Delete a structured character attribute by id."""
+    return {"novel_id": novel_id, "attribute_id": attribute_id}
+
+
+@tool("list_inventory_items", args_schema=ListInventoryItemsArgs)
+def list_inventory_items_tool(
+    novel_id: str,
+    owner_name: str | None = None,
+    location_name: str | None = None,
+) -> dict[str, Any]:
+    """List structured inventory items with calculable quantities."""
+    return {"novel_id": novel_id, "owner_name": owner_name, "location_name": location_name, "items": []}
+
+
+@tool("upsert_inventory_item", args_schema=UpsertInventoryItemArgs)
+def upsert_inventory_item_tool(
+    novel_id: str,
+    owner_name: str,
+    item_name: str,
+    quantity: float,
+    unit: str = "",
+    location_name: str | None = None,
+    description: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create or update one inventory item. Same owner+item+location upserts."""
+    return {"action_type": "upsert_inventory_item", "payload": locals()}
+
+
+@tool("delete_inventory_item", args_schema=DeleteInventoryItemArgs)
+def delete_inventory_item_tool(novel_id: str, item_id: str) -> dict[str, Any]:
+    """Delete an inventory item by id."""
+    return {"novel_id": novel_id, "item_id": item_id}
+
+
+@tool("list_map_locations", args_schema=ListMapLocationsArgs)
+def list_map_locations_tool(
+    novel_id: str,
+    location_type: str | None = None,
+    parent_name: str | None = None,
+) -> dict[str, Any]:
+    """List structured map locations, regions, coordinates, and adjacency."""
+    return {"novel_id": novel_id, "location_type": location_type, "parent_name": parent_name, "locations": []}
+
+
+@tool("upsert_map_location", args_schema=UpsertMapLocationArgs)
+def upsert_map_location_tool(
+    novel_id: str,
+    name: str,
+    location_type: str = "location",
+    summary: str = "",
+    parent_name: str | None = None,
+    coordinates: dict[str, Any] | None = None,
+    adjacent_location_names: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create or update one structured map location."""
+    return {"action_type": "upsert_map_location", "payload": locals()}
+
+
+@tool("delete_map_location", args_schema=DeleteMapLocationArgs)
+def delete_map_location_tool(novel_id: str, location_id: str) -> dict[str, Any]:
+    """Delete a map location by id."""
+    return {"novel_id": novel_id, "location_id": location_id}
+
+
 @tool("update_creative_asset", args_schema=UpdateCreativeAssetArgs)
 def update_creative_asset_tool(
     novel_id: str,
@@ -782,6 +945,15 @@ def get_agent_tools() -> list[BaseTool]:
         list_character_states_tool,
         update_character_state,
         delete_character_state_tool,
+        list_character_attributes_tool,
+        upsert_character_attribute_tool,
+        delete_character_attribute_tool,
+        list_inventory_items_tool,
+        upsert_inventory_item_tool,
+        delete_inventory_item_tool,
+        list_map_locations_tool,
+        upsert_map_location_tool,
+        delete_map_location_tool,
         create_relationship_edge,
         update_relationship_edge_tool,
         delete_relationship_edge_tool,

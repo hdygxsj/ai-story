@@ -41,6 +41,9 @@ func TestAgentManifestExposesWritingBusinessCapabilities(t *testing.T) {
 	for _, want := range []string{
 		"GET /novels/{novel_id}/creative-assets",
 		"GET /novels/{novel_id}/timeline-events",
+		"GET /novels/{novel_id}/character-attributes",
+		"GET /novels/{novel_id}/inventory-items",
+		"GET /novels/{novel_id}/map-locations",
 		"GET /novels/{novel_id}/memory-items",
 		"POST /novels/{novel_id}/agent/tools/{tool_name}",
 	} {
@@ -57,6 +60,9 @@ func TestAgentManifestExposesWritingBusinessCapabilities(t *testing.T) {
 		"create_chapter_with_content",
 		"list_creative_assets",
 		"list_timeline_events",
+		"upsert_character_attribute",
+		"upsert_inventory_item",
+		"upsert_map_location",
 		"save_key_memory",
 		"search_documents_by_keyword",
 	} {

@@ -282,3 +282,95 @@ def test_reorder_timeline_events_sets_explicit_display_order() -> None:
     payload = response.json()
     assert [item["title"] for item in payload] == ["第三卷", "第一卷", "第二卷"]
     assert [item["position"] for item in payload] == [1, 2, 3]
+
+
+def test_structured_story_state_routes_upsert_list_update_and_delete() -> None:
+    client = TestClient(app)
+    headers = auth_headers(client)
+    novel = client.post("/novels", headers=headers, json={"title": "Structured State Novel"}).json()
+
+    attribute = client.post(
+        f"/novels/{novel['id']}/character-attributes",
+        headers=headers,
+        json={
+            "character_name": "叶尘",
+            "attribute_key": "level",
+            "value": 3,
+            "unit": "级",
+            "scope": "current",
+            "metadata": {"source": "chapter_3"},
+        },
+    )
+    assert attribute.status_code == 201
+    assert attribute.json()["value"] == 3
+
+    updated_attribute = client.post(
+        f"/novels/{novel['id']}/character-attributes",
+        headers=headers,
+        json={
+            "character_name": "叶尘",
+            "attribute_key": "level",
+            "value": 4,
+            "unit": "级",
+            "scope": "current",
+        },
+    )
+    assert updated_attribute.status_code == 201
+    assert updated_attribute.json()["id"] == attribute.json()["id"]
+    assert client.get(f"/novels/{novel['id']}/character-attributes", headers=headers).json()[0]["value"] == 4
+
+    inventory_item = client.post(
+        f"/novels/{novel['id']}/inventory-items",
+        headers=headers,
+        json={
+            "owner_name": "叶尘",
+            "item_name": "灵石",
+            "quantity": 12.5,
+            "unit": "枚",
+            "location_name": "青石镇",
+            "description": "战利品",
+        },
+    )
+    assert inventory_item.status_code == 201
+    assert inventory_item.json()["quantity"] == 12.5
+
+    patched_item = client.patch(
+        f"/novels/{novel['id']}/inventory-items/{inventory_item.json()['id']}",
+        headers=headers,
+        json={"quantity": 10, "description": "修炼消耗后剩余"},
+    )
+    assert patched_item.status_code == 200
+    assert patched_item.json()["quantity"] == 10
+    assert client.get(f"/novels/{novel['id']}/inventory-items", headers=headers).json()[0]["description"] == "修炼消耗后剩余"
+
+    location = client.post(
+        f"/novels/{novel['id']}/map-locations",
+        headers=headers,
+        json={
+            "name": "青石镇",
+            "location_type": "town",
+            "summary": "叶尘觉醒前居住的小镇。",
+            "parent_name": "东荒",
+            "coordinates": {"x": 12, "y": -3},
+            "adjacent_location_names": ["黑风岭"],
+        },
+    )
+    assert location.status_code == 201
+    assert location.json()["coordinates"] == {"x": 12, "y": -3}
+
+    assert client.delete(
+        f"/novels/{novel['id']}/character-attributes/{attribute.json()['id']}",
+        headers=headers,
+    ).status_code == 204
+    assert client.delete(
+        f"/novels/{novel['id']}/inventory-items/{inventory_item.json()['id']}",
+        headers=headers,
+    ).status_code == 204
+    assert client.delete(
+        f"/novels/{novel['id']}/map-locations/{location.json()['id']}",
+        headers=headers,
+    ).status_code == 204
+
+    changes = client.get(f"/novels/{novel['id']}/material-changes", headers=headers).json()
+    material_types = {change["material_type"] for change in changes}
+    assert {"character_attribute", "inventory_item", "map_location"}.issubset(material_types)

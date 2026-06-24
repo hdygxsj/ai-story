@@ -30,6 +30,8 @@ export type RelationshipEdge = {
   target_character: string;
   relationship_type: string;
   description?: string;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
 };
 
 export type MaterialChange = {

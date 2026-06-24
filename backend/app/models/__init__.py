@@ -9,7 +9,15 @@ from app.models.conversation import (
 from app.models.document import Document, DocumentVersion
 from app.models.memory import MemoryItem, MemoryReviewItem
 from app.models.material_change import MaterialChange
-from app.models.materials import CharacterState, CreativeAsset, RelationshipEdge, TimelineEvent
+from app.models.materials import (
+    CharacterAttribute,
+    CharacterState,
+    CreativeAsset,
+    InventoryItem,
+    MapLocation,
+    RelationshipEdge,
+    TimelineEvent,
+)
 from app.models.model_profile import ModelProfile
 from app.models.novel import Novel
 from app.models.rag import RagChunk
@@ -23,7 +31,10 @@ __all__ = [
     "Document",
     "DocumentVersion",
     "CharacterState",
+    "CharacterAttribute",
     "CreativeAsset",
+    "InventoryItem",
+    "MapLocation",
     "MaterialChange",
     "MemoryItem",
     "MemoryReviewItem",
