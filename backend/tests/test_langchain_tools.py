@@ -40,6 +40,9 @@ def test_default_agent_prompt_allows_selective_automatic_memory() -> None:
     assert "split_chapter_by_max_chars" in prompt
     assert "已有章节必须更新原 document_id" in prompt
     assert "禁止新建同名章节" in prompt
+    assert "upsert_character_attribute" in prompt
+    assert "upsert_inventory_item" in prompt
+    assert "upsert_map_location" in prompt
 
 
 def test_agent_tool_registry_exposes_structured_langchain_tools() -> None:
