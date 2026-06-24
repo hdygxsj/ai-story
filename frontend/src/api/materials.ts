@@ -24,6 +24,70 @@ export type CharacterState = {
   created_at?: string;
 };
 
+export type CharacterAttribute = {
+  id: string;
+  character_name: string;
+  attribute_key: string;
+  value: unknown;
+  unit?: string;
+  scope?: string;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+};
+
+export type CharacterAttributePayload = {
+  character_name: string;
+  attribute_key: string;
+  value: unknown;
+  unit?: string;
+  scope?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type InventoryItem = {
+  id: string;
+  owner_name: string;
+  item_name: string;
+  quantity: number;
+  unit?: string;
+  location_name?: string | null;
+  description?: string;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+};
+
+export type InventoryItemPayload = {
+  owner_name: string;
+  item_name: string;
+  quantity: number;
+  unit?: string;
+  location_name?: string | null;
+  description?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type MapLocation = {
+  id: string;
+  name: string;
+  location_type: string;
+  summary: string;
+  parent_name?: string | null;
+  coordinates?: Record<string, unknown>;
+  adjacent_location_names?: string[];
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+};
+
+export type MapLocationPayload = {
+  name: string;
+  location_type?: string;
+  summary: string;
+  parent_name?: string | null;
+  coordinates?: Record<string, unknown>;
+  adjacent_location_names?: string[];
+  metadata?: Record<string, unknown>;
+};
+
 export type RelationshipEdge = {
   id: string;
   source_character: string;
@@ -95,6 +159,102 @@ export function listTimelineEvents(token: string, novelId: string) {
 
 export function listCharacterStates(token: string, novelId: string) {
   return apiRequest<CharacterState[]>(`/novels/${novelId}/character-states`, { token });
+}
+
+export function listCharacterAttributes(token: string, novelId: string) {
+  return apiRequest<CharacterAttribute[]>(`/novels/${novelId}/character-attributes`, { token });
+}
+
+export function upsertCharacterAttribute(token: string, novelId: string, payload: CharacterAttributePayload) {
+  return apiRequest<CharacterAttribute>(`/novels/${novelId}/character-attributes`, {
+    method: "POST",
+    token,
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateCharacterAttribute(
+  token: string,
+  novelId: string,
+  attributeId: string,
+  payload: Partial<CharacterAttributePayload>,
+) {
+  return apiRequest<CharacterAttribute>(`/novels/${novelId}/character-attributes/${attributeId}`, {
+    method: "PATCH",
+    token,
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteCharacterAttribute(token: string, novelId: string, attributeId: string) {
+  return apiRequest<void>(`/novels/${novelId}/character-attributes/${attributeId}`, {
+    method: "DELETE",
+    token,
+  });
+}
+
+export function listInventoryItems(token: string, novelId: string) {
+  return apiRequest<InventoryItem[]>(`/novels/${novelId}/inventory-items`, { token });
+}
+
+export function upsertInventoryItem(token: string, novelId: string, payload: InventoryItemPayload) {
+  return apiRequest<InventoryItem>(`/novels/${novelId}/inventory-items`, {
+    method: "POST",
+    token,
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateInventoryItem(
+  token: string,
+  novelId: string,
+  itemId: string,
+  payload: Partial<InventoryItemPayload>,
+) {
+  return apiRequest<InventoryItem>(`/novels/${novelId}/inventory-items/${itemId}`, {
+    method: "PATCH",
+    token,
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteInventoryItem(token: string, novelId: string, itemId: string) {
+  return apiRequest<void>(`/novels/${novelId}/inventory-items/${itemId}`, {
+    method: "DELETE",
+    token,
+  });
+}
+
+export function listMapLocations(token: string, novelId: string) {
+  return apiRequest<MapLocation[]>(`/novels/${novelId}/map-locations`, { token });
+}
+
+export function upsertMapLocation(token: string, novelId: string, payload: MapLocationPayload) {
+  return apiRequest<MapLocation>(`/novels/${novelId}/map-locations`, {
+    method: "POST",
+    token,
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateMapLocation(
+  token: string,
+  novelId: string,
+  locationId: string,
+  payload: Partial<MapLocationPayload>,
+) {
+  return apiRequest<MapLocation>(`/novels/${novelId}/map-locations/${locationId}`, {
+    method: "PATCH",
+    token,
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteMapLocation(token: string, novelId: string, locationId: string) {
+  return apiRequest<void>(`/novels/${novelId}/map-locations/${locationId}`, {
+    method: "DELETE",
+    token,
+  });
 }
 
 export function listRelationshipEdges(token: string, novelId: string) {

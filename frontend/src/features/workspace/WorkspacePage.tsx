@@ -27,15 +27,39 @@ import type { DocumentBody, DocumentRecord, DocumentVersion } from "../../api/do
 import { getDocument, listDocumentVersions, restoreDocumentVersion, updateDocument } from "../../api/documents";
 import type { MemoryItem } from "../../api/memory";
 import { deleteMemoryItem, listMemoryItems } from "../../api/memory";
-import type { CharacterState, CreativeAsset, MaterialChange, RelationshipEdge, TimelineEvent } from "../../api/materials";
+import type {
+  CharacterAttribute,
+  CharacterAttributePayload,
+  CharacterState,
+  CreativeAsset,
+  InventoryItem,
+  InventoryItemPayload,
+  MapLocation,
+  MapLocationPayload,
+  MaterialChange,
+  RelationshipEdge,
+  TimelineEvent,
+} from "../../api/materials";
 import {
+  deleteCharacterAttribute,
   deleteCreativeAsset,
+  deleteInventoryItem,
+  deleteMapLocation,
+  listCharacterAttributes,
   listCharacterStates,
   listCreativeAssets,
+  listInventoryItems,
+  listMapLocations,
   listMaterialChanges,
   listRelationshipEdges,
   listTimelineEvents,
+  updateCharacterAttribute,
   updateCreativeAsset,
+  updateInventoryItem,
+  updateMapLocation,
+  upsertCharacterAttribute,
+  upsertInventoryItem,
+  upsertMapLocation,
 } from "../../api/materials";
 import type { ModelProfile } from "../../api/modelProfiles";
 import type { ModelProfileConnectivityResult, ModelProfilePurpose } from "../../api/modelProfiles";
@@ -322,6 +346,9 @@ export function WorkspacePage({
   const [creativeAssets, setCreativeAssets] = useState<CreativeAsset[]>([]);
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
   const [characterStates, setCharacterStates] = useState<CharacterState[]>([]);
+  const [characterAttributes, setCharacterAttributes] = useState<CharacterAttribute[]>([]);
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [mapLocations, setMapLocations] = useState<MapLocation[]>([]);
   const [relationshipEdges, setRelationshipEdges] = useState<RelationshipEdge[]>([]);
   const [materialChanges, setMaterialChanges] = useState<MaterialChange[]>([]);
   const [workspaceDiff, setWorkspaceDiff] = useState<WorkspaceDiff | null>(null);
@@ -462,6 +489,9 @@ export function WorkspacePage({
           assets,
           events,
           states,
+          attributes,
+          inventory,
+          mapLocations,
           relationships,
           changes,
         ] = await Promise.all([
@@ -473,6 +503,9 @@ export function WorkspacePage({
           listCreativeAssets(token, novelId),
           listTimelineEvents(token, novelId),
           listCharacterStates(token, novelId),
+          listCharacterAttributes(token, novelId),
+          listInventoryItems(token, novelId),
+          listMapLocations(token, novelId),
           listRelationshipEdges(token, novelId),
           listMaterialChanges(token, novelId),
         ]);
@@ -501,6 +534,9 @@ export function WorkspacePage({
           setCreativeAssets(assets);
           setTimelineEvents(events);
           setCharacterStates(states);
+          setCharacterAttributes(attributes);
+          setInventoryItems(inventory);
+          setMapLocations(mapLocations);
           setRelationshipEdges(relationships);
           setMaterialChanges(changes);
           setConfirmationCount(confirmations.filter((item) => item.status === "pending").length);
@@ -642,16 +678,22 @@ export function WorkspacePage({
   }
 
   async function refreshCreativeCollections() {
-    const [assets, events, states, relationships, changes] = await Promise.all([
+    const [assets, events, states, attributes, inventory, mapLocations, relationships, changes] = await Promise.all([
       listCreativeAssets(token, novelId),
       listTimelineEvents(token, novelId),
       listCharacterStates(token, novelId),
+      listCharacterAttributes(token, novelId),
+      listInventoryItems(token, novelId),
+      listMapLocations(token, novelId),
       listRelationshipEdges(token, novelId),
       listMaterialChanges(token, novelId),
     ]);
     setCreativeAssets(assets);
     setTimelineEvents(events);
     setCharacterStates(states);
+    setCharacterAttributes(attributes);
+    setInventoryItems(inventory);
+    setMapLocations(mapLocations);
     setRelationshipEdges(relationships);
     setMaterialChanges(changes);
   }
@@ -759,6 +801,114 @@ export function WorkspacePage({
       message.success("创作资产已删除");
     } catch {
       message.error("删除创作资产失败");
+    }
+  }
+
+  async function handleUpsertCharacterAttribute(payload: CharacterAttributePayload) {
+    try {
+      const saved = await upsertCharacterAttribute(token, novelId, payload);
+      setCharacterAttributes((items) => {
+        const exists = items.some((item) => item.id === saved.id);
+        return exists ? items.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...items];
+      });
+      setMaterialChanges(await listMaterialChanges(token, novelId));
+      message.success("人物属性已保存");
+    } catch {
+      message.error("保存人物属性失败");
+    }
+  }
+
+  async function handleUpdateCharacterAttribute(attributeId: string, payload: Partial<CharacterAttributePayload>) {
+    try {
+      const updated = await updateCharacterAttribute(token, novelId, attributeId, payload);
+      setCharacterAttributes((items) => items.map((item) => (item.id === attributeId ? updated : item)));
+      setMaterialChanges(await listMaterialChanges(token, novelId));
+      message.success("人物属性已更新");
+    } catch {
+      message.error("更新人物属性失败");
+    }
+  }
+
+  async function handleDeleteCharacterAttribute(attributeId: string) {
+    try {
+      await deleteCharacterAttribute(token, novelId, attributeId);
+      setCharacterAttributes((items) => items.filter((item) => item.id !== attributeId));
+      setMaterialChanges(await listMaterialChanges(token, novelId));
+      message.success("人物属性已删除");
+    } catch {
+      message.error("删除人物属性失败");
+    }
+  }
+
+  async function handleUpsertInventoryItem(payload: InventoryItemPayload) {
+    try {
+      const saved = await upsertInventoryItem(token, novelId, payload);
+      setInventoryItems((items) => {
+        const exists = items.some((item) => item.id === saved.id);
+        return exists ? items.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...items];
+      });
+      setMaterialChanges(await listMaterialChanges(token, novelId));
+      message.success("背包物品已保存");
+    } catch {
+      message.error("保存背包物品失败");
+    }
+  }
+
+  async function handleUpdateInventoryItem(itemId: string, payload: Partial<InventoryItemPayload>) {
+    try {
+      const updated = await updateInventoryItem(token, novelId, itemId, payload);
+      setInventoryItems((items) => items.map((item) => (item.id === itemId ? updated : item)));
+      setMaterialChanges(await listMaterialChanges(token, novelId));
+      message.success("背包物品已更新");
+    } catch {
+      message.error("更新背包物品失败");
+    }
+  }
+
+  async function handleDeleteInventoryItem(itemId: string) {
+    try {
+      await deleteInventoryItem(token, novelId, itemId);
+      setInventoryItems((items) => items.filter((item) => item.id !== itemId));
+      setMaterialChanges(await listMaterialChanges(token, novelId));
+      message.success("背包物品已删除");
+    } catch {
+      message.error("删除背包物品失败");
+    }
+  }
+
+  async function handleUpsertMapLocation(payload: MapLocationPayload) {
+    try {
+      const saved = await upsertMapLocation(token, novelId, payload);
+      setMapLocations((items) => {
+        const exists = items.some((item) => item.id === saved.id);
+        return exists ? items.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...items];
+      });
+      setMaterialChanges(await listMaterialChanges(token, novelId));
+      message.success("地图地点已保存");
+    } catch {
+      message.error("保存地图地点失败");
+    }
+  }
+
+  async function handleUpdateMapLocation(locationId: string, payload: Partial<MapLocationPayload>) {
+    try {
+      const updated = await updateMapLocation(token, novelId, locationId, payload);
+      setMapLocations((items) => items.map((item) => (item.id === locationId ? updated : item)));
+      setMaterialChanges(await listMaterialChanges(token, novelId));
+      message.success("地图地点已更新");
+    } catch {
+      message.error("更新地图地点失败");
+    }
+  }
+
+  async function handleDeleteMapLocation(locationId: string) {
+    try {
+      await deleteMapLocation(token, novelId, locationId);
+      setMapLocations((items) => items.filter((item) => item.id !== locationId));
+      setMaterialChanges(await listMaterialChanges(token, novelId));
+      message.success("地图地点已删除");
+    } catch {
+      message.error("删除地图地点失败");
     }
   }
 
@@ -1860,11 +2010,23 @@ export function WorkspacePage({
 
   const materialsCenterContent = (
     <MaterialsPanel
+      characterAttributes={characterAttributes}
       characterStates={characterStates}
       creativeAssets={creativeAssets}
+      inventoryItems={inventoryItems}
+      mapLocations={mapLocations}
       materialChanges={materialChanges}
+      onDeleteCharacterAttribute={handleDeleteCharacterAttribute}
       onDeleteCreativeAsset={handleDeleteCreativeAsset}
+      onDeleteInventoryItem={handleDeleteInventoryItem}
+      onDeleteMapLocation={handleDeleteMapLocation}
+      onUpsertCharacterAttribute={handleUpsertCharacterAttribute}
+      onUpsertInventoryItem={handleUpsertInventoryItem}
+      onUpsertMapLocation={handleUpsertMapLocation}
+      onUpdateCharacterAttribute={handleUpdateCharacterAttribute}
       onUpdateCreativeAsset={handleUpdateCreativeAsset}
+      onUpdateInventoryItem={handleUpdateInventoryItem}
+      onUpdateMapLocation={handleUpdateMapLocation}
       relationshipEdges={relationshipEdges}
       timelineEvents={visibleTimelineEvents}
     />

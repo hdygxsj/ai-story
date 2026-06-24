@@ -105,6 +105,27 @@ describe("WorkspacePage", () => {
     });
   });
 
+  it("loads structured story state collections for materials", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      const conversationResponse = conversationMockResponse(url);
+      if (conversationResponse) {
+        return Promise.resolve(conversationResponse);
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorkspacePage activeSection="materials" token="test-token" novelId="novel-1" />);
+
+    await waitFor(() => {
+      const urls = fetchMock.mock.calls.map(([input]) => requestUrl(input));
+      expect(urls.some((url) => url.endsWith("/novels/novel-1/character-attributes"))).toBe(true);
+      expect(urls.some((url) => url.endsWith("/novels/novel-1/inventory-items"))).toBe(true);
+      expect(urls.some((url) => url.endsWith("/novels/novel-1/map-locations"))).toBe(true);
+    });
+  });
+
   it("resizes and persists the chapter tree panel width", () => {
     window.localStorage.setItem("ai-story-workspace-tree-width", "330");
 
