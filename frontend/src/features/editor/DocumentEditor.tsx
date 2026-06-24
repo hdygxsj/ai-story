@@ -13,11 +13,15 @@ import { documentBodiesEqual } from "./documentBodyText";
 import { documentStartPos, focusPlainTextRange } from "./editorTextPosition";
 import { DocumentConfirmationNavigator } from "./DocumentConfirmationNavigator";
 import { DocumentEditorConfirmations } from "./DocumentEditorConfirmations";
+import { SearchHighlightExtension, setSearchHighlight } from "./searchHighlightExtension";
+
+import "./document-editor.css";
 
 const EMPTY_DOCUMENT: DocumentBody = { type: "doc", content: [] };
 
 const EDITOR_EXTENSIONS = [
   StarterKit,
+  SearchHighlightExtension,
   Placeholder.configure({
     placeholder: "开始写这一章...",
   }),
@@ -169,6 +173,13 @@ const DocumentEditorView = memo(function DocumentEditorView({
   }, [documentId]);
 
   useEffect(() => {
+    if (!editor) {
+      return;
+    }
+    setSearchHighlight(editor, null);
+  }, [documentId, editor]);
+
+  useEffect(() => {
     if (!editor || loading) {
       return;
     }
@@ -177,6 +188,7 @@ const DocumentEditorView = memo(function DocumentEditorView({
     if (documentBodiesEqual(currentContent, nextContent)) {
       return;
     }
+    setSearchHighlight(editor, null);
     applyingExternalContent.current = true;
     editor.commands.setContent(nextContent);
     queueMicrotask(() => {
@@ -235,10 +247,17 @@ const DocumentEditorView = memo(function DocumentEditorView({
     requestAnimationFrame(() => {
       const scrollContainer = editorShellRef.current?.closest(".ant-card-body") as HTMLElement | null;
       if (focusSearchRange.matchLength > 0) {
-        focusPlainTextRange(editor, focusSearchRange.matchIndex, focusSearchRange.matchLength, scrollContainer);
+        const range = focusPlainTextRange(
+          editor,
+          focusSearchRange.matchIndex,
+          focusSearchRange.matchLength,
+          scrollContainer,
+        );
+        setSearchHighlight(editor, range);
       } else {
         const start = documentStartPos(editor);
         focusPlainTextRange(editor, start, 1, scrollContainer);
+        setSearchHighlight(editor, null);
       }
       onFocusSearchHandled?.();
     });
