@@ -38,6 +38,10 @@ def test_local_agent_skill_download_contains_cli_workflow() -> None:
     assert "GET /novels/{novel_id}/nodes" in response.text
     assert "After changing prose" in response.text
     assert "Do not finish after prose only" in response.text
+    assert "AI粗制滥造" in response.text
+    assert "格式混乱" in response.text
+    assert "结构失常" in response.text
+    assert "空洞水文" in response.text
     assert "update_character_state" in response.text
     assert "update_relationship_edge" in response.text
     assert "reorder_timeline_events" in response.text

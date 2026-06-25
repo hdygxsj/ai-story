@@ -75,6 +75,15 @@ Use `.store/<小说名>/` for local working caches before editing or writing:
 - Prefer one file per chapter or material group so changes are easy to inspect and recover.
 - Treat files under `.store/<小说名>/` as disposable local cache, not as the platform source of truth.
 
+## Novel Quality Guardrails
+
+When writing or revising long-form web fiction, avoid content that severely harms reader experience, including but not limited to:
+
+- AI粗制滥造：滥用AI工具批量生成，严重缺乏原创性，属于“粗制滥造”范畴的。
+- 格式混乱：分章异常、标点符号严重错乱、排版格式错乱、短篇童话/公文报告等非长网文体裁等。
+- 结构失常：梗概式写文，复述剧情提纲；开篇结尾句式重复堆砌，模板化拼接等。
+- 空洞水文：机械罗列时间、动作、对话等流水账式叙事，单调冗长；行文空泛，节奏拖沓，长篇幅无实质情节推进；大量堆砌艰涩难懂的高级概念，无可读性等。
+
 ## Workspace Structure Changes
 
 Separate structure edits from prose edits:
