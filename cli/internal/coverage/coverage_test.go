@@ -115,7 +115,7 @@ func TestAgentToolsIncludeCurrentRuntimeSurface(t *testing.T) {
 		"delete_relationship_edge", "list_character_attributes", "upsert_character_attribute",
 		"delete_character_attribute", "list_inventory_items", "upsert_inventory_item",
 		"delete_inventory_item", "list_map_locations", "upsert_map_location",
-		"delete_map_location", "list_material_changes",
+		"delete_map_location", "list_material_changes", "score_chapters_with_rubric",
 	}
 	got := coverage.ToolKeys()
 	for _, name := range want {

@@ -43,6 +43,25 @@ export type AgentMessageResponse = {
   tool_calls?: AgentToolCallRecord[];
 };
 
+export type AgentToolRunResponse<T = unknown> = {
+  tool_name: string;
+  result: T;
+};
+
+export function runAgentTool<T = unknown>(
+  token: string,
+  novelId: string,
+  toolName: string,
+  argumentsPayload: Record<string, unknown>,
+  documentId?: string | null,
+) {
+  return apiRequest<AgentToolRunResponse<T>>(`/novels/${novelId}/agent/tools/${toolName}`, {
+    method: "POST",
+    token,
+    body: JSON.stringify({ arguments: argumentsPayload, document_id: documentId ?? null }),
+  });
+}
+
 export type WorkspaceDiffSnapshot = {
   id: string;
   title: string;

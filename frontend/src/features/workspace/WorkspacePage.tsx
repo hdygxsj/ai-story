@@ -1,5 +1,5 @@
 import { RightOutlined, SearchOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Empty, Form, Input, List, message, Popconfirm, Select, Space, Statistic, Tabs, Tag, Timeline, Typography } from "antd";
+import { Alert, Button, Card, Empty, Flex, Form, Input, List, message, Popconfirm, Select, Space, Statistic, Tabs, Tag, Timeline, Typography } from "antd";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -15,6 +15,7 @@ import { prepareTimelineEvents } from "./timelinePresentation";
 import { WorkspaceTree } from "./WorkspaceTree";
 import { ApiError } from "../../api/http";
 import type { AgentStreamDonePayload, WorkspaceDiff } from "../../api/agent";
+import { runAgentTool } from "../../api/agent";
 import type { Confirmation } from "../../api/confirmations";
 import { approveConfirmation, listConfirmations, rejectConfirmation } from "../../api/confirmations";
 import { ConfirmationsPanel } from "../confirmations/ConfirmationsPanel";
@@ -96,7 +97,37 @@ type WorkspacePageProps = {
   novelId: string;
 };
 
-export type WorkspaceSection = "workspace" | "agent-config" | "memory" | "confirmations" | "materials" | "timeline";
+export type WorkspaceSection = "workspace" | "agent-config" | "memory" | "confirmations" | "materials" | "timeline" | "scoring";
+
+type ChapterScoreDetail = {
+  hook: number;
+  progress: number;
+  character: number;
+  conflict: number;
+  language_originality: number;
+};
+
+type ChapterScore = {
+  node_id: string;
+  chapter_title: string;
+  total_score: number;
+  platform_risk: string;
+  details: ChapterScoreDetail;
+  reasons: string[];
+  suggestions: string[];
+};
+
+type ChapterScoreResult = {
+  status: string;
+  scores: ChapterScore[];
+  summary: {
+    average_score: number;
+    chapter_count: number;
+  };
+  rubric: {
+    total_points: number;
+  };
+};
 
 const providerOptions = [
   { label: "OpenAI", value: "openai" },
@@ -323,6 +354,10 @@ export function WorkspacePage({
   const [documentId, setDocumentId] = useState<string | null>(() => getStoredDocumentId(novelId));
   const [document, setDocument] = useState<DocumentRecord | null>(null);
   const [documentLoading, setDocumentLoading] = useState(() => getStoredDocumentId(novelId) != null);
+  const [scoringScope, setScoringScope] = useState<"all" | "current" | "selected">("all");
+  const [selectedScoringNodeIds, setSelectedScoringNodeIds] = useState<string[]>([]);
+  const [chapterScoreResult, setChapterScoreResult] = useState<ChapterScoreResult | null>(null);
+  const [chapterScoring, setChapterScoring] = useState(false);
   const [agentDocumentWriteLocked, setAgentDocumentWriteLocked] = useState(false);
   const draftTrackerRef = useRef(createDirtyDraftTracker());
   const [draftRevision, setDraftRevision] = useState(0);
@@ -1339,6 +1374,37 @@ export function WorkspacePage({
     [documentId, nodes],
   );
   const currentChapterTitle = currentChapterNode?.title ?? null;
+  const chapterNodes = useMemo(
+    () => activeNodes.filter((node) => node.node_type === "chapter" && Boolean(node.document_id)),
+    [activeNodes],
+  );
+  async function handleScoreChapters() {
+    const nodeIds =
+      scoringScope === "all"
+        ? []
+        : scoringScope === "current"
+          ? currentChapterNode
+            ? [currentChapterNode.id]
+            : []
+          : selectedScoringNodeIds;
+    if (scoringScope !== "all" && nodeIds.length === 0) {
+      message.warning("请先选择要评分的章节");
+      return;
+    }
+    setChapterScoring(true);
+    try {
+      const response = await runAgentTool<ChapterScoreResult>(token, novelId, "score_chapters_with_rubric", {
+        scope: scoringScope === "all" ? "all" : "selected",
+        node_ids: nodeIds,
+      });
+      setChapterScoreResult(response.result);
+      message.success("评分完成");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "评分失败");
+    } finally {
+      setChapterScoring(false);
+    }
+  }
   const pendingWriteConfirmations = useMemo(
     () => pendingDocumentWriteConfirmations(confirmations),
     [confirmations],
@@ -2033,6 +2099,113 @@ export function WorkspacePage({
     />
   );
 
+  const scoringCenterContent = (
+    <Card
+      style={{
+        border: "none",
+        boxShadow: "0 18px 45px rgba(15,23,42,0.08)",
+        height: "100%",
+        minWidth: 0,
+      }}
+      styles={{ body: { height: "100%", overflow: "auto" } }}
+    >
+      <Flex align="center" justify="space-between" gap={16} wrap>
+        <div>
+          <Typography.Title level={3} style={{ marginBottom: 4 }}>
+            章节评分
+          </Typography.Title>
+          <Typography.Paragraph style={{ marginBottom: 0 }} type="secondary">
+            通过 Agent 工具按平台 rubric 评分：钩子、推进、人物、冲突、语言原创，并标记低质内容风险。
+          </Typography.Paragraph>
+        </div>
+        {chapterScoreResult ? (
+          <Statistic
+            precision={1}
+            suffix="/ 10"
+            title={`${chapterScoreResult.summary.chapter_count} 章平均分`}
+            value={chapterScoreResult.summary.average_score}
+          />
+        ) : null}
+      </Flex>
+      <Space align="end" size={12} style={{ marginTop: 18, width: "100%" }} wrap>
+        <div>
+          <Typography.Text style={{ display: "block", marginBottom: 6 }}>评分范围</Typography.Text>
+          <Select
+            aria-label="评分范围"
+            onChange={(value) => setScoringScope(value)}
+            options={[
+              { label: "全部章节", value: "all" },
+              { label: "当前章节", value: "current" },
+              { label: "指定章节", value: "selected" },
+            ]}
+            style={{ width: 160 }}
+            value={scoringScope}
+          />
+        </div>
+        {scoringScope === "selected" ? (
+          <div>
+            <Typography.Text style={{ display: "block", marginBottom: 6 }}>选择章节</Typography.Text>
+            <Select
+              aria-label="选择章节"
+              mode="multiple"
+              onChange={setSelectedScoringNodeIds}
+              options={chapterNodes.map((node) => ({ label: node.title, value: node.id }))}
+              placeholder="选择一个或多个章节"
+              style={{ minWidth: 260 }}
+              value={selectedScoringNodeIds}
+            />
+          </div>
+        ) : null}
+        <Button loading={chapterScoring} onClick={() => void handleScoreChapters()} type="primary">
+          开始评分
+        </Button>
+      </Space>
+      <Alert
+        title="评分说明"
+        description="总分 10 分。平台风险会结合章节体量、解释性句式、系统数字密度、功能章倾向和人物代价不足来判断。"
+        showIcon
+        style={{ marginTop: 16 }}
+        type="info"
+      />
+      {chapterScoreResult?.scores.length ? (
+        <List
+          dataSource={chapterScoreResult.scores}
+          renderItem={(score) => (
+            <List.Item style={{ alignItems: "stretch", paddingInline: 0 }}>
+              <Card size="small" style={{ width: "100%" }}>
+                <Flex align="start" justify="space-between" gap={12} wrap>
+                  <Space direction="vertical" size={2}>
+                    <Typography.Text strong>{score.chapter_title}</Typography.Text>
+                    <Tag color={score.platform_risk === "低" ? "green" : score.platform_risk === "中" ? "orange" : "red"}>
+                      平台风险：{score.platform_risk}
+                    </Tag>
+                  </Space>
+                  <Statistic precision={1} suffix="/ 10" title="总分" value={score.total_score} />
+                </Flex>
+                <Space size={[8, 8]} style={{ marginTop: 12 }} wrap>
+                  <Tag>钩子：{score.details.hook}</Tag>
+                  <Tag>推进：{score.details.progress}</Tag>
+                  <Tag>人物：{score.details.character}</Tag>
+                  <Tag>冲突：{score.details.conflict}</Tag>
+                  <Tag>语言原创：{score.details.language_originality}</Tag>
+                </Space>
+                <Typography.Paragraph style={{ marginTop: 12, marginBottom: 4 }} type="secondary">
+                  扣分原因：{score.reasons.join("；")}
+                </Typography.Paragraph>
+                <Typography.Paragraph style={{ marginBottom: 0 }} type="secondary">
+                  修改建议：{score.suggestions.join("；")}
+                </Typography.Paragraph>
+              </Card>
+            </List.Item>
+          )}
+          style={{ marginTop: 16 }}
+        />
+      ) : (
+        <Empty description="还没有评分结果" style={{ marginTop: 40 }} />
+      )}
+    </Card>
+  );
+
   const timelineCenterContent = (
     <Card
       data-testid="timeline-card"
@@ -2087,6 +2260,7 @@ export function WorkspacePage({
     confirmations: confirmationsCenterContent,
     materials: materialsCenterContent,
     memory: memoryCenterContent,
+    scoring: scoringCenterContent,
     timeline: timelineCenterContent,
     workspace: workspaceCenterContent,
   };

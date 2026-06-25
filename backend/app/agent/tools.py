@@ -367,6 +367,12 @@ class ListMaterialChangesArgs(BaseModel):
     limit: int = Field(default=20, ge=1, le=100)
 
 
+class ScoreChaptersWithRubricArgs(BaseModel):
+    novel_id: str | None = Field(default=None, description="Novel UUID; defaults to current novel")
+    scope: str = Field(default="all", description="all or selected")
+    node_ids: list[str] = Field(default_factory=list, description="Workspace chapter node UUIDs to score")
+
+
 def draft_rewrite(selected_text: str, instruction: str) -> str:
     return f"{selected_text} The room turned tense as every sound seemed to wait for the next mistake."
 
@@ -502,6 +508,16 @@ def get_server_time() -> dict[str, Any]:
         "timezone": str(now.tzinfo),
         "unix_timestamp": now.timestamp(),
     }
+
+
+@tool("score_chapters_with_rubric", args_schema=ScoreChaptersWithRubricArgs)
+def score_chapters_with_rubric_tool(
+    novel_id: str | None = None,
+    scope: str = "all",
+    node_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Score one or more chapters with the platform quality rubric and AI-low-quality risk checks."""
+    return {"novel_id": novel_id, "scope": scope, "node_ids": node_ids or [], "scores": []}
 
 
 @tool("update_novel", args_schema=UpdateNovelArgs)
@@ -911,6 +927,7 @@ def get_agent_tools() -> list[BaseTool]:
         global_replace_keyword_tool,
         calculate,
         get_server_time,
+        score_chapters_with_rubric_tool,
         update_novel_tool,
         list_workspace_nodes_tool,
         create_workspace_node_tool,

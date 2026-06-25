@@ -8,6 +8,7 @@ var AgentTools = []string{
 	"global_replace_keyword",
 	"calculate",
 	"get_server_time",
+	"score_chapters_with_rubric",
 	"update_novel",
 	"list_workspace_nodes",
 	"create_workspace_node",

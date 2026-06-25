@@ -19,6 +19,7 @@ const workspaceMenuItems: { key: WorkspaceSection; label: string }[] = [
   { key: "confirmations", label: "确认" },
   { key: "materials", label: "素材" },
   { key: "timeline", label: "时间线" },
+  { key: "scoring", label: "评分" },
   { key: "agent-config", label: "Agent配置" },
 ];
 
@@ -44,6 +45,7 @@ const sectionPathByKey: Record<WorkspaceSection | "novels", string> = {
   materials: "/materials",
   memory: "/memory",
   novels: "/novels",
+  scoring: "/scoring",
   timeline: "/timeline",
   workspace: "/workspace",
 };
@@ -61,6 +63,9 @@ function sectionFromPath(pathname: string): WorkspaceSection | "novels" {
   }
   if (normalized === "/timeline") {
     return "timeline";
+  }
+  if (normalized === "/scoring") {
+    return "scoring";
   }
   if (normalized === "/confirmations") {
     return "confirmations";

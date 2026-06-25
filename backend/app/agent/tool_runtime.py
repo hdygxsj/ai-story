@@ -42,6 +42,7 @@ from app.agent.tools import (
     ReadDocumentArgs,
     ReorderTimelineEventsArgs,
     SaveKeyMemoryArgs,
+    ScoreChaptersWithRubricArgs,
     SearchDocumentsByKeywordArgs,
     SearchMemoryArgs,
     SearchRagArgs,
@@ -72,6 +73,7 @@ from app.models import (
     MemoryReviewItem,
     ModelProfile,
     Novel,
+    WorkspaceNode,
     TimelineEvent,
 )
 from app.services.document_actions import (
@@ -179,6 +181,129 @@ def map_location_payload(location: MapLocation) -> dict[str, Any]:
         "coordinates": location.coordinates,
         "adjacent_location_names": location.adjacent_location_names,
         "metadata": location.extra_metadata,
+    }
+
+
+RUBRIC_DETAIL_LABELS = {
+    "hook": "钩子与追读",
+    "progress": "情节推进与因果逻辑",
+    "character": "人物选择与情绪代价",
+    "conflict": "冲突爽点与压迫感",
+    "language_originality": "语言质量与原创细节",
+}
+
+
+def _clamp_score(value: float) -> float:
+    return round(min(2.0, max(0.0, value)), 1)
+
+
+def _count_any(text: str, words: tuple[str, ...]) -> int:
+    return sum(text.count(word) for word in words)
+
+
+def _score_chapter_text(*, node_id: UUID, title: str, text: str) -> dict[str, Any]:
+    compact = "".join(text.split())
+    char_count = len(compact)
+    paragraph_count = len([part for part in text.splitlines() if part.strip()]) or 1
+    reasons: list[str] = []
+    suggestions: list[str] = []
+
+    opening = compact[:180]
+    ending = compact[-220:]
+    hook = 1.0
+    if any(marker in opening for marker in ("倒计时", "警报", "血", "死", "裂缝", "敌", "失踪", "爆炸", "第一天")):
+        hook += 0.4
+    if any(marker in ending for marker in ("来了", "失踪", "开门", "带回来", "亮起", "逼近", "完", "终")):
+        hook += 0.3
+    if char_count < 2500:
+        hook -= 0.2
+        reasons.append("章节体量偏短，单章承载的追读钩子容易不足。")
+        suggestions.append("补一个明确的章末问题、危机或人物选择。")
+
+    action_count = _count_any(compact, ("走", "冲", "斩", "杀", "退", "问", "说", "看", "醒", "选择", "决定", "撤"))
+    progress = 1.0 + min(0.6, action_count / 24)
+    if any(marker in compact for marker in ("目标", "计划", "任务", "撤", "破阵", "训练", "增援", "觉醒")):
+        progress += 0.2
+    if char_count < 2200:
+        progress -= 0.3
+    if progress < 1.3:
+        reasons.append("情节推进偏功能化，章内事件增量不够明显。")
+        suggestions.append("让本章至少完成一个不可回退的情节变化。")
+
+    character_signal = _count_any(compact, ("叶尘", "苏念", "王磊", "袁晓乐", "林瑶", "江若溪", "秦上士"))
+    emotion_signal = _count_any(compact, ("怕", "疼", "沉默", "笑", "哭", "颤", "代价", "选择", "后悔", "相信"))
+    character = 0.9 + min(0.5, character_signal / 30) + min(0.4, emotion_signal / 12)
+    if emotion_signal < 2:
+        character -= 0.2
+        reasons.append("人物情绪和选择代价偏少，角色容易变成功能位。")
+        suggestions.append("增加一个角色主动选择、犹豫或承担后果的场景。")
+
+    conflict_signal = _count_any(compact, ("敌", "战", "杀", "血", "伤", "死", "裂缝", "妖兽", "赤血", "D级", "E级", "F级", "危机"))
+    conflict = 0.9 + min(0.8, conflict_signal / 26)
+    if any(marker in compact for marker in ("追", "围", "断后", "塌", "失踪", "领主", "Boss")):
+        conflict += 0.2
+    if conflict < 1.3:
+        reasons.append("单章对抗不够尖锐，读者可能觉得是过渡章。")
+        suggestions.append("给本章增加更具体的阻力、失败风险或反转。")
+
+    contrast_count = compact.count("不是")
+    no_count = compact.count("没有")
+    system_count = _count_any(compact, ("系统", "面板", "F级", "E级", "D级", "星"))
+    language = 1.6
+    if contrast_count >= 18:
+        language -= 0.35
+        reasons.append("“不是……”类解释句偏密，容易形成 AI 句式感。")
+        suggestions.append("把直接对照改成动作、感官细节、代价或对话潜台词。")
+    if no_count >= 18:
+        language -= 0.2
+    if system_count >= 45:
+        language -= 0.35
+        reasons.append("系统数字和等级说明偏密，原创场景细节被压缩。")
+        suggestions.append("减少面板播报，把等级差转化为可见的身体压力和战术变化。")
+    if paragraph_count > 180:
+        language -= 0.15
+        reasons.append("短段落过密，连续阅读会有机械切分感。")
+    if char_count > 5500:
+        language -= 0.25
+        reasons.append("章节偏长，信息和战斗可能压成一章导致疲劳。")
+        suggestions.append("拆分或压缩说明，把高潮保留在更清晰的单章结构里。")
+    if char_count < 2400:
+        language -= 0.2
+    if not reasons:
+        reasons.append("章节阅读效果稳定，平台低质风险较低。")
+    if not suggestions:
+        suggestions.append("保留现有结构，二修时只压缩重复说明。")
+
+    details = {
+        "hook": _clamp_score(hook),
+        "progress": _clamp_score(progress),
+        "character": _clamp_score(character),
+        "conflict": _clamp_score(conflict),
+        "language_originality": _clamp_score(language),
+    }
+    total_score = round(sum(details.values()), 1)
+    if total_score < 6.5 or details["language_originality"] <= 0.8:
+        platform_risk = "高"
+    elif total_score < 7.3 or any("AI" in reason or "功能" in reason for reason in reasons):
+        platform_risk = "中"
+    else:
+        platform_risk = "低"
+
+    return {
+        "node_id": str(node_id),
+        "chapter_title": title,
+        "total_score": total_score,
+        "platform_risk": platform_risk,
+        "details": details,
+        "detail_labels": RUBRIC_DETAIL_LABELS,
+        "reasons": reasons[:4],
+        "suggestions": suggestions[:4],
+        "stats": {
+            "chars": char_count,
+            "paragraphs": paragraph_count,
+            "contrast_count": contrast_count,
+            "system_count": system_count,
+        },
     }
 
 
@@ -1329,6 +1454,71 @@ def build_runtime_tools(
             ],
         }
 
+    @tool("score_chapters_with_rubric", args_schema=ScoreChaptersWithRubricArgs)
+    async def score_chapters_with_rubric_runtime(
+        novel_id: str | None = None,
+        scope: str = "all",
+        node_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Score selected or all chapters with a 10-point platform quality rubric."""
+        try:
+            resolved_novel_id = current_novel_id(novel_id)
+        except ValueError as exc:
+            return {"status": "error", "message": str(exc)}
+        selected_node_ids = [UUID(node_id) for node_id in (node_ids or [])]
+        stmt = (
+            select(WorkspaceNode, Document)
+            .join(Document, Document.id == WorkspaceNode.document_id)
+            .where(
+                WorkspaceNode.novel_id == resolved_novel_id,
+                WorkspaceNode.node_type == "chapter",
+                WorkspaceNode.status != "trashed",
+            )
+        )
+        if selected_node_ids:
+            stmt = stmt.where(WorkspaceNode.id.in_(selected_node_ids))
+        rows = (await session.execute(stmt)).all()
+        parent_ids = {node.parent_id for node, _document in rows if node.parent_id is not None}
+        parent_positions: dict[UUID, int] = {}
+        if parent_ids:
+            parent_rows = await session.execute(
+                select(WorkspaceNode.id, WorkspaceNode.position).where(WorkspaceNode.id.in_(parent_ids))
+            )
+            parent_positions = {row.id: row.position for row in parent_rows}
+        ordered_rows = sorted(
+            rows,
+            key=lambda row: (
+                parent_positions.get(row[0].parent_id, -1) if row[0].parent_id is not None else -1,
+                row[0].position,
+                row[0].created_at,
+            ),
+        )
+        scores = [
+            _score_chapter_text(
+                node_id=node.id,
+                title=node.title,
+                text=extract_text_from_prosemirror(document.content),
+            )
+            for node, document in ordered_rows
+        ]
+        average_score = round(sum(score["total_score"] for score in scores) / len(scores), 1) if scores else 0
+        return {
+            "status": "ok",
+            "rubric": {
+                "total_points": 10,
+                "details": RUBRIC_DETAIL_LABELS,
+                "platform_checks": [
+                    "粗制滥造风险",
+                    "AI批量生成感",
+                    "逻辑与因果完整性",
+                    "语言原创细节",
+                    "低质功能章连续出现风险",
+                ],
+            },
+            "summary": {"chapter_count": len(scores), "average_score": average_score},
+            "scores": scores,
+        }
+
     @tool("propose_rewrite", args_schema=ProposeRewriteArgs)
     async def propose_rewrite_runtime(
         document_id: str | None = None, selected_text: str = "", instruction: str = ""
@@ -1429,6 +1619,7 @@ def build_runtime_tools(
         "update_relationship_edge": update_relationship_edge_runtime,
         "delete_relationship_edge": delete_relationship_edge_runtime,
         "list_material_changes": list_material_changes_runtime,
+        "score_chapters_with_rubric": score_chapters_with_rubric_runtime,
         "propose_rewrite": propose_rewrite_runtime,
     }
 

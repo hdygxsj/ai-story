@@ -1952,4 +1952,63 @@ describe("WorkspacePage", () => {
       expect(screen.queryByTestId("agent-thinking-indicator")).not.toBeInTheDocument();
     });
   });
+
+  it("scores all chapters with the Agent rubric tool", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const conversationResponse = conversationMockResponse(url);
+      if (conversationResponse) {
+        return Promise.resolve(conversationResponse);
+      }
+      if (url.endsWith("/novels/novel-1/nodes")) {
+        return Promise.resolve(
+          jsonResponse([
+            { id: "node-1", title: "第一章 钩子", node_type: "chapter", parent_id: null, document_id: "doc-1", position: 0 },
+            { id: "node-2", title: "第二章 暗流", node_type: "chapter", parent_id: null, document_id: "doc-2", position: 1 },
+          ]),
+        );
+      }
+      if (url.endsWith("/novels/novel-1/agent/tools/score_chapters_with_rubric")) {
+        expect(init?.method).toBe("POST");
+        return Promise.resolve(
+          jsonResponse({
+            result: {
+              status: "ok",
+              scores: [
+                {
+                  node_id: "node-2",
+                  chapter_title: "第二章 暗流",
+                  total_score: 6.4,
+                  platform_risk: "中",
+                  details: {
+                    hook: 1.1,
+                    progress: 1.2,
+                    character: 1,
+                    conflict: 1.1,
+                    language_originality: 1,
+                  },
+                  reasons: ["功能章偏重", "AI句式感偏高"],
+                  suggestions: ["增加人物选择和章末钩子"],
+                },
+              ],
+              summary: { average_score: 6.4, chapter_count: 1 },
+              rubric: { total_points: 10 },
+            },
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorkspacePage activeSection="scoring" token="test-token" novelId="novel-1" />);
+
+    expect(await screen.findByRole("heading", { name: "章节评分" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "开始评分" }));
+
+    expect(await screen.findByText("平台风险：中")).toBeInTheDocument();
+    expect(screen.getByText("语言原创：1")).toBeInTheDocument();
+    expect(screen.getByText(/功能章偏重/)).toBeInTheDocument();
+  });
 });

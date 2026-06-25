@@ -234,6 +234,89 @@ async def test_runtime_tools_default_to_current_novel_and_document_scope(
 
 
 @pytest.mark.asyncio
+async def test_score_chapters_with_rubric_scores_selected_and_all_chapters(session: AsyncSession) -> None:
+    owner = User(email="score-tool@example.com", username="score-tool", password_hash="hash")
+    session.add(owner)
+    await session.flush()
+    novel = Novel(owner_id=owner.id, title="Score Novel")
+    session.add(novel)
+    await session.flush()
+    first_doc = Document(
+        novel_id=novel.id,
+        content={
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "开场爆炸。叶尘做出选择。敌人逼近，他付出代价。不是逃跑，是主动迎战。",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    second_doc = Document(
+        novel_id=novel.id,
+        content={
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "这一章只有设定说明。系统面板显示F级1星。没有人物选择，没有冲突。",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    session.add_all([first_doc, second_doc])
+    await session.flush()
+    first_node = WorkspaceNode(
+        novel_id=novel.id,
+        title="第一章 钩子",
+        node_type="chapter",
+        document_id=first_doc.id,
+        position=0,
+    )
+    second_node = WorkspaceNode(
+        novel_id=novel.id,
+        title="第二章 设定",
+        node_type="chapter",
+        document_id=second_doc.id,
+        position=1,
+    )
+    session.add_all([first_node, second_node])
+    await session.commit()
+
+    tools = {
+        tool.name: tool
+        for tool in build_runtime_tools(
+            session,
+            model_profile=None,
+            owner_id=owner.id,
+            novel_id=novel.id,
+        )
+    }
+
+    selected = await tools["score_chapters_with_rubric"].ainvoke({"node_ids": [str(second_node.id)]})
+    all_chapters = await tools["score_chapters_with_rubric"].ainvoke({"scope": "all"})
+
+    assert selected["status"] == "ok"
+    assert selected["rubric"]["total_points"] == 10
+    assert [item["chapter_title"] for item in selected["scores"]] == ["第二章 设定"]
+    assert set(selected["scores"][0]["details"]) == {"hook", "progress", "character", "conflict", "language_originality"}
+    assert selected["scores"][0]["total_score"] <= 7
+    assert selected["scores"][0]["platform_risk"] in {"中", "高"}
+    assert len(all_chapters["scores"]) == 2
+
+
+@pytest.mark.asyncio
 async def test_runtime_tools_cannot_cross_authenticated_novel_scope(session: AsyncSession) -> None:
     current_owner = User(
         email="current-scope@example.com",
