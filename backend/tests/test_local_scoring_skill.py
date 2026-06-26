@@ -1,0 +1,20 @@
+from fastapi.testclient import TestClient
+
+from app.main import app
+
+
+def test_local_scoring_skill_download_contains_rubric_workflow() -> None:
+    client = TestClient(app)
+
+    response = client.get("/local-scoring-skill/SKILL.md")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/markdown")
+    assert "name: ai-story-scoring" in response.text
+    assert "score_chapters_with_rubric" in response.text
+    assert "AI粗制滥造" in response.text
+    assert "格式混乱" in response.text
+    assert "结构失常" in response.text
+    assert "空洞水文" in response.text
+    assert "ai-story agent manifest" in response.text
+    assert "ai-story tools run {novel_id} score_chapters_with_rubric" in response.text

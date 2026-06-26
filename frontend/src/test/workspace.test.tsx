@@ -2011,4 +2011,104 @@ describe("WorkspacePage", () => {
     expect(screen.getByText("语言原创：1")).toBeInTheDocument();
     expect(screen.getByText(/功能章偏重/)).toBeInTheDocument();
   });
+
+  it("copies a local scoring Agent setup prompt from the scoring page", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    render(<WorkspacePage activeSection="scoring" token="test-token" novelId="novel-1" />);
+
+    expect(await screen.findByRole("heading", { name: "章节评分" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "复制本地评分接入提示" }));
+
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const copied = writeText.mock.calls[0][0] as string;
+    expect(copied).toContain("/local-scoring-skill/SKILL.md");
+    expect(copied).toContain("AI_STORY_ACCESS_TOKEN=test-token");
+    expect(copied).toContain("ai-story agent manifest");
+    expect(copied).toContain("score_chapters_with_rubric");
+    expect(await screen.findByText("已复制本地评分接入提示")).toBeInTheDocument();
+  });
+
+  it("scores selected chapters from a chapter tree", async () => {
+    const user = userEvent.setup();
+    let scoreRequestBody: unknown = null;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const conversationResponse = conversationMockResponse(url);
+      if (conversationResponse) {
+        return Promise.resolve(conversationResponse);
+      }
+      if (url.endsWith("/novels/novel-1/nodes")) {
+        return Promise.resolve(
+          jsonResponse([
+            { id: "folder-1", title: "第一卷", node_type: "folder", parent_id: null, document_id: null, position: 0 },
+            { id: "node-1", title: "第一章 钩子", node_type: "chapter", parent_id: "folder-1", document_id: "doc-1", position: 0 },
+            { id: "node-2", title: "第二章 暗流", node_type: "chapter", parent_id: "folder-1", document_id: "doc-2", position: 1 },
+            { id: "node-3", title: "第三章 独立章", node_type: "chapter", parent_id: null, document_id: "doc-3", position: 1 },
+          ]),
+        );
+      }
+      if (url.endsWith("/novels/novel-1/agent/tools/score_chapters_with_rubric")) {
+        scoreRequestBody = init?.body ? JSON.parse(String(init.body)) : null;
+        return Promise.resolve(
+          jsonResponse({
+            result: {
+              status: "ok",
+              scores: [
+                {
+                  node_id: "node-1",
+                  chapter_title: "第一章 钩子",
+                  total_score: 7.2,
+                  platform_risk: "低",
+                  details: {
+                    hook: 1.4,
+                    progress: 1.4,
+                    character: 1.4,
+                    conflict: 1.5,
+                    language_originality: 1.5,
+                  },
+                  reasons: ["章节阅读效果稳定"],
+                  suggestions: ["继续保持章末钩子"],
+                },
+              ],
+              summary: { average_score: 7.2, chapter_count: 1 },
+              rubric: { total_points: 10 },
+            },
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorkspacePage activeSection="scoring" token="test-token" novelId="novel-1" />);
+
+    expect(await screen.findByRole("heading", { name: "章节评分" })).toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByLabelText("评分范围"));
+    await user.click(await screen.findByText("指定章节"));
+    const scoringTree = await screen.findByLabelText("选择章节");
+    expect(scoringTree).toBeInTheDocument();
+
+    const folderTitle = within(scoringTree).getByText("第一卷");
+    const folderRow = folderTitle.closest(".ant-tree-treenode") as HTMLElement;
+    fireEvent.click(folderRow.querySelector(".ant-tree-checkbox") as HTMLElement);
+    expect(await screen.findByText("已选 2 章")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "开始评分" }));
+
+    await waitFor(() => {
+      expect(scoreRequestBody).toMatchObject({
+        arguments: {
+          node_ids: ["node-1", "node-2"],
+          scope: "selected",
+        },
+      });
+    });
+    expect(await screen.findByText("平台风险：低")).toBeInTheDocument();
+  });
 });

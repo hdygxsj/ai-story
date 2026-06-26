@@ -46,6 +46,7 @@ func TestAgentManifestExposesWritingBusinessCapabilities(t *testing.T) {
 		"GET /novels/{novel_id}/map-locations",
 		"GET /novels/{novel_id}/memory-items",
 		"POST /novels/{novel_id}/agent/tools/{tool_name}",
+		"GET /local-scoring-skill/SKILL.md",
 	} {
 		if !routeKeys[want] {
 			t.Fatalf("manifest missing route %s", want)
@@ -65,6 +66,7 @@ func TestAgentManifestExposesWritingBusinessCapabilities(t *testing.T) {
 		"upsert_map_location",
 		"save_key_memory",
 		"search_documents_by_keyword",
+		"score_chapters_with_rubric",
 	} {
 		if !toolKeys[want] {
 			t.Fatalf("manifest missing tool %s", want)

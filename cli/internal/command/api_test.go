@@ -66,4 +66,7 @@ func TestAPIRoutesPrintsCoverage(t *testing.T) {
 	if !strings.Contains(stdout.String(), "POST /novels/{novel_id}/agent/tools/{tool_name}") {
 		t.Fatalf("routes output = %s", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "GET /local-scoring-skill/SKILL.md") {
+		t.Fatalf("routes output missing scoring skill route = %s", stdout.String())
+	}
 }

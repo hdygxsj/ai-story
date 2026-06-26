@@ -85,6 +85,7 @@ func TestRoutesIncludeCurrentBackendSurface(t *testing.T) {
 		"POST /novels/{novel_id}/agent/messages",
 		"POST /novels/{novel_id}/agent/messages/stream",
 		"GET /local-agent-skill/SKILL.md",
+		"GET /local-scoring-skill/SKILL.md",
 		"GET /agent-tools",
 		"GET /agent-tools/{tool_name}",
 		"POST /novels/{novel_id}/agent/tools/{tool_name}",

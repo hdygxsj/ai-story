@@ -1,6 +1,7 @@
-import { RightOutlined, SearchOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Empty, Flex, Form, Input, List, message, Popconfirm, Select, Space, Statistic, Tabs, Tag, Timeline, Typography } from "antd";
-import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import { CopyOutlined, FileTextOutlined, FolderOutlined, RightOutlined, SearchOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Empty, Flex, Form, Input, List, message, Popconfirm, Select, Space, Statistic, Tabs, Tag, Timeline, Tooltip, Tree, Typography } from "antd";
+import type { Key, MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import type { TreeDataNode } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { documentBodiesEqual, extractDocumentBodyText } from "../editor/documentBodyText";
@@ -13,7 +14,7 @@ import { MaterialsPanel } from "./MaterialsPanel";
 import { NovelSearchModal } from "./NovelSearchModal";
 import { prepareTimelineEvents } from "./timelinePresentation";
 import { WorkspaceTree } from "./WorkspaceTree";
-import { ApiError } from "../../api/http";
+import { API_BASE, ApiError } from "../../api/http";
 import type { AgentStreamDonePayload, WorkspaceDiff } from "../../api/agent";
 import { runAgentTool } from "../../api/agent";
 import type { Confirmation } from "../../api/confirmations";
@@ -149,6 +150,30 @@ const MODEL_TAB_PURPOSES: Record<ModelConfigTab, ModelProfilePurpose[]> = {
   summary: ["summary"],
   writing: ["writing"],
 };
+
+const LOCAL_SCORING_SKILL_PATH = "/local-scoring-skill/SKILL.md";
+
+function buildLocalScoringPrompt(apiBase: string, accessToken: string, novelId: string) {
+  const normalizedApiBase = apiBase.replace(/\/$/, "");
+  return [
+    "请连接我的 AI Story 平台，下载并使用平台提供的本地评分 skill，然后通过 ai-story CLI 基于平台章节数据进行小说评分。",
+    "",
+    `平台地址：${normalizedApiBase}`,
+    `小说 ID：${novelId}`,
+    `Skill 下载地址：${normalizedApiBase}${LOCAL_SCORING_SKILL_PATH}`,
+    "",
+    "请按下面步骤执行：",
+    `1. 下载 skill：curl -fsS ${normalizedApiBase}${LOCAL_SCORING_SKILL_PATH}`,
+    "2. 安装或加载这个 skill，按 skill 说明使用 ai-story CLI。",
+    `3. 设置连接环境：AI_STORY_API_BASE=${normalizedApiBase} AI_STORY_ACCESS_TOKEN=${accessToken}`,
+    "4. 先运行 ai-story agent manifest，确认 score_chapters_with_rubric 工具可用。",
+    "5. 读取章节树：ai-story api request GET /novels/{novel_id}/nodes。",
+    `6. 全书评分：ai-story tools run ${novelId} score_chapters_with_rubric --arg scope=all。`,
+    "7. 指定章节评分时使用 --arg scope=selected --json-arg node_ids='[\"chapter-node-id\"]'。",
+    "",
+    "评分时以平台实时数据为准，不要使用可能过期的本地缓存。",
+  ].join("\n");
+}
 
 function modelTabValidateFields(tab: ModelConfigTab, editing: boolean): string[] {
   const shared = editing ? ["name", "provider_kind"] : ["name", "provider_kind", "api_key"];
@@ -358,6 +383,7 @@ export function WorkspacePage({
   const [selectedScoringNodeIds, setSelectedScoringNodeIds] = useState<string[]>([]);
   const [chapterScoreResult, setChapterScoreResult] = useState<ChapterScoreResult | null>(null);
   const [chapterScoring, setChapterScoring] = useState(false);
+  const [localScoringPromptCopied, setLocalScoringPromptCopied] = useState(false);
   const [agentDocumentWriteLocked, setAgentDocumentWriteLocked] = useState(false);
   const draftTrackerRef = useRef(createDirtyDraftTracker());
   const [draftRevision, setDraftRevision] = useState(0);
@@ -1378,6 +1404,55 @@ export function WorkspacePage({
     () => activeNodes.filter((node) => node.node_type === "chapter" && Boolean(node.document_id)),
     [activeNodes],
   );
+  const scoringChapterNodeIds = useMemo(() => new Set(chapterNodes.map((node) => node.id)), [chapterNodes]);
+  const scoringTreeNodeIds = useMemo(() => new Set(activeNodes.map((node) => node.id)), [activeNodes]);
+  const scoringSelectedChapterIds = useMemo(
+    () => selectedScoringNodeIds.filter((nodeId) => scoringChapterNodeIds.has(nodeId)),
+    [scoringChapterNodeIds, selectedScoringNodeIds],
+  );
+  const scoringChapterTreeData = useMemo(() => {
+    const childrenByParent = new Map<string | null, WorkspaceNode[]>();
+    for (const node of activeNodes) {
+      if (node.node_type !== "folder" && !scoringChapterNodeIds.has(node.id)) {
+        continue;
+      }
+      const siblings = childrenByParent.get(node.parent_id) ?? [];
+      siblings.push(node);
+      childrenByParent.set(node.parent_id, siblings);
+    }
+    for (const siblings of childrenByParent.values()) {
+      siblings.sort((left, right) => left.position - right.position || left.title.localeCompare(right.title));
+    }
+
+    function buildTree(parentId: string | null): TreeDataNode[] {
+      return (childrenByParent.get(parentId) ?? []).map((node) => {
+        const children = buildTree(node.id);
+        const isFolder = node.node_type === "folder";
+        return {
+          key: node.id,
+          title: (
+            <span style={{ alignItems: "center", display: "inline-flex", gap: 6, minWidth: 0 }}>
+              <span aria-hidden style={{ color: "#94a3b8", display: "inline-flex", flexShrink: 0 }}>
+                {isFolder ? <FolderOutlined /> : <FileTextOutlined />}
+              </span>
+              <span title={node.title} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {node.title}
+              </span>
+            </span>
+          ),
+          children,
+          disableCheckbox: isFolder && children.length === 0,
+        };
+      });
+    }
+
+    return buildTree(null);
+  }, [activeNodes, scoringChapterNodeIds]);
+
+  useEffect(() => {
+    setSelectedScoringNodeIds((current) => current.filter((nodeId) => scoringTreeNodeIds.has(nodeId)));
+  }, [scoringTreeNodeIds]);
+
   async function handleScoreChapters() {
     const nodeIds =
       scoringScope === "all"
@@ -1386,7 +1461,7 @@ export function WorkspacePage({
           ? currentChapterNode
             ? [currentChapterNode.id]
             : []
-          : selectedScoringNodeIds;
+          : scoringSelectedChapterIds;
     if (scoringScope !== "all" && nodeIds.length === 0) {
       message.warning("请先选择要评分的章节");
       return;
@@ -1403,6 +1478,17 @@ export function WorkspacePage({
       message.error(error instanceof Error ? error.message : "评分失败");
     } finally {
       setChapterScoring(false);
+    }
+  }
+
+  async function handleCopyLocalScoringPrompt() {
+    const prompt = buildLocalScoringPrompt(API_BASE, token, novelId);
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setLocalScoringPromptCopied(true);
+      window.setTimeout(() => setLocalScoringPromptCopied(false), 2200);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "无法复制本地评分接入提示");
     }
   }
   const pendingWriteConfirmations = useMemo(
@@ -2118,15 +2204,31 @@ export function WorkspacePage({
             通过 Agent 工具按平台 rubric 评分：钩子、推进、人物、冲突、语言原创，并标记低质内容风险。
           </Typography.Paragraph>
         </div>
-        {chapterScoreResult ? (
-          <Statistic
-            precision={1}
-            suffix="/ 10"
-            title={`${chapterScoreResult.summary.chapter_count} 章平均分`}
-            value={chapterScoreResult.summary.average_score}
-          />
-        ) : null}
+        <Space align="center">
+          {chapterScoreResult ? (
+            <Statistic
+              precision={1}
+              suffix="/ 10"
+              title={`${chapterScoreResult.summary.chapter_count} 章平均分`}
+              value={chapterScoreResult.summary.average_score}
+            />
+          ) : null}
+          <Tooltip title="复制给本地评分 Agent">
+            <Button
+              aria-label="复制本地评分接入提示"
+              icon={<CopyOutlined />}
+              onClick={() => void handleCopyLocalScoringPrompt()}
+              size="small"
+              type="text"
+            />
+          </Tooltip>
+        </Space>
       </Flex>
+      {localScoringPromptCopied ? (
+        <Typography.Text style={{ display: "block", marginTop: 10 }} type="secondary">
+          已复制本地评分接入提示
+        </Typography.Text>
+      ) : null}
       <Space align="end" size={12} style={{ marginTop: 18, width: "100%" }} wrap>
         <div>
           <Typography.Text style={{ display: "block", marginBottom: 6 }}>评分范围</Typography.Text>
@@ -2143,17 +2245,37 @@ export function WorkspacePage({
           />
         </div>
         {scoringScope === "selected" ? (
-          <div>
+          <div style={{ minWidth: 320, width: "min(520px, 100%)" }}>
             <Typography.Text style={{ display: "block", marginBottom: 6 }}>选择章节</Typography.Text>
-            <Select
+            <div
               aria-label="选择章节"
-              mode="multiple"
-              onChange={setSelectedScoringNodeIds}
-              options={chapterNodes.map((node) => ({ label: node.title, value: node.id }))}
-              placeholder="选择一个或多个章节"
-              style={{ minWidth: 260 }}
-              value={selectedScoringNodeIds}
-            />
+              style={{
+                border: "1px solid #d9d9d9",
+                borderRadius: 8,
+                maxHeight: 280,
+                overflow: "auto",
+                padding: "8px 10px",
+              }}
+            >
+              {scoringChapterTreeData.length ? (
+                <Tree
+                  checkable
+                  checkedKeys={selectedScoringNodeIds}
+                  defaultExpandAll
+                  onCheck={(checkedKeys) => {
+                    const keys = Array.isArray(checkedKeys) ? checkedKeys : checkedKeys.checked;
+                    setSelectedScoringNodeIds(keys.map((key: Key) => String(key)));
+                  }}
+                  selectable={false}
+                  treeData={scoringChapterTreeData}
+                />
+              ) : (
+                <Empty description="暂无可评分章节" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              )}
+            </div>
+            <Typography.Text style={{ display: "block", marginTop: 6 }} type="secondary">
+              已选 {scoringSelectedChapterIds.length} 章
+            </Typography.Text>
           </div>
         ) : null}
         <Button loading={chapterScoring} onClick={() => void handleScoreChapters()} type="primary">
