@@ -2089,14 +2089,11 @@ describe("WorkspacePage", () => {
     render(<WorkspacePage activeSection="scoring" token="test-token" novelId="novel-1" />);
 
     expect(await screen.findByRole("heading", { name: "章节评分" })).toBeInTheDocument();
-    fireEvent.mouseDown(screen.getByLabelText("评分范围"));
     await user.click(await screen.findByText("指定章节"));
     const scoringTree = await screen.findByLabelText("选择章节");
     expect(scoringTree).toBeInTheDocument();
 
-    const folderTitle = within(scoringTree).getByText("第一卷");
-    const folderRow = folderTitle.closest(".ant-tree-treenode") as HTMLElement;
-    fireEvent.click(folderRow.querySelector(".ant-tree-checkbox") as HTMLElement);
+    await user.click(within(scoringTree).getByRole("checkbox", { name: "选择第一卷" }));
     expect(await screen.findByText("已选 2 章")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "开始评分" }));

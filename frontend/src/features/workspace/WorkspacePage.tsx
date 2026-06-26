@@ -1,7 +1,6 @@
 import { CopyOutlined, FileTextOutlined, FolderOutlined, RightOutlined, SearchOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Empty, Flex, Form, Input, List, message, Popconfirm, Select, Space, Statistic, Tabs, Tag, Timeline, Tooltip, Tree, Typography } from "antd";
-import type { Key, MouseEvent as ReactMouseEvent, ReactNode } from "react";
-import type { TreeDataNode } from "antd";
+import { Alert, Button, Card, Empty, Flex, Form, Input, List, message, Popconfirm, Segmented, Select, Space, Statistic, Tabs, Tag, Timeline, Tooltip, Typography } from "antd";
+import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { documentBodiesEqual, extractDocumentBodyText } from "../editor/documentBodyText";
@@ -85,6 +84,7 @@ import {
   updateWorkspaceNode,
 } from "../../api/workspace";
 import { getStoredDocumentId, setStoredDocumentId } from "./workspaceSessionStorage";
+import "./workspace-page.css";
 
 type WorkspacePageProps = {
   activeSection?: WorkspaceSection;
@@ -128,6 +128,13 @@ type ChapterScoreResult = {
   rubric: {
     total_points: number;
   };
+};
+
+type ScoringTreeItem = {
+  chapterIds: string[];
+  children: ScoringTreeItem[];
+  isFolder: boolean;
+  node: WorkspaceNode;
 };
 
 const providerOptions = [
@@ -1410,7 +1417,7 @@ export function WorkspacePage({
     () => selectedScoringNodeIds.filter((nodeId) => scoringChapterNodeIds.has(nodeId)),
     [scoringChapterNodeIds, selectedScoringNodeIds],
   );
-  const scoringChapterTreeData = useMemo(() => {
+  const scoringChapterTreeItems = useMemo(() => {
     const childrenByParent = new Map<string | null, WorkspaceNode[]>();
     for (const node of activeNodes) {
       if (node.node_type !== "folder" && !scoringChapterNodeIds.has(node.id)) {
@@ -1424,34 +1431,124 @@ export function WorkspacePage({
       siblings.sort((left, right) => left.position - right.position || left.title.localeCompare(right.title));
     }
 
-    function buildTree(parentId: string | null): TreeDataNode[] {
+    function buildTree(parentId: string | null): ScoringTreeItem[] {
       return (childrenByParent.get(parentId) ?? []).map((node) => {
         const children = buildTree(node.id);
         const isFolder = node.node_type === "folder";
+        const childChapterIds = children.flatMap((child) => child.chapterIds);
+        const chapterIds = isFolder ? childChapterIds : [node.id];
         return {
-          key: node.id,
-          title: (
-            <span style={{ alignItems: "center", display: "inline-flex", gap: 6, minWidth: 0 }}>
-              <span aria-hidden style={{ color: "#94a3b8", display: "inline-flex", flexShrink: 0 }}>
-                {isFolder ? <FolderOutlined /> : <FileTextOutlined />}
-              </span>
-              <span title={node.title} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {node.title}
-              </span>
-            </span>
-          ),
+          chapterIds,
           children,
-          disableCheckbox: isFolder && children.length === 0,
+          isFolder,
+          node,
         };
       });
     }
 
     return buildTree(null);
   }, [activeNodes, scoringChapterNodeIds]);
+  const scoringExpandableNodeIds = useMemo(() => {
+    const ids: string[] = [];
+    function collect(items: ScoringTreeItem[]) {
+      for (const item of items) {
+        if (item.children.length > 0) {
+          ids.push(item.node.id);
+          collect(item.children);
+        }
+      }
+    }
+    collect(scoringChapterTreeItems);
+    return ids;
+  }, [scoringChapterTreeItems]);
+  const [expandedScoringNodeIds, setExpandedScoringNodeIds] = useState<string[]>([]);
+  const expandedScoringNodeIdSet = useMemo(() => new Set(expandedScoringNodeIds), [expandedScoringNodeIds]);
 
   useEffect(() => {
     setSelectedScoringNodeIds((current) => current.filter((nodeId) => scoringTreeNodeIds.has(nodeId)));
   }, [scoringTreeNodeIds]);
+
+  useEffect(() => {
+    setExpandedScoringNodeIds((current) => {
+      const known = current.filter((nodeId) => scoringTreeNodeIds.has(nodeId));
+      const knownSet = new Set(known);
+      const missing = scoringExpandableNodeIds.filter((nodeId) => !knownSet.has(nodeId));
+      return [...known, ...missing];
+    });
+  }, [scoringExpandableNodeIds, scoringTreeNodeIds]);
+
+  function toggleScoringNodeExpanded(nodeId: string) {
+    setExpandedScoringNodeIds((current) =>
+      current.includes(nodeId) ? current.filter((currentId) => currentId !== nodeId) : [...current, nodeId],
+    );
+  }
+
+  function toggleScoringTreeItem(item: ScoringTreeItem) {
+    if (item.chapterIds.length === 0) {
+      return;
+    }
+    const itemChapterIdSet = new Set(item.chapterIds);
+    const allSelected = item.chapterIds.every((nodeId) => selectedScoringNodeIds.includes(nodeId));
+    setSelectedScoringNodeIds((current) => {
+      if (allSelected) {
+        return current.filter((nodeId) => !itemChapterIdSet.has(nodeId));
+      }
+      const next = new Set(current);
+      for (const nodeId of item.chapterIds) {
+        next.add(nodeId);
+      }
+      return Array.from(next);
+    });
+  }
+
+  function renderScoringTreeItems(items: ScoringTreeItem[], depth = 0): ReactNode {
+    return items.map((item) => {
+      const isExpanded = expandedScoringNodeIdSet.has(item.node.id);
+      const selectedCount = item.chapterIds.filter((nodeId) => selectedScoringNodeIds.includes(nodeId)).length;
+      const checked = item.chapterIds.length > 0 && selectedCount === item.chapterIds.length;
+      const indeterminate = selectedCount > 0 && !checked;
+      const disabled = item.chapterIds.length === 0;
+      return (
+        <div className="scoring-tree-branch" key={item.node.id}>
+          <div className="scoring-tree-row" style={{ "--scoring-tree-depth": depth } as CSSProperties}>
+            <button
+              aria-checked={indeterminate ? "mixed" : checked}
+              aria-label={`选择${item.node.title}`}
+              className={[
+                "scoring-tree-check",
+                checked ? "scoring-tree-check-checked" : "",
+                indeterminate ? "scoring-tree-check-indeterminate" : "",
+              ].filter(Boolean).join(" ")}
+              disabled={disabled}
+              onClick={() => toggleScoringTreeItem(item)}
+              role="checkbox"
+              type="button"
+            />
+            {item.children.length > 0 ? (
+              <button
+                aria-expanded={isExpanded}
+                aria-label={isExpanded ? `收起${item.node.title}` : `展开${item.node.title}`}
+                className="scoring-tree-expand"
+                onClick={() => toggleScoringNodeExpanded(item.node.id)}
+                type="button"
+              >
+                <RightOutlined rotate={isExpanded ? 90 : 0} />
+              </button>
+            ) : (
+              <span className="scoring-tree-expand scoring-tree-expand-placeholder" />
+            )}
+            <span aria-hidden className="scoring-tree-node-icon">
+              {item.isFolder ? <FolderOutlined /> : <FileTextOutlined />}
+            </span>
+            <span className="scoring-tree-node-text" title={item.node.title}>
+              {item.node.title}
+            </span>
+          </div>
+          {item.children.length > 0 && isExpanded ? renderScoringTreeItems(item.children, depth + 1) : null}
+        </div>
+      );
+    });
+  }
 
   async function handleScoreChapters() {
     const nodeIds =
@@ -2229,59 +2326,52 @@ export function WorkspacePage({
           已复制本地评分接入提示
         </Typography.Text>
       ) : null}
-      <Space align="end" size={12} style={{ marginTop: 18, width: "100%" }} wrap>
-        <div>
-          <Typography.Text style={{ display: "block", marginBottom: 6 }}>评分范围</Typography.Text>
-          <Select
+      <div className="scoring-controls">
+        <div className="scoring-scope-field">
+          <Typography.Text className="scoring-field-label">评分范围</Typography.Text>
+          <Segmented
             aria-label="评分范围"
-            onChange={(value) => setScoringScope(value)}
+            className="scoring-scope-segmented"
+            onChange={(value) => setScoringScope(value as "all" | "current" | "selected")}
             options={[
               { label: "全部章节", value: "all" },
               { label: "当前章节", value: "current" },
               { label: "指定章节", value: "selected" },
             ]}
-            style={{ width: 160 }}
             value={scoringScope}
           />
         </div>
         {scoringScope === "selected" ? (
-          <div style={{ minWidth: 320, width: "min(520px, 100%)" }}>
-            <Typography.Text style={{ display: "block", marginBottom: 6 }}>选择章节</Typography.Text>
+          <div className="scoring-tree-panel">
+            <div className="scoring-tree-header">
+              <Typography.Text className="scoring-field-label">选择章节</Typography.Text>
+              <Typography.Text className="scoring-selected-count" type="secondary">
+                已选 {scoringSelectedChapterIds.length} 章
+              </Typography.Text>
+            </div>
             <div
               aria-label="选择章节"
-              style={{
-                border: "1px solid #d9d9d9",
-                borderRadius: 8,
-                maxHeight: 280,
-                overflow: "auto",
-                padding: "8px 10px",
-              }}
+              className="scoring-tree-frame"
             >
-              {scoringChapterTreeData.length ? (
-                <Tree
-                  checkable
-                  checkedKeys={selectedScoringNodeIds}
-                  defaultExpandAll
-                  onCheck={(checkedKeys) => {
-                    const keys = Array.isArray(checkedKeys) ? checkedKeys : checkedKeys.checked;
-                    setSelectedScoringNodeIds(keys.map((key: Key) => String(key)));
-                  }}
-                  selectable={false}
-                  treeData={scoringChapterTreeData}
-                />
+              {scoringChapterTreeItems.length ? (
+                <div className="scoring-chapter-tree" role="tree">
+                  {renderScoringTreeItems(scoringChapterTreeItems)}
+                </div>
               ) : (
                 <Empty description="暂无可评分章节" image={Empty.PRESENTED_IMAGE_SIMPLE} />
               )}
             </div>
-            <Typography.Text style={{ display: "block", marginTop: 6 }} type="secondary">
-              已选 {scoringSelectedChapterIds.length} 章
-            </Typography.Text>
           </div>
         ) : null}
-        <Button loading={chapterScoring} onClick={() => void handleScoreChapters()} type="primary">
+        <Button
+          className="scoring-start-button"
+          loading={chapterScoring}
+          onClick={() => void handleScoreChapters()}
+          type="primary"
+        >
           开始评分
         </Button>
-      </Space>
+      </div>
       <Alert
         title="评分说明"
         description="总分 10 分。平台风险会结合章节体量、解释性句式、系统数字密度、功能章倾向和人物代价不足来判断。"

@@ -1,0 +1,221 @@
+.scoring-controls {
+  align-items: end;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(180px, 220px) auto 1fr;
+  margin-top: 22px;
+  width: 100%;
+}
+
+.scoring-scope-field,
+.scoring-tree-panel {
+  min-width: 0;
+}
+
+.scoring-field-label {
+  color: #111827;
+  display: block;
+  font-size: 15px;
+  font-weight: 650;
+  margin-bottom: 8px;
+}
+
+.scoring-scope-segmented {
+  background: #f6f7f9;
+  border: 1px solid #e5e7eb;
+  max-width: 100%;
+  padding: 4px;
+  width: 348px;
+}
+
+.scoring-scope-segmented .ant-segmented-item {
+  border-radius: 6px;
+  color: #475569;
+  font-weight: 600;
+  min-height: 30px;
+}
+
+.scoring-scope-segmented .ant-segmented-item-selected {
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+  color: #ff6b1a;
+}
+
+.scoring-scope-segmented .ant-segmented-item-label {
+  line-height: 30px;
+}
+
+.scoring-tree-panel {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.scoring-tree-header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.scoring-selected-count {
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.scoring-tree-frame {
+  background: #fff;
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  box-shadow: inset 0 1px 0 rgba(15, 23, 42, 0.03);
+  max-height: 520px;
+  min-height: 420px;
+  overflow: auto;
+  padding: 12px 14px;
+}
+
+.scoring-chapter-tree {
+  background: transparent;
+  color: #111827;
+  font-size: 16px;
+}
+
+.scoring-tree-row {
+  align-items: center;
+  border-radius: 6px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 18px calc(var(--scoring-tree-depth, 0) * 22px) 22px 22px minmax(0, 1fr);
+  min-height: 38px;
+  padding: 2px 8px;
+}
+
+.scoring-tree-row:hover {
+  background: #f5f7fb;
+}
+
+.scoring-tree-check {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  height: 18px;
+  justify-content: center;
+  padding: 0;
+  position: relative;
+  width: 18px;
+}
+
+.scoring-tree-check::before {
+  border: 1.5px solid #cbd5e1;
+  border-radius: 6px;
+  box-sizing: border-box;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+  content: "";
+  display: block;
+  height: 18px;
+  width: 18px;
+}
+
+.scoring-tree-check:hover::before {
+  border-color: #ff7a1a;
+}
+
+.scoring-tree-check:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.scoring-tree-check-checked::before {
+  background: #ff6b1a;
+  border-color: #ff6b1a;
+}
+
+.scoring-tree-check-checked::after {
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  content: "";
+  display: block;
+  height: 9px;
+  left: 50%;
+  position: absolute;
+  top: 45%;
+  transform: translate(-50%, -50%) rotate(45deg);
+  width: 5px;
+}
+
+.scoring-tree-check-indeterminate::before {
+  border-color: #ff9a4d;
+}
+
+.scoring-tree-check-indeterminate::after {
+  background: #ff6b1a;
+  border-radius: 999px;
+  content: "";
+  display: block;
+  height: 2px;
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 9px;
+}
+
+.scoring-tree-expand {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: #475569;
+  cursor: pointer;
+  display: inline-flex;
+  grid-column: 3;
+  height: 22px;
+  justify-content: center;
+  padding: 0;
+  width: 22px;
+}
+
+.scoring-tree-expand-placeholder {
+  cursor: default;
+}
+
+.scoring-tree-node-icon {
+  color: #8091ac;
+  display: inline-flex;
+  flex-shrink: 0;
+  font-size: 18px;
+  grid-column: 4;
+}
+
+.scoring-tree-node-text {
+  display: inline-block;
+  font-weight: 600;
+  grid-column: 5;
+  line-height: 1.35;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scoring-start-button {
+  justify-self: start;
+  min-width: 128px;
+}
+
+@media (max-width: 1180px) {
+  .scoring-controls {
+    grid-template-columns: minmax(180px, 240px) auto 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .scoring-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .scoring-tree-frame {
+    max-height: 360px;
+    min-height: 280px;
+  }
+}
