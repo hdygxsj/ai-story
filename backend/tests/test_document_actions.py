@@ -4,6 +4,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
+from app.api.routes.confirmations import list_confirmations
 from app.models import Document, DocumentVersion, Novel, User, WorkspaceNode
 from app.services.document_actions import (
     approve_document_confirmation,
@@ -73,6 +74,63 @@ async def test_document_update_proposal_does_not_mutate_until_approved(session, 
     assert extract_text_from_prosemirror(versions[0].content) == "旧正文"
 
 
+async def test_document_update_approval_keeps_other_confirmations_pending(session, monkeypatch) -> None:
+    async def fake_index_text(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.services.document_actions.index_text", fake_index_text)
+    user, novel, document = await create_owned_document(session)
+    first = await create_document_update_proposal(
+        session,
+        owner_id=user.id,
+        novel_id=novel.id,
+        document_id=document.id,
+        content="第一版 Agent 正文",
+    )
+    second = await create_document_update_proposal(
+        session,
+        owner_id=user.id,
+        novel_id=novel.id,
+        document_id=document.id,
+        content="第二版 Agent 正文",
+    )
+
+    await approve_document_confirmation(session, owner_id=user.id, confirmation=first)
+
+    await session.refresh(second)
+    assert second.status == "pending"
+
+
+async def test_listing_confirmations_keeps_stale_pending_items_visible(session, monkeypatch) -> None:
+    async def fake_index_text(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.services.document_actions.index_text", fake_index_text)
+    user, novel, document = await create_owned_document(session)
+    first = await create_document_update_proposal(
+        session,
+        owner_id=user.id,
+        novel_id=novel.id,
+        document_id=document.id,
+        content="第一版 Agent 正文",
+    )
+    second = await create_document_update_proposal(
+        session,
+        owner_id=user.id,
+        novel_id=novel.id,
+        document_id=document.id,
+        content="第二版 Agent 正文",
+    )
+    await approve_document_confirmation(session, owner_id=user.id, confirmation=first)
+
+    listed = await list_confirmations(novel.id, user, session)
+
+    await session.refresh(second)
+    assert second.status == "pending"
+    assert [str(item["id"]) for item in listed] == [str(second.id)]
+    assert listed[0]["is_stale"] is True
+
+
 async def test_selection_replace_changes_only_unique_selection(session, monkeypatch) -> None:
     async def fake_index_text(*args, **kwargs):
         return None
@@ -92,6 +150,43 @@ async def test_selection_replace_changes_only_unique_selection(session, monkeypa
 
     await session.refresh(document)
     assert extract_text_from_prosemirror(document.content) == "甲冒雨来到门前。乙留在屋内。"
+
+
+async def test_selection_replace_approval_keeps_other_applicable_confirmations_pending(
+    session,
+    monkeypatch,
+) -> None:
+    async def fake_index_text(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.services.document_actions.index_text", fake_index_text)
+    user, novel, document = await create_owned_document(session, text="甲来到门前。乙留在屋内。")
+    first = await create_selection_replace_proposal(
+        session,
+        owner_id=user.id,
+        novel_id=novel.id,
+        document_id=document.id,
+        selected_text="甲来到门前。",
+        replacement_text="甲冒雨来到门前。",
+    )
+    second = await create_selection_replace_proposal(
+        session,
+        owner_id=user.id,
+        novel_id=novel.id,
+        document_id=document.id,
+        selected_text="乙留在屋内。",
+        replacement_text="乙点灯留在屋内。",
+    )
+
+    await approve_document_confirmation(session, owner_id=user.id, confirmation=first)
+
+    await session.refresh(second)
+    assert second.status == "pending"
+
+    await approve_document_confirmation(session, owner_id=user.id, confirmation=second)
+
+    await session.refresh(document)
+    assert extract_text_from_prosemirror(document.content) == "甲冒雨来到门前。乙点灯留在屋内。"
 
 
 async def test_selection_replace_works_when_selected_text_spans_formatted_nodes(session, monkeypatch) -> None:

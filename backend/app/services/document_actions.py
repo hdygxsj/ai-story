@@ -181,6 +181,11 @@ def confirmation_is_stale(
     document = documents_by_id.get(UUID(str(document_id_raw)))
     if document is None:
         return True
+    if confirmation.action_type in {"selection_replace", "rewrite_selection"}:
+        selected_text = confirmation.payload.get("selected_text")
+        if not isinstance(selected_text, str):
+            return True
+        return _resolve_selection_text(extract_document_plain_text(document.content), selected_text) is None
     return _timestamp_token(document.updated_at) != expected
 
 
@@ -200,6 +205,8 @@ def reject_pending_confirmations_for_document(
         if str(confirmation.payload.get("document_id", "")) != document_id_str:
             continue
         if not confirmation.payload.get("expected_updated_at"):
+            continue
+        if confirmation.action_type in {"selection_replace", "rewrite_selection"}:
             continue
         mark_confirmation_resolved(confirmation, "rejected")
         changed = True
@@ -648,7 +655,10 @@ async def approve_document_confirmation(
         novel_id=confirmation.novel_id,
         document_id=UUID(confirmation.payload["document_id"]),
     )
-    if _timestamp_token(document.updated_at) != confirmation.payload.get("expected_updated_at"):
+    timestamp_mismatch = _timestamp_token(document.updated_at) != confirmation.payload.get(
+        "expected_updated_at"
+    )
+    if timestamp_mismatch and confirmation.action_type not in {"selection_replace", "rewrite_selection"}:
         mark_confirmation_resolved(confirmation, "rejected")
         await session.commit()
         raise HTTPException(
@@ -685,18 +695,5 @@ async def approve_document_confirmation(
         text=extract_text_from_prosemirror(document.content),
     )
     mark_confirmation_resolved(confirmation, "approved")
-    pending = list(
-        await session.scalars(
-            select(PendingConfirmation).where(
-                PendingConfirmation.novel_id == confirmation.novel_id,
-                PendingConfirmation.status == "pending",
-            )
-        )
-    )
-    reject_pending_confirmations_for_document(
-        pending,
-        document_id=document.id,
-        exclude_confirmation_id=confirmation.id,
-    )
     await session.commit()
     return {"document_id": str(document.id), "confirmation_id": str(confirmation.id)}

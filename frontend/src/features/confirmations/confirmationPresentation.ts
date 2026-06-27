@@ -82,9 +82,7 @@ export function isDocumentWriteConfirmation(confirmation: Confirmation): boolean
 }
 
 export function pendingDocumentWriteConfirmations(items: Confirmation[]): Confirmation[] {
-  return pendingConfirmations(items)
-    .filter(isDocumentWriteConfirmation)
-    .filter((item) => !item.is_stale);
+  return pendingConfirmations(items).filter(isDocumentWriteConfirmation);
 }
 
 export function pendingDocumentWriteConfirmationIds(items: Confirmation[]): string[] {

@@ -13,7 +13,6 @@ from app.services.novels import get_owned_novel
 from app.services.document_actions import (
     approve_document_confirmation,
     build_confirmation_responses,
-    expire_stale_pending_confirmations,
     mark_confirmation_resolved,
 )
 from app.services.rag import extract_text_from_prosemirror, index_text
@@ -38,7 +37,6 @@ async def list_confirmations(
         .order_by(PendingConfirmation.created_at, PendingConfirmation.id)
         )
     )
-    await expire_stale_pending_confirmations(session, confirmations)
     active_confirmations = [confirmation for confirmation in confirmations if confirmation.status == "pending"]
     return await build_confirmation_responses(session, active_confirmations, novel_id=novel_id)
 

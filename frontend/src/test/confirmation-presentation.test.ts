@@ -30,6 +30,14 @@ describe("confirmationPresentation document write helpers", () => {
       payload: {},
       document_id: "doc-2",
     },
+    {
+      id: "write-3",
+      action_type: "document_update",
+      status: "pending",
+      payload: {},
+      document_id: "doc-3",
+      is_stale: true,
+    },
   ];
 
   it("identifies document write confirmations", () => {
@@ -38,8 +46,8 @@ describe("confirmationPresentation document write helpers", () => {
   });
 
   it("filters pending document write confirmations and document ids", () => {
-    expect(pendingDocumentWriteConfirmations(items)).toEqual([items[0]]);
-    expect(pendingDocumentWriteConfirmationIds(items)).toEqual(["doc-1"]);
-    expect(pendingDocumentWriteCountsByDocumentId(items)).toEqual({ "doc-1": 1 });
+    expect(pendingDocumentWriteConfirmations(items)).toEqual([items[0], items[3]]);
+    expect(pendingDocumentWriteConfirmationIds(items)).toEqual(["doc-1", "doc-3"]);
+    expect(pendingDocumentWriteCountsByDocumentId(items)).toEqual({ "doc-1": 1, "doc-3": 1 });
   });
 });
