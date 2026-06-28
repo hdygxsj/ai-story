@@ -73,25 +73,9 @@ function welcomeMessages(): ChatMessage[] {
   return [{ id: createMessageId("assistant"), role: "assistant", content: WELCOME_MESSAGE }];
 }
 
-function buildLocalAgentPrompt(apiBase: string, accessToken: string, novelId: string) {
+function buildLocalAgentPrompt(apiBase: string) {
   const normalizedApiBase = apiBase.replace(/\/$/, "");
-  return [
-    "请连接我的 AI Story 平台，下载并使用平台提供的本地 Agent skill，然后通过 ai-story CLI 复用素材、时间线、记忆和章节工具来写小说。",
-    "",
-    `平台地址：${normalizedApiBase}`,
-    `小说 ID：${novelId}`,
-    `Skill 下载地址：${normalizedApiBase}${LOCAL_AGENT_SKILL_PATH}`,
-    "",
-    "请按下面步骤执行：",
-    `1. 下载 skill：curl -fsS ${normalizedApiBase}${LOCAL_AGENT_SKILL_PATH}`,
-    "2. 安装或加载这个 skill，按 skill 说明使用 ai-story CLI。",
-    `3. 设置连接环境：AI_STORY_API_BASE=${normalizedApiBase} AI_STORY_ACCESS_TOKEN=${accessToken}`,
-    "4. 先运行 ai-story agent manifest，读取可用接口和 Agent 工具。",
-    "5. 写作前读取 creative-assets、timeline-events、memory-items 和章节正文。",
-    "6. 写入时优先使用 ai-story tools run，例如 create_chapter_with_content、save_key_memory、create_timeline_event。",
-    "",
-    "不要直接写数据库；通过 CLI 和平台 API 连接。",
-  ].join("\n");
+  return `请安装 ${normalizedApiBase}${LOCAL_AGENT_SKILL_PATH} 这个 skill；安装前请先询问我是装到用户目录还是本地目录，用户目录安装后需要重启后生效，本地目录只对当前项目生效。`;
 }
 
 export function AgentPanel({
@@ -490,7 +474,7 @@ export function AgentPanel({
   }
 
   async function handleCopyLocalAgentPrompt() {
-    const prompt = buildLocalAgentPrompt(API_BASE, token, novelId);
+    const prompt = buildLocalAgentPrompt(API_BASE);
     try {
       await navigator.clipboard.writeText(prompt);
       setLocalAgentPromptCopied(true);

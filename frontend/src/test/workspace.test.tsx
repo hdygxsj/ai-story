@@ -501,9 +501,13 @@ describe("WorkspacePage", () => {
     expect(writeText).toHaveBeenCalledTimes(1);
     const copied = writeText.mock.calls[0][0] as string;
     expect(copied).toContain("/local-agent-skill/SKILL.md");
-    expect(copied).toContain("AI_STORY_ACCESS_TOKEN=test-token");
-    expect(copied).toContain("ai-story agent manifest");
-    expect(copied).toContain("ai-story tools run");
+    expect(copied).toContain("请安装");
+    expect(copied).toContain("用户目录");
+    expect(copied).toContain("本地目录");
+    expect(copied).toContain("重启后生效");
+    expect(copied).not.toContain("AI_STORY_ACCESS_TOKEN=test-token");
+    expect(copied).not.toContain("ai-story agent manifest");
+    expect(copied).not.toContain("ai-story tools run");
     expect(await screen.findByText("已复制本地 Agent 接入提示")).toBeInTheDocument();
   });
 
@@ -2028,9 +2032,13 @@ describe("WorkspacePage", () => {
     expect(writeText).toHaveBeenCalledTimes(1);
     const copied = writeText.mock.calls[0][0] as string;
     expect(copied).toContain("/local-scoring-skill/SKILL.md");
-    expect(copied).toContain("AI_STORY_ACCESS_TOKEN=test-token");
-    expect(copied).toContain("ai-story agent manifest");
-    expect(copied).toContain("score_chapters_with_rubric");
+    expect(copied).toContain("请安装");
+    expect(copied).toContain("用户目录");
+    expect(copied).toContain("本地目录");
+    expect(copied).toContain("重启后生效");
+    expect(copied).not.toContain("AI_STORY_ACCESS_TOKEN=test-token");
+    expect(copied).not.toContain("ai-story agent manifest");
+    expect(copied).not.toContain("score_chapters_with_rubric");
     expect(await screen.findByText("已复制本地评分接入提示")).toBeInTheDocument();
   });
 

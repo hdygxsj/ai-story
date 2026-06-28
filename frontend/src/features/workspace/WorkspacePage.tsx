@@ -160,26 +160,9 @@ const MODEL_TAB_PURPOSES: Record<ModelConfigTab, ModelProfilePurpose[]> = {
 
 const LOCAL_SCORING_SKILL_PATH = "/local-scoring-skill/SKILL.md";
 
-function buildLocalScoringPrompt(apiBase: string, accessToken: string, novelId: string) {
+function buildLocalScoringPrompt(apiBase: string) {
   const normalizedApiBase = apiBase.replace(/\/$/, "");
-  return [
-    "请连接我的 AI Story 平台，下载并使用平台提供的本地评分 skill，然后通过 ai-story CLI 基于平台章节数据进行小说评分。",
-    "",
-    `平台地址：${normalizedApiBase}`,
-    `小说 ID：${novelId}`,
-    `Skill 下载地址：${normalizedApiBase}${LOCAL_SCORING_SKILL_PATH}`,
-    "",
-    "请按下面步骤执行：",
-    `1. 下载 skill：curl -fsS ${normalizedApiBase}${LOCAL_SCORING_SKILL_PATH}`,
-    "2. 安装或加载这个 skill，按 skill 说明使用 ai-story CLI。",
-    `3. 设置连接环境：AI_STORY_API_BASE=${normalizedApiBase} AI_STORY_ACCESS_TOKEN=${accessToken}`,
-    "4. 先运行 ai-story agent manifest，确认 score_chapters_with_rubric 工具可用。",
-    "5. 读取章节树：ai-story api request GET /novels/{novel_id}/nodes。",
-    `6. 全书评分：ai-story tools run ${novelId} score_chapters_with_rubric --arg scope=all。`,
-    "7. 指定章节评分时使用 --arg scope=selected --json-arg node_ids='[\"chapter-node-id\"]'。",
-    "",
-    "评分时以平台实时数据为准，不要使用可能过期的本地缓存。",
-  ].join("\n");
+  return `请安装 ${normalizedApiBase}${LOCAL_SCORING_SKILL_PATH} 这个 skill；安装前请先询问我是装到用户目录还是本地目录，用户目录安装后需要重启后生效，本地目录只对当前项目生效。`;
 }
 
 function modelTabValidateFields(tab: ModelConfigTab, editing: boolean): string[] {
@@ -1579,7 +1562,7 @@ export function WorkspacePage({
   }
 
   async function handleCopyLocalScoringPrompt() {
-    const prompt = buildLocalScoringPrompt(API_BASE, token, novelId);
+    const prompt = buildLocalScoringPrompt(API_BASE);
     try {
       await navigator.clipboard.writeText(prompt);
       setLocalScoringPromptCopied(true);
