@@ -11,6 +11,7 @@ from app.api.routes import (
     conversations_router,
     confirmations_router,
     local_agent_skill_router,
+    local_novel_skills_router,
     local_scoring_skill_router,
     memory_router,
     materials_router,
@@ -48,6 +49,7 @@ app.include_router(agent_tools_router)
 app.include_router(conversations_router)
 app.include_router(confirmations_router)
 app.include_router(local_agent_skill_router)
+app.include_router(local_novel_skills_router)
 app.include_router(local_scoring_skill_router)
 app.include_router(rag_router)
 app.include_router(search_router)

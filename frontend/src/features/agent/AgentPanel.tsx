@@ -53,7 +53,7 @@ type AgentPanelProps = {
 
 const WELCOME_MESSAGE = "告诉我你想创建、改写、记录或检索什么。";
 const VISIBLE_MESSAGE_LIMIT = 120;
-const LOCAL_AGENT_SKILL_PATH = "/local-agent-skill/SKILL.md";
+const LOCAL_AGENT_SKILLS_PATH = "/local-agent-skills";
 
 type ThinkingState = {
   startedAt: number;
@@ -75,7 +75,7 @@ function welcomeMessages(): ChatMessage[] {
 
 function buildLocalAgentPrompt(apiBase: string) {
   const normalizedApiBase = apiBase.replace(/\/$/, "");
-  return `请安装 ${normalizedApiBase}${LOCAL_AGENT_SKILL_PATH} 这个 skill；安装前请先询问我是装到用户目录还是本地目录，用户目录安装后需要重启后生效，本地目录只对当前项目生效。`;
+  return `请安装 ${normalizedApiBase}${LOCAL_AGENT_SKILLS_PATH} 这个完整 AI Story skill 包，包含基础接入 skill、评分 skill 和平台小说 skill；安装前请先询问我是装到用户目录还是本地目录，用户目录安装后需要重启后生效，本地目录只对当前项目生效。`;
 }
 
 export function AgentPanel({

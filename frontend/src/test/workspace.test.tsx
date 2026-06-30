@@ -500,7 +500,10 @@ describe("WorkspacePage", () => {
 
     expect(writeText).toHaveBeenCalledTimes(1);
     const copied = writeText.mock.calls[0][0] as string;
-    expect(copied).toContain("/local-agent-skill/SKILL.md");
+    expect(copied).toContain("/local-agent-skills");
+    expect(copied).toContain("完整 AI Story skill 包");
+    expect(copied).toContain("评分 skill");
+    expect(copied).toContain("小说 skill");
     expect(copied).toContain("请安装");
     expect(copied).toContain("用户目录");
     expect(copied).toContain("本地目录");

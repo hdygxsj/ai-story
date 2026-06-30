@@ -69,4 +69,13 @@ func TestAPIRoutesPrintsCoverage(t *testing.T) {
 	if !strings.Contains(stdout.String(), "GET /local-scoring-skill/SKILL.md") {
 		t.Fatalf("routes output missing scoring skill route = %s", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "GET /local-agent-skills") {
+		t.Fatalf("routes output missing local agent skills manifest route = %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "GET /local-novel-skills/{skill_name}/SKILL.md") {
+		t.Fatalf("routes output missing novel skills route = %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "GET /local-novel-skills") {
+		t.Fatalf("routes output missing novel skills list route = %s", stdout.String())
+	}
 }

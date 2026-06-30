@@ -45,3 +45,35 @@ def test_local_agent_skill_download_contains_cli_workflow() -> None:
     assert "update_character_state" in response.text
     assert "update_relationship_edge" in response.text
     assert "reorder_timeline_events" in response.text
+    assert "/local-agent-skills" in response.text
+    assert "ai-story-scoring" in response.text
+    assert "ai-story-novel-workflow" in response.text
+    assert "安装完整 AI Story skill 包" in response.text
+    assert "## Local Agent Orchestration" in response.text
+    assert "本地总控层" in response.text
+    assert "Top-Level Controller" in response.text
+    assert "ai-story-novel-workflow 是小说域路由" in response.text
+    assert "task router" in response.text
+    assert "do not skip straight to prose" in response.text
+
+
+def test_local_agent_skills_manifest_includes_core_and_novel_skills() -> None:
+    client = TestClient(app)
+
+    response = client.get("/local-agent-skills")
+
+    assert response.status_code == 200
+    payload = response.json()
+    skills = payload["skills"]
+    by_name = {item["name"]: item for item in skills}
+    assert by_name["ai-story-local-agent"]["path"] == "/local-agent-skill/SKILL.md"
+    assert by_name["ai-story-local-agent"]["kind"] == "core"
+    assert by_name["ai-story-scoring"]["path"] == "/local-scoring-skill/SKILL.md"
+    assert by_name["ai-story-scoring"]["kind"] == "scoring"
+    assert by_name["ai-story-novel-workflow"]["path"] == (
+        "/local-novel-skills/ai-story-novel-workflow/SKILL.md"
+    )
+    assert by_name["ai-story-novel-workflow"]["kind"] == "novel"
+    assert by_name["ai-story-novel-character-entrance"]["path"] == (
+        "/local-novel-skills/ai-story-novel-character-entrance/SKILL.md"
+    )

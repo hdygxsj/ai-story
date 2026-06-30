@@ -1,18 +1,11 @@
-from fastapi import APIRouter
-from fastapi.responses import Response
-
-from app.api.routes.local_novel_skills import LOCAL_NOVEL_SKILLS
-
-router = APIRouter(tags=["local-agent-skill"])
-
-LOCAL_AGENT_SKILL = """---
+---
 name: ai-story-local-agent
-description: Connect a local coding or writing Agent to AI Story through the Go CLI.
+description: Connect a local coding or writing Agent to AI Story through the Go CLI, then use project-local AI Story novel skills for platform-grounded writing and revision.
 ---
 
 # AI Story Local Agent
 
-Use this skill when the user wants you to write or revise a novel with AI Story data.
+Use this skill when the user wants you to write, revise, inspect, score-adjacent, or organize a novel with AI Story platform data.
 
 ## Setup
 
@@ -22,7 +15,7 @@ The user should provide:
 - `AI_STORY_ACCESS_TOKEN`: the user's current access token.
 - The `ai-story` Go CLI binary built from this repository.
 
-Export the connection values before running CLI commands:
+Export connection values before running CLI commands:
 
 ```bash
 export AI_STORY_API_BASE="<backend-url>"
@@ -39,15 +32,19 @@ ai-story agent manifest
 
 Use the manifest to find HTTP routes and Agent runtime tools.
 
-## Install Full Skill Pack
+## Project Skill Pack
 
-安装完整 AI Story skill 包时，读取平台清单并安装每一个条目，而不是只安装当前基础 skill：
+This project installs AI Story skills under `.agents/skills/`. The local skill pack includes this core connection skill plus the novel atomic and flow skills:
 
-```bash
-ai-story api request GET /local-agent-skills
-```
+- `ai-story-scoring` for platform rubric scoring and low-quality risk checks.
+- `ai-story-novel-workflow` for routing multi-step novel work.
+- `ai-story-novel-chapter-repair` for existing chapter repair.
+- `ai-story-novel-new-chapter` for planning and drafting new chapters.
+- `ai-story-novel-character-entrance` for heroine, appearance, clothing, first impressions, and relationship tension.
+- `ai-story-novel-continuity` for platform truth, timeline, character knowledge, power levels, and material drift.
+- Topic, outline, character management, worldbuilding, plot structure, reader promise, prose polish, finalize, market radar, new book start, pre-publish check, and volume review skills for their matching tasks.
 
-The `/local-agent-skills` manifest includes this core skill, `ai-story-scoring`, and all platform-provided novel atomic skills such as `ai-story-novel-workflow`, `ai-story-novel-character-entrance`, `ai-story-novel-chapter-repair`, and `ai-story-novel-new-chapter`. Install every `path` from that manifest into the chosen skills directory so the local Agent can trigger the right atomic workflow directly.
+When a user asks for novel work, trigger the most specific project skill first. Use `ai-story-novel-workflow` when the task spans multiple skills or needs orchestration.
 
 ## Local Agent Orchestration
 
@@ -78,7 +75,7 @@ ai-story api request GET /novels/{novel_id}/relationship-edges
 ai-story tools run {novel_id} search_documents_by_keyword --arg query=关键词
 ```
 
-Before drafting, actively gather context with the available routes and tools:
+Before drafting, actively gather context with available routes and tools:
 
 - Materials and worldbuilding: `list_creative_assets`, `/novels/{novel_id}/creative-assets`.
 - Timeline: `list_timeline_events`, `/novels/{novel_id}/timeline-events`.
@@ -115,7 +112,7 @@ Separate structure edits from prose edits:
 
 - Use `PATCH /novels/{novel_id}/nodes/reorder` only to reorder workspace nodes or chapter tree items.
 - Reordering nodes must not change document body text, chapter prose, memories, materials, or timeline content.
-- Read the current tree first with `GET /novels/{novel_id}/nodes`, then send the reordered node IDs through the CLI/API.
+- Read the current tree first with `GET /novels/{novel_id}/nodes`, then send reordered node IDs through the CLI/API.
 - Use document tools such as `write_document_content` or `propose_document_update` only when the user explicitly asks to change prose.
 
 ## Write Through Platform Tools
@@ -131,7 +128,7 @@ ai-story tools run {novel_id} upsert_inventory_item --arg owner_name=角色名 -
 ai-story tools run {novel_id} upsert_map_location --arg name=地点名 --arg location_type=town --arg summary=地点摘要
 ```
 
-After changing prose, reconcile the story state before finishing. Do not finish after prose only:
+After changing prose, reconcile story state before finishing. Do not finish after prose only:
 
 - Update or create materials when new characters, locations, items, factions, or world rules appear: `list_creative_assets`, `create_character_asset`, `create_world_rule`, `update_creative_asset`.
 - Save durable facts, decisions, or continuity constraints as memory: `save_key_memory`; check existing memory with `list_memory_items` or `search_memory` first.
@@ -144,35 +141,3 @@ After changing prose, reconcile the story state before finishing. Do not finish 
 - If the new prose adds no durable fact changes, state that no material, memory, relationship, or timeline update is needed.
 
 Never write directly to the database. Use the CLI and platform APIs.
-"""
-
-
-@router.get("/local-agent-skill/SKILL.md")
-async def download_local_agent_skill() -> Response:
-    return Response(LOCAL_AGENT_SKILL, media_type="text/markdown; charset=utf-8")
-
-
-@router.get("/local-agent-skills")
-async def list_local_agent_skills() -> dict[str, list[dict[str, str]]]:
-    return {
-        "skills": [
-            {
-                "name": "ai-story-local-agent",
-                "path": "/local-agent-skill/SKILL.md",
-                "kind": "core",
-            },
-            {
-                "name": "ai-story-scoring",
-                "path": "/local-scoring-skill/SKILL.md",
-                "kind": "scoring",
-            },
-            *[
-                {
-                    "name": name,
-                    "path": f"/local-novel-skills/{name}/SKILL.md",
-                    "kind": "novel",
-                }
-                for name in sorted(LOCAL_NOVEL_SKILLS)
-            ],
-        ]
-    }

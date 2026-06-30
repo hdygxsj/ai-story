@@ -1,9 +1,4 @@
-from fastapi import APIRouter
-from fastapi.responses import Response
-
-router = APIRouter(tags=["local-scoring-skill"])
-
-LOCAL_SCORING_SKILL = """---
+---
 name: ai-story-scoring
 description: Use when scoring AI Story novel chapters with the platform rubric and low-quality-content risk checks through the Go CLI.
 ---
@@ -80,9 +75,3 @@ When reporting scores:
 - For each chapter, include total score, platform risk, strongest issue, and one concrete revision suggestion.
 - Do not claim freshness unless the score came from live platform CLI/API data in this run.
 - If local files conflict with platform content, trust platform content and mention the conflict.
-"""
-
-
-@router.get("/local-scoring-skill/SKILL.md")
-async def download_local_scoring_skill() -> Response:
-    return Response(LOCAL_SCORING_SKILL, media_type="text/markdown; charset=utf-8")

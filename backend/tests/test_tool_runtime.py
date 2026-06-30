@@ -317,6 +317,211 @@ async def test_score_chapters_with_rubric_scores_selected_and_all_chapters(sessi
 
 
 @pytest.mark.asyncio
+async def test_score_chapters_with_rubric_recognizes_fantasy_school_terms(session: AsyncSession) -> None:
+    owner = User(email="fantasy-score@example.com", username="fantasy-score", password_hash="hash")
+    session.add(owner)
+    await session.flush()
+    novel = Novel(owner_id=owner.id, title="Fantasy Score Novel")
+    session.add(novel)
+    await session.flush()
+    document = Document(
+        novel_id=novel.id,
+        content={
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "第一天退学危机逼近。李天、苏安灵和赵阔在清风学院测验中做出选择，"
+                                "强化石碎裂，旧案、赌约、小考和代价一起压来。李舜沉默，柳婉颤声相信，"
+                                "许成盯上断剑线索，万宝行的危险也来了。李天决定迎战。"
+                            ),
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    session.add(document)
+    await session.flush()
+    node = WorkspaceNode(
+        novel_id=novel.id,
+        title="第一章 学院危机",
+        node_type="chapter",
+        document_id=document.id,
+        position=0,
+    )
+    session.add(node)
+    await session.commit()
+
+    tools = {
+        tool.name: tool
+        for tool in build_runtime_tools(
+            session,
+            model_profile=None,
+            owner_id=owner.id,
+            novel_id=novel.id,
+        )
+    }
+
+    result = await tools["score_chapters_with_rubric"].ainvoke({"scope": "all"})
+
+    assert result["status"] == "ok"
+    score = result["scores"][0]
+    assert score["details"]["character"] >= 1.3
+    assert score["details"]["conflict"] >= 1.3
+
+
+@pytest.mark.asyncio
+async def test_score_chapters_with_rubric_rewards_fun_character_voice(session: AsyncSession) -> None:
+    owner = User(email="fun-score@example.com", username="fun-score", password_hash="hash")
+    session.add(owner)
+    await session.flush()
+    novel = Novel(owner_id=owner.id, title="Fun Score Novel")
+    session.add(novel)
+    await session.flush()
+    document = Document(
+        novel_id=novel.id,
+        content={
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "小考赌约第一天就压了下来。李天看着张全怀里的肉干，忍不住吐槽这人像把厨房背进学院。"
+                                "张全嘿嘿一笑，说救命粮不能丢，苏安灵嘴角轻轻弯起，让他闭嘴上课。"
+                                "赵阔挑衅逼近，断剑线索、强化石判断和退学危机一起来了。李天决定记录、验证、迎战。"
+                            )
+                            * 24,
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    session.add(document)
+    await session.flush()
+    node = WorkspaceNode(
+        novel_id=novel.id,
+        title="第一章 趣味危机",
+        node_type="chapter",
+        document_id=document.id,
+        position=0,
+    )
+    session.add(node)
+    await session.commit()
+
+    tools = {
+        tool.name: tool
+        for tool in build_runtime_tools(
+            session,
+            model_profile=None,
+            owner_id=owner.id,
+            novel_id=novel.id,
+        )
+    }
+
+    result = await tools["score_chapters_with_rubric"].ainvoke({"scope": "all"})
+
+    assert result["status"] == "ok"
+    score = result["scores"][0]
+    assert score["stats"]["fun_signal"] >= 3
+    assert score["details"]["language_originality"] > 1.6
+    assert score["details"]["character"] > 1.8
+
+
+@pytest.mark.asyncio
+async def test_score_chapters_with_rubric_uses_current_novel_character_names(session: AsyncSession) -> None:
+    owner = User(email="dynamic-character-score@example.com", username="dynamic-character-score", password_hash="hash")
+    session.add(owner)
+    await session.flush()
+    novel = Novel(owner_id=owner.id, title="Dynamic Character Score Novel")
+    session.add(novel)
+    await session.flush()
+    session.add_all(
+        [
+            CreativeAsset(novel_id=novel.id, asset_type="character", name="岑映", summary="主角"),
+            CreativeAsset(novel_id=novel.id, asset_type="character", name="顾临舟", summary="关键盟友"),
+            CreativeAsset(novel_id=novel.id, asset_type="character", name="阮青", summary="对手"),
+        ]
+    )
+    current_doc = Document(
+        novel_id=novel.id,
+        content={
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "岑映做出选择。顾临舟沉默片刻，阮青相信她能付出代价。敌人逼近。",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    stale_doc = Document(
+        novel_id=novel.id,
+        content={
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "叶尘做出选择。苏念沉默片刻，江若溪相信他能付出代价。敌人逼近。",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    session.add_all([current_doc, stale_doc])
+    await session.flush()
+    current_node = WorkspaceNode(
+        novel_id=novel.id,
+        title="第一章 当前人物",
+        node_type="chapter",
+        document_id=current_doc.id,
+        position=0,
+    )
+    stale_node = WorkspaceNode(
+        novel_id=novel.id,
+        title="第二章 旧名污染",
+        node_type="chapter",
+        document_id=stale_doc.id,
+        position=1,
+    )
+    session.add_all([current_node, stale_node])
+    await session.commit()
+
+    tools = {
+        tool.name: tool
+        for tool in build_runtime_tools(
+            session,
+            model_profile=None,
+            owner_id=owner.id,
+            novel_id=novel.id,
+        )
+    }
+
+    result = await tools["score_chapters_with_rubric"].ainvoke({"scope": "all"})
+
+    assert result["status"] == "ok"
+    scores = {score["chapter_title"]: score for score in result["scores"]}
+    assert scores["第一章 当前人物"]["details"]["character"] >= scores["第二章 旧名污染"]["details"]["character"]
+
+
+@pytest.mark.asyncio
 async def test_runtime_tools_cannot_cross_authenticated_novel_scope(session: AsyncSession) -> None:
     current_owner = User(
         email="current-scope@example.com",

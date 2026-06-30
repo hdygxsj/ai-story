@@ -1,3 +1,4 @@
+import re
 from typing import Any
 from uuid import UUID
 
@@ -73,6 +74,7 @@ from app.models import (
     MemoryReviewItem,
     ModelProfile,
     Novel,
+    RelationshipEdge,
     WorkspaceNode,
     TimelineEvent,
 )
@@ -201,7 +203,94 @@ def _count_any(text: str, words: tuple[str, ...]) -> int:
     return sum(text.count(word) for word in words)
 
 
-def _score_chapter_text(*, node_id: UUID, title: str, text: str) -> dict[str, Any]:
+_CHARACTER_NAME_CANDIDATE_RE = re.compile(
+    r"([\u4e00-\u9fff]{2,4})(?=(?:说|问|看|笑|哭|沉默|颤|选择|决定|相信|冲|走|退|醒|抬|低|握|伸|站|坐|转|盯|摇|点|付出|后悔))"
+)
+
+_CHARACTER_NAME_STOPWORDS = {
+    "第一天",
+    "这一章",
+    "系统面",
+    "系统",
+    "面板",
+    "敌人",
+    "章节",
+    "开场",
+    "危机",
+    "旧案",
+    "赌约",
+    "小考",
+    "代价",
+}
+
+
+def _clean_character_name(name: str) -> str:
+    return name.strip(" \t\r\n，。！？、：；“”‘’（）()[]【】")
+
+
+def _character_name_candidates(text: str) -> tuple[str, ...]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for match in _CHARACTER_NAME_CANDIDATE_RE.finditer(text):
+        name = _clean_character_name(match.group(1))
+        if len(name) < 2 or name in _CHARACTER_NAME_STOPWORDS or name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+    return tuple(names)
+
+
+def _character_signal(compact: str, *, platform_character_names: tuple[str, ...]) -> int:
+    platform_matches = tuple(name for name in platform_character_names if name and name in compact)
+    if platform_character_names:
+        return _count_any(compact, platform_matches)
+    return _count_any(compact, _character_name_candidates(compact))
+
+
+async def _load_scoring_character_names(session: AsyncSession, novel_id: UUID) -> tuple[str, ...]:
+    names: set[str] = set()
+
+    character_asset_names = await session.scalars(
+        select(CreativeAsset.name).where(CreativeAsset.novel_id == novel_id, CreativeAsset.asset_type == "character")
+    )
+    names.update(_clean_character_name(name) for name in character_asset_names if _clean_character_name(name))
+
+    character_state_names = await session.scalars(
+        select(CharacterState.character_name).where(CharacterState.novel_id == novel_id)
+    )
+    names.update(_clean_character_name(name) for name in character_state_names if _clean_character_name(name))
+
+    character_attribute_names = await session.scalars(
+        select(CharacterAttribute.character_name).where(CharacterAttribute.novel_id == novel_id)
+    )
+    names.update(_clean_character_name(name) for name in character_attribute_names if _clean_character_name(name))
+
+    inventory_owner_names = await session.scalars(select(InventoryItem.owner_name).where(InventoryItem.novel_id == novel_id))
+    names.update(_clean_character_name(name) for name in inventory_owner_names if _clean_character_name(name))
+
+    relationship_rows = await session.execute(
+        select(RelationshipEdge.source_character, RelationshipEdge.target_character).where(
+            RelationshipEdge.novel_id == novel_id
+        )
+    )
+    for source_character, target_character in relationship_rows:
+        source_name = _clean_character_name(source_character)
+        target_name = _clean_character_name(target_character)
+        if source_name:
+            names.add(source_name)
+        if target_name:
+            names.add(target_name)
+
+    return tuple(sorted(names, key=len, reverse=True))
+
+
+def _score_chapter_text(
+    *,
+    node_id: UUID,
+    title: str,
+    text: str,
+    platform_character_names: tuple[str, ...] = (),
+) -> dict[str, Any]:
     compact = "".join(text.split())
     char_count = len(compact)
     paragraph_count = len([part for part in text.splitlines() if part.strip()]) or 1
@@ -211,9 +300,51 @@ def _score_chapter_text(*, node_id: UUID, title: str, text: str) -> dict[str, An
     opening = compact[:180]
     ending = compact[-220:]
     hook = 1.0
-    if any(marker in opening for marker in ("倒计时", "警报", "血", "死", "裂缝", "敌", "失踪", "爆炸", "第一天")):
+    if any(
+        marker in opening
+        for marker in (
+            "倒计时",
+            "警报",
+            "血",
+            "死",
+            "裂缝",
+            "敌",
+            "失踪",
+            "爆炸",
+            "第一天",
+            "赌",
+            "旧案",
+            "退学",
+            "测验",
+            "小考",
+            "赌约",
+            "强化",
+            "断剑",
+            "危机",
+        )
+    ):
         hook += 0.4
-    if any(marker in ending for marker in ("来了", "失踪", "开门", "带回来", "亮起", "逼近", "完", "终")):
+    if any(
+        marker in ending
+        for marker in (
+            "来了",
+            "失踪",
+            "开门",
+            "带回来",
+            "亮起",
+            "逼近",
+            "完",
+            "终",
+            "开始",
+            "资格",
+            "线索",
+            "规则",
+            "查",
+            "盯上",
+            "小考",
+            "赌约",
+        )
+    ):
         hook += 0.3
     if char_count < 2500:
         hook -= 0.2
@@ -221,8 +352,8 @@ def _score_chapter_text(*, node_id: UUID, title: str, text: str) -> dict[str, An
         suggestions.append("补一个明确的章末问题、危机或人物选择。")
 
     action_count = _count_any(compact, ("走", "冲", "斩", "杀", "退", "问", "说", "看", "醒", "选择", "决定", "撤"))
-    progress = 1.0 + min(0.6, action_count / 24)
-    if any(marker in compact for marker in ("目标", "计划", "任务", "撤", "破阵", "训练", "增援", "觉醒")):
+    progress = 1.0 + min(0.7, action_count / 24)
+    if any(marker in compact for marker in ("目标", "计划", "任务", "撤", "破阵", "训练", "增援", "觉醒", "记录", "判断", "验证")):
         progress += 0.2
     if char_count < 2200:
         progress -= 0.3
@@ -230,17 +361,74 @@ def _score_chapter_text(*, node_id: UUID, title: str, text: str) -> dict[str, An
         reasons.append("情节推进偏功能化，章内事件增量不够明显。")
         suggestions.append("让本章至少完成一个不可回退的情节变化。")
 
-    character_signal = _count_any(compact, ("叶尘", "苏念", "王磊", "袁晓乐", "林瑶", "江若溪", "秦上士"))
+    character_signal = _character_signal(compact, platform_character_names=platform_character_names)
     emotion_signal = _count_any(compact, ("怕", "疼", "沉默", "笑", "哭", "颤", "代价", "选择", "后悔", "相信"))
-    character = 0.9 + min(0.5, character_signal / 30) + min(0.4, emotion_signal / 12)
+    fun_signal = _count_any(
+        compact,
+        (
+            "笑",
+            "嘿",
+            "吐槽",
+            "嘴角",
+            "闭嘴",
+            "完了",
+            "挨打",
+            "救命",
+            "肉干",
+            "丢人",
+            "缩水",
+            "合理吗",
+            "坑",
+            "倒霉",
+            "脸色",
+        ),
+    )
+    character = 0.9 + min(0.55, character_signal / 28) + min(0.45, emotion_signal / 12)
+    if fun_signal >= 3:
+        character += min(0.15, fun_signal / 80)
     if emotion_signal < 2:
         character -= 0.2
         reasons.append("人物情绪和选择代价偏少，角色容易变成功能位。")
         suggestions.append("增加一个角色主动选择、犹豫或承担后果的场景。")
 
-    conflict_signal = _count_any(compact, ("敌", "战", "杀", "血", "伤", "死", "裂缝", "妖兽", "赤血", "D级", "E级", "F级", "危机"))
+    conflict_signal = _count_any(
+        compact,
+        (
+            "敌",
+            "战",
+            "杀",
+            "血",
+            "伤",
+            "死",
+            "裂缝",
+            "妖兽",
+            "魔兽",
+            "赤血",
+            "D级",
+            "E级",
+            "F级",
+            "危机",
+            "赌",
+            "失败",
+            "碎",
+            "压价",
+            "旧案",
+            "强化",
+            "测验",
+            "小考",
+            "退学",
+            "挑衅",
+            "风险",
+            "代价",
+            "裂承",
+            "断剑",
+            "封存",
+            "项链",
+            "万宝行",
+        ),
+    )
     conflict = 0.9 + min(0.8, conflict_signal / 26)
-    if any(marker in compact for marker in ("追", "围", "断后", "塌", "失踪", "领主", "Boss")):
+    if any(marker in compact for marker in ("追", "围", "断后", "塌", "失踪", "领主", "Boss", "赌约", "退学", "盯上", "封存")):
         conflict += 0.2
     if conflict < 1.3:
         reasons.append("单章对抗不够尖锐，读者可能觉得是过渡章。")
@@ -249,7 +437,11 @@ def _score_chapter_text(*, node_id: UUID, title: str, text: str) -> dict[str, An
     contrast_count = compact.count("不是")
     no_count = compact.count("没有")
     system_count = _count_any(compact, ("系统", "面板", "F级", "E级", "D级", "星"))
-    language = 1.6
+    sensory_signal = _count_any(
+        compact,
+        ("风", "火", "烟", "铁", "冷", "热", "疼", "响", "光", "味", "灰", "汗", "尘", "水", "雪"),
+    )
+    language = 1.6 + min(0.25, fun_signal / 36) + min(0.15, sensory_signal / 90)
     if contrast_count >= 18:
         language -= 0.35
         reasons.append("“不是……”类解释句偏密，容易形成 AI 句式感。")
@@ -303,6 +495,7 @@ def _score_chapter_text(*, node_id: UUID, title: str, text: str) -> dict[str, An
             "paragraphs": paragraph_count,
             "contrast_count": contrast_count,
             "system_count": system_count,
+            "fun_signal": fun_signal,
         },
     }
 
@@ -1493,11 +1686,13 @@ def build_runtime_tools(
                 row[0].created_at,
             ),
         )
+        platform_character_names = await _load_scoring_character_names(session, resolved_novel_id)
         scores = [
             _score_chapter_text(
                 node_id=node.id,
                 title=node.title,
                 text=extract_text_from_prosemirror(document.content),
+                platform_character_names=platform_character_names,
             )
             for node, document in ordered_rows
         ]

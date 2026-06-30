@@ -46,7 +46,10 @@ func TestAgentManifestExposesWritingBusinessCapabilities(t *testing.T) {
 		"GET /novels/{novel_id}/map-locations",
 		"GET /novels/{novel_id}/memory-items",
 		"POST /novels/{novel_id}/agent/tools/{tool_name}",
+		"GET /local-agent-skills",
 		"GET /local-scoring-skill/SKILL.md",
+		"GET /local-novel-skills",
+		"GET /local-novel-skills/{skill_name}/SKILL.md",
 	} {
 		if !routeKeys[want] {
 			t.Fatalf("manifest missing route %s", want)
