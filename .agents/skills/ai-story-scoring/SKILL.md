@@ -48,18 +48,23 @@ Use selected scoring when the user asks about one chapter or a specific subset. 
 
 Treat `score_chapters_with_rubric` as a rule-based reference signal, not as the final literary judgment. Before giving a score report or revision priority, the AI agent must read the relevant platform chapter text and, when needed, adjacent chapters or platform materials. Use the tool output to find likely risk points, then explain which conclusions come from the rule score and which come from AI reading.
 
+## AI Review Focus
+
+When the AI agent reads the chapter text, it must explicitly check 角色感情与对话温度. Do not let a chapter pass only because plot events are complete. Look for cold or functional dialogue: characters answering with isolated one-line statements, exchanging information without reaction, or speaking without hesitation, subtext, body response, emotional pressure, relationship movement, or aftermath. Flag cold single-line dialogue when important conversations do not reveal what the characters want, fear, hide, owe, misunderstand, or refuse to say.
+
 ## Rubric
 
 Use the platform scoring output as a reference baseline, then read the chapter text and explain results with these dimensions:
 
 - 钩子与追读：开篇是否有问题、危机、欲望或悬念；章末是否推动继续阅读。
 - 情节推进与因果逻辑：本章是否有不可回退的事件增量，而不是原地解释。
-- 人物魅力与关系张力：角色登场、辨识度、主动性和人物关系是否立住。
+- 人物魅力与关系张力：角色登场、辨识度、主动性、角色感情与对话温度、人物关系是否立住。
 - 冲突压迫与风险：对抗是否具体，阻力、风险、反转是否足够清楚。
 - 情绪代价与选择后果：角色是否有选择、犹豫、牺牲、后悔或关系压力。
 - 爽点兑现与期待满足：章节是否兑现胜利、发现、反转、打脸、突破或关键线索。
 - 语言质量与原创细节：是否有可感知的动作、场景、细节和非模板化表达。
 - 节奏趣味与阅读愉悦：信息密度、轻松互动、反差、吐槽或段落节奏是否让阅读顺畅。
+- 关系潜台词与对白温度：重要对话是否承载情绪、试探、误解、安慰、隐瞒、退让、靠近或疏离，而不是冷冰冰的单句对话。
 
 ## Character Recognition
 
@@ -81,5 +86,6 @@ When reporting scores:
 - Start with overall average score, chapter count, and high-risk chapters.
 - State that the numeric score and platform risk are rule-based references unless a separate AI/model scoring tool was used.
 - For each chapter, include total score, platform risk, strongest issue from AI reading, and one concrete revision suggestion.
+- When character dialogue is a weakness, name the cold conversation pattern and suggest one way to add emotion, relationship pressure, or subtext without adding empty exposition.
 - Do not claim freshness unless both the rule score and chapter reading came from live platform CLI/API data in this run.
 - If local files conflict with platform content, trust platform content and mention the conflict.

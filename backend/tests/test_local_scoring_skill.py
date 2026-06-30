@@ -21,6 +21,9 @@ def test_local_scoring_skill_download_contains_rubric_workflow() -> None:
     assert "rule-based reference signal" in response.text
     assert "AI agent must read the relevant platform chapter text" in response.text
     assert "numeric score and platform risk are rule-based references" in response.text
+    assert "角色感情与对话温度" in response.text
+    assert "冷冰冰的单句对话" in response.text
+    assert "关系潜台词" in response.text
     assert "人物魅力与关系张力" in response.text
     assert "冲突压迫与风险" in response.text
     assert "情绪代价与选择后果" in response.text
