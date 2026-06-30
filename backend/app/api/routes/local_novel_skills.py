@@ -14,6 +14,7 @@ ai-story agent manifest
 ```
 
 Prefer platform data over local caches. Read chapters, materials, timeline, memories, character states, attributes, inventory, maps, relationships, and recent material changes before making story-facing judgments.
+When using `score_chapters_with_rubric`, treat its numeric score and platform risk as rule-based reference signals only; final story quality judgments must come from reading the platform chapter text.
 """
 
 LOCAL_NOVEL_SKILLS = {

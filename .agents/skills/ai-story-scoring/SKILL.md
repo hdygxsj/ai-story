@@ -44,9 +44,13 @@ ai-story tools run {novel_id} score_chapters_with_rubric --arg scope=selected --
 
 Use selected scoring when the user asks about one chapter or a specific subset. Use all-chapter scoring when the user asks for the whole novel, publication readiness, platform risk, or a ranking across chapters.
 
+## AI Reading Requirement
+
+Treat `score_chapters_with_rubric` as a rule-based reference signal, not as the final literary judgment. Before giving a score report or revision priority, the AI agent must read the relevant platform chapter text and, when needed, adjacent chapters or platform materials. Use the tool output to find likely risk points, then explain which conclusions come from the rule score and which come from AI reading.
+
 ## Rubric
 
-Use the platform scoring output as the source of truth, then explain results with these dimensions:
+Use the platform scoring output as a reference baseline, then read the chapter text and explain results with these dimensions:
 
 - 钩子与追读：开篇是否有问题、危机、欲望或悬念；章末是否推动继续阅读。
 - 情节推进与因果逻辑：本章是否有不可回退的事件增量，而不是原地解释。
@@ -75,6 +79,7 @@ Flag serious reader-experience violations, including but not limited to:
 When reporting scores:
 
 - Start with overall average score, chapter count, and high-risk chapters.
-- For each chapter, include total score, platform risk, strongest issue, and one concrete revision suggestion.
-- Do not claim freshness unless the score came from live platform CLI/API data in this run.
+- State that the numeric score and platform risk are rule-based references unless a separate AI/model scoring tool was used.
+- For each chapter, include total score, platform risk, strongest issue from AI reading, and one concrete revision suggestion.
+- Do not claim freshness unless both the rule score and chapter reading came from live platform CLI/API data in this run.
 - If local files conflict with platform content, trust platform content and mention the conflict.
