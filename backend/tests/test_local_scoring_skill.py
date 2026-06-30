@@ -18,6 +18,12 @@ def test_local_scoring_skill_download_contains_rubric_workflow() -> None:
     assert "空洞水文" in response.text
     assert "ai-story agent manifest" in response.text
     assert "ai-story tools run {novel_id} score_chapters_with_rubric" in response.text
+    assert "人物魅力与关系张力" in response.text
+    assert "冲突压迫与风险" in response.text
+    assert "情绪代价与选择后果" in response.text
+    assert "爽点兑现与期待满足" in response.text
+    assert "节奏趣味与阅读愉悦" in response.text
+    assert "幽默感与互动趣味" not in response.text
     assert "Do not use fixed character names" in response.text
     assert "current novel platform character data" in response.text
     assert "叶尘" not in response.text

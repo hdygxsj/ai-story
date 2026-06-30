@@ -189,9 +189,12 @@ def map_location_payload(location: MapLocation) -> dict[str, Any]:
 RUBRIC_DETAIL_LABELS = {
     "hook": "钩子与追读",
     "progress": "情节推进与因果逻辑",
-    "character": "人物选择与情绪代价",
-    "conflict": "冲突爽点与压迫感",
+    "character": "人物魅力与关系张力",
+    "conflict": "冲突压迫与风险",
+    "emotional_cost": "情绪代价与选择后果",
+    "payoff": "爽点兑现与期待满足",
     "language_originality": "语言质量与原创细节",
+    "pacing_interest": "节奏趣味与阅读愉悦",
 }
 
 
@@ -383,9 +386,9 @@ def _score_chapter_text(
             "脸色",
         ),
     )
-    character = 0.9 + min(0.55, character_signal / 28) + min(0.45, emotion_signal / 12)
+    character = 0.95 + min(0.65, character_signal / 28) + min(0.25, emotion_signal / 18)
     if fun_signal >= 3:
-        character += min(0.15, fun_signal / 80)
+        character += min(0.1, fun_signal / 100)
     if emotion_signal < 2:
         character -= 0.2
         reasons.append("人物情绪和选择代价偏少，角色容易变成功能位。")
@@ -434,6 +437,39 @@ def _score_chapter_text(
         reasons.append("单章对抗不够尖锐，读者可能觉得是过渡章。")
         suggestions.append("给本章增加更具体的阻力、失败风险或反转。")
 
+    emotional_cost = 0.9 + min(0.65, emotion_signal / 10) + min(0.25, conflict_signal / 44)
+    if any(marker in compact for marker in ("代价", "牺牲", "后悔", "相信", "选择", "沉默", "颤声")):
+        emotional_cost += 0.15
+    if emotion_signal < 2:
+        emotional_cost -= 0.2
+
+    payoff_signal = _count_any(
+        compact,
+        (
+            "获得",
+            "发现",
+            "成功",
+            "赢",
+            "击败",
+            "打脸",
+            "突破",
+            "升级",
+            "奖励",
+            "线索",
+            "真相",
+            "反转",
+            "救下",
+            "证明",
+            "兑现",
+            "资格",
+            "强化",
+            "亮起",
+        ),
+    )
+    payoff = 0.95 + min(0.55, payoff_signal / 16) + min(0.25, conflict_signal / 50)
+    if any(marker in ending for marker in ("线索", "资格", "亮起", "开始", "查", "盯上", "赌约")):
+        payoff += 0.15
+
     contrast_count = compact.count("不是")
     no_count = compact.count("没有")
     system_count = _count_any(compact, ("系统", "面板", "F级", "E级", "D级", "星"))
@@ -441,6 +477,16 @@ def _score_chapter_text(
         compact,
         ("风", "火", "烟", "铁", "冷", "热", "疼", "响", "光", "味", "灰", "汗", "尘", "水", "雪"),
     )
+    pacing_interest = 1.0 + min(0.35, fun_signal / 36) + min(0.25, action_count / 60) + min(0.2, sensory_signal / 80)
+    if 2400 <= char_count <= 5000:
+        pacing_interest += 0.1
+    if paragraph_count > 180:
+        pacing_interest -= 0.15
+    if char_count > 5500:
+        pacing_interest -= 0.2
+    if char_count < 2400:
+        pacing_interest -= 0.1
+
     language = 1.6 + min(0.25, fun_signal / 36) + min(0.15, sensory_signal / 90)
     if contrast_count >= 18:
         language -= 0.35
@@ -471,9 +517,12 @@ def _score_chapter_text(
         "progress": _clamp_score(progress),
         "character": _clamp_score(character),
         "conflict": _clamp_score(conflict),
+        "emotional_cost": _clamp_score(emotional_cost),
+        "payoff": _clamp_score(payoff),
         "language_originality": _clamp_score(language),
+        "pacing_interest": _clamp_score(pacing_interest),
     }
-    total_score = round(sum(details.values()), 1)
+    total_score = round(sum(details.values()) * 10 / (len(details) * 2), 1)
     if total_score < 6.5 or details["language_originality"] <= 0.8:
         platform_risk = "高"
     elif total_score < 7.3 or any("AI" in reason or "功能" in reason for reason in reasons):

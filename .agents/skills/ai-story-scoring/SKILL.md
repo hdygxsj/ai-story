@@ -50,13 +50,16 @@ Use the platform scoring output as the source of truth, then explain results wit
 
 - 钩子与追读：开篇是否有问题、危机、欲望或悬念；章末是否推动继续阅读。
 - 情节推进与因果逻辑：本章是否有不可回退的事件增量，而不是原地解释。
-- 人物选择与情绪代价：角色是否有选择、代价、情绪变化和关系压力。
-- 冲突爽点与压迫感：对抗是否具体，阻力、风险、反转是否足够清楚。
+- 人物魅力与关系张力：角色登场、辨识度、主动性和人物关系是否立住。
+- 冲突压迫与风险：对抗是否具体，阻力、风险、反转是否足够清楚。
+- 情绪代价与选择后果：角色是否有选择、犹豫、牺牲、后悔或关系压力。
+- 爽点兑现与期待满足：章节是否兑现胜利、发现、反转、打脸、突破或关键线索。
 - 语言质量与原创细节：是否有可感知的动作、场景、细节和非模板化表达。
+- 节奏趣味与阅读愉悦：信息密度、轻松互动、反差、吐槽或段落节奏是否让阅读顺畅。
 
 ## Character Recognition
 
-Do not use fixed character names or examples when judging the 人物选择与情绪代价 dimension. Use current novel platform character data first: character assets, character states, character attributes, relationship edges, and inventory owners. Then compare that with the actual chapter text. If platform character data is missing, rely on the scoring tool's text-based fallback and say the result depends on incomplete platform character records.
+Do not use fixed character names or examples when judging the 人物魅力与关系张力 dimension. Use current novel platform character data first: character assets, character states, character attributes, relationship edges, and inventory owners. Then compare that with the actual chapter text. If platform character data is missing, rely on the scoring tool's text-based fallback and say the result depends on incomplete platform character records.
 
 ## Low-Quality Risk Checks
 

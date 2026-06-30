@@ -105,7 +105,10 @@ type ChapterScoreDetail = {
   progress: number;
   character: number;
   conflict: number;
+  emotional_cost: number;
+  payoff: number;
   language_originality: number;
+  pacing_interest: number;
 };
 
 type ChapterScore = {
@@ -2281,7 +2284,7 @@ export function WorkspacePage({
             章节评分
           </Typography.Title>
           <Typography.Paragraph style={{ marginBottom: 0 }} type="secondary">
-            通过 Agent 工具按平台 rubric 评分：钩子、推进、人物、冲突、语言原创，并标记低质内容风险。
+            通过 Agent 工具按平台 rubric 评分：钩子、推进、冲突、人物、情绪、爽点、语言、节奏趣味，并标记低质内容风险。
           </Typography.Paragraph>
         </div>
         <Space align="center">
@@ -2382,7 +2385,10 @@ export function WorkspacePage({
                   <Tag>推进：{score.details.progress}</Tag>
                   <Tag>人物：{score.details.character}</Tag>
                   <Tag>冲突：{score.details.conflict}</Tag>
+                  <Tag>情绪代价：{score.details.emotional_cost}</Tag>
+                  <Tag>爽点兑现：{score.details.payoff}</Tag>
                   <Tag>语言原创：{score.details.language_originality}</Tag>
+                  <Tag>节奏趣味：{score.details.pacing_interest}</Tag>
                 </Space>
                 <Typography.Paragraph style={{ marginTop: 12, marginBottom: 4 }} type="secondary">
                   扣分原因：{score.reasons.join("；")}

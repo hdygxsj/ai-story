@@ -1993,7 +1993,10 @@ describe("WorkspacePage", () => {
                     progress: 1.2,
                     character: 1,
                     conflict: 1.1,
+                    emotional_cost: 1.2,
+                    payoff: 1.1,
                     language_originality: 1,
+                    pacing_interest: 1.7,
                   },
                   reasons: ["功能章偏重", "AI句式感偏高"],
                   suggestions: ["增加人物选择和章末钩子"],
@@ -2016,6 +2019,7 @@ describe("WorkspacePage", () => {
 
     expect(await screen.findByText("平台风险：中")).toBeInTheDocument();
     expect(screen.getByText("语言原创：1")).toBeInTheDocument();
+    expect(screen.getByText("节奏趣味：1.7")).toBeInTheDocument();
     expect(screen.getByText(/功能章偏重/)).toBeInTheDocument();
   });
 
@@ -2081,7 +2085,10 @@ describe("WorkspacePage", () => {
                     progress: 1.4,
                     character: 1.4,
                     conflict: 1.5,
+                    emotional_cost: 1.4,
+                    payoff: 1.3,
                     language_originality: 1.5,
+                    pacing_interest: 1.3,
                   },
                   reasons: ["章节阅读效果稳定"],
                   suggestions: ["继续保持章末钩子"],

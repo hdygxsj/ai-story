@@ -310,7 +310,18 @@ async def test_score_chapters_with_rubric_scores_selected_and_all_chapters(sessi
     assert selected["status"] == "ok"
     assert selected["rubric"]["total_points"] == 10
     assert [item["chapter_title"] for item in selected["scores"]] == ["第二章 设定"]
-    assert set(selected["scores"][0]["details"]) == {"hook", "progress", "character", "conflict", "language_originality"}
+    assert set(selected["scores"][0]["details"]) == {
+        "hook",
+        "progress",
+        "character",
+        "conflict",
+        "emotional_cost",
+        "payoff",
+        "language_originality",
+        "pacing_interest",
+    }
+    assert selected["rubric"]["details"]["pacing_interest"] == "节奏趣味与阅读愉悦"
+    assert selected["rubric"]["details"]["payoff"] == "爽点兑现与期待满足"
     assert selected["scores"][0]["total_score"] <= 7
     assert selected["scores"][0]["platform_risk"] in {"中", "高"}
     assert len(all_chapters["scores"]) == 2
@@ -432,6 +443,7 @@ async def test_score_chapters_with_rubric_rewards_fun_character_voice(session: A
     assert result["status"] == "ok"
     score = result["scores"][0]
     assert score["stats"]["fun_signal"] >= 3
+    assert score["details"]["pacing_interest"] > 1.6
     assert score["details"]["language_originality"] > 1.6
     assert score["details"]["character"] > 1.8
 
